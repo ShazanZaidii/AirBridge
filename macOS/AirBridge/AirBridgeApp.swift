@@ -42,6 +42,19 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         }
         completionHandler()
     }
+    
+    // Forces the notification banner to show even if the app is active
+        func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                    willPresent notification: UNNotification,
+                                    withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+            
+            // Use .banner for macOS 11+, or .alert for older targets
+            if #available(macOS 11.0, *) {
+                completionHandler([.banner, .sound])
+            } else {
+                completionHandler([.alert, .sound])
+            }
+        }
 }
 
 @main

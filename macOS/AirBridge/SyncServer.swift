@@ -90,11 +90,18 @@ class SyncServer: ObservableObject {
     private func triggerTransferNotification(fileName: String, fileURL: URL) {
         let content = UNMutableNotificationContent()
         content.title = "AirBridge"
-        content.subtitle = "File transfer complete"
-        content.body = "Received a new file"
-        content.sound = UNNotificationSound.default
-        content.categoryIdentifier = "FILE_TRANSFER"
+        content.subtitle = "Transfer Complete"
+        content.body = "Received: \(fileName)"
         
+        // Use a distinct Apple system sound (e.g., Glass, Tink, Pop, or Submarine)
+        content.sound = UNNotificationSound(named: UNNotificationSoundName("Glass.aiff"))
+        
+        // Elevate interruption level so it bypasses silent delivery
+        if #available(macOS 12.0, *) {
+            content.interruptionLevel = .timeSensitive
+        }
+        
+        content.categoryIdentifier = "FILE_TRANSFER"
         content.userInfo = ["filePath": fileURL.path]
 
         let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
@@ -117,7 +124,6 @@ class SyncServer: ObservableObject {
 
     private func receive(on connection: NWConnection) {
             connection.receiveMessage { [weak self] (content, context, isComplete, error) in
-                // Safely unwrap self to fix the explicit capture semantics errors
                 guard let self = self else { return }
                 
                 if error != nil {
@@ -131,8 +137,14 @@ class SyncServer: ObservableObject {
                         if text.hasPrefix("START_FILE:") {
                             self.isReceivingFile = true
                             self.currentFileName = String(text.dropFirst("START_FILE:".count))
+                            
+                            // Create dedicated AirBridge folder
                             let downloadsURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
-                            self.currentFileURL = downloadsURL.appendingPathComponent(self.currentFileName)
+                            let airBridgeDir = downloadsURL.appendingPathComponent("AirBridge Transfers")
+                            
+                            try? FileManager.default.createDirectory(at: airBridgeDir, withIntermediateDirectories: true)
+                            
+                            self.currentFileURL = airBridgeDir.appendingPathComponent(self.currentFileName)
                             
                             if let fileURL = self.currentFileURL {
                                 FileManager.default.createFile(atPath: fileURL.path, contents: nil, attributes: nil)
@@ -145,6 +157,14 @@ class SyncServer: ObservableObject {
                             
                             if let fileURL = self.currentFileURL {
                                 self.triggerTransferNotification(fileName: self.currentFileName, fileURL: fileURL)
+                                
+                                // Automatically copy the file to macOS clipboard
+                                DispatchQueue.main.async {
+                                    let pb = NSPasteboard.general
+                                    pb.clearContents()
+                                    pb.writeObjects([fileURL as NSURL])
+                                    self.lastChangeCount = pb.changeCount
+                                }
                             }
                         } else {
                             // Standard clipboard text sync
