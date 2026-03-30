@@ -39,13 +39,17 @@ import android.widget.Toast
 import androidx.annotation.RequiresApi
 import androidx.core.app.NotificationCompat
 import okhttp3.*
-import okio.ByteString
+import androidx.core.app.Person
+import androidx.core.content.pm.ShortcutInfoCompat
+import androidx.core.content.pm.ShortcutManagerCompat
+import androidx.core.graphics.drawable.IconCompat
 import okio.ByteString.Companion.toByteString
 import java.util.concurrent.TimeUnit
 import kotlin.math.abs
 
 class AirBridgeService : Service() {
 
+    private val transferQueue = java.util.concurrent.Executors.newSingleThreadExecutor()
     private var webSocket: WebSocket? = null
     private val client = OkHttpClient.Builder()
         .pingInterval(15, TimeUnit.SECONDS)
@@ -102,11 +106,26 @@ class AirBridgeService : Service() {
             }
         }
 
-        val fileUri = intent?.data
-        if (fileUri != null && intent?.action == Intent.ACTION_SEND) {
-            if (isWsConnected && webSocket != null) {
+        // UPDATED: Handle single and multiple files
+        val action = intent?.action
+        if (action == Intent.ACTION_SEND) {
+            val fileUri = intent.data
+            if (fileUri != null && isWsConnected && webSocket != null) {
                 streamFileToMac(fileUri)
+            } else if (fileUri != null) {
+                showToast("Not connected to Mac")
+            }
+        } else if (action == Intent.ACTION_SEND_MULTIPLE) {
+            val fileUris = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                intent.getParcelableArrayListExtra("FILE_URIS", Uri::class.java)
             } else {
+                @Suppress("DEPRECATION")
+                intent.getParcelableArrayListExtra<Uri>("FILE_URIS")
+            }
+
+            if (fileUris != null && isWsConnected && webSocket != null) {
+                fileUris.forEach { uri -> streamFileToMac(uri) }
+            } else if (fileUris != null) {
                 showToast("Not connected to Mac")
             }
         }
@@ -115,7 +134,8 @@ class AirBridgeService : Service() {
     }
 
     private fun streamFileToMac(uri: Uri) {
-        Thread {
+        // UPDATED: Use the queue instead of a raw Thread
+        transferQueue.execute {
             try {
                 var fileName = "SharedFile_${System.currentTimeMillis()}.dat"
                 contentResolver.query(uri, null, null, null, null)?.use { cursor ->
@@ -127,25 +147,22 @@ class AirBridgeService : Service() {
                     }
                 }
 
-                // Signal start of transfer
                 webSocket?.send("START_FILE:$fileName")
 
                 contentResolver.openInputStream(uri)?.use { inputStream ->
-                    val buffer = ByteArray(1024 * 1024 * 5) // 5MB chunks
+                    val buffer = ByteArray(1024 * 1024 * 5)
                     var bytesRead: Int
 
                     while (inputStream.read(buffer).also { bytesRead = it } != -1) {
                         val byteString = buffer.toByteString(0, bytesRead)
                         webSocket?.send(byteString)
 
-                        // Backpressure: prevent OutOfMemory on Android by letting OkHttp flush its queue
                         while ((webSocket?.queueSize() ?: 0L) > 25_000_000L) {
                             Thread.sleep(50)
                         }
                     }
                 }
 
-                // Signal end of transfer
                 webSocket?.send("END_FILE:$fileName")
                 showToast("Sent to Mac!")
 
@@ -153,34 +170,52 @@ class AirBridgeService : Service() {
                 showToast("Failed to send file")
                 e.printStackTrace()
             }
-        }.start()
+        }
+    }
+
+    fun getShortMacName(fullName: String): String {
+        return fullName
+            .replace("MacBook Pro", "MBP", ignoreCase = true)
+            .replace("MacBook Air", "MBA", ignoreCase = true)
+            .replace("Mac mini", "McM", ignoreCase = true)
+            .replace("Mac Studio", "McS", ignoreCase = true)
+            .replace("Mac Pro", "McP", ignoreCase = true)
     }
 
     @RequiresApi(Build.VERSION_CODES.Q)
     private fun updateDirectShareShortcut(wsUrl: String) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N_MR1) {
-            try {
-                val uri = Uri.parse(wsUrl)
-                val macName = uri.getQueryParameter("name") ?: "Mac"
+        try {
+            val uri = Uri.parse(wsUrl)
+            val macName = uri.getQueryParameter("name") ?: "Mac"
+            val shortName = getShortMacName(macName)
 
-                val shortcutManager = getSystemService(ShortcutManager::class.java)
-                val shareIntent = Intent(this, ShareActivity::class.java).apply {
-                    action = Intent.ACTION_SEND
-                }
-
-                val shortcut = ShortcutInfo.Builder(this, "mac_target")
-                    .setShortLabel(macName)
-                    .setLongLabel("Send to $macName")
-                    .setIcon(Icon.createWithResource(this, android.R.drawable.ic_menu_share))
-                    .setCategories(setOf("com.shazan.airbridge.category.TEXT_SHARE_TARGET"))
-                    .setIntent(shareIntent)
-                    .setLongLived(true) // Required for newer Android versions
-                    .build()
-
-                shortcutManager.dynamicShortcuts = listOf(shortcut)
-            } catch (e: Exception) {
-                Log.e("AirBridge", "Failed to update share shortcut", e)
+            val shareIntent = Intent(this, ShareActivity::class.java).apply {
+                action = Intent.ACTION_SEND
             }
+
+            // 1. Create a Person object. Android prioritizes "People" in the top row.
+            val person = Person.Builder()
+                .setName(macName)
+                .build()
+
+            // 2. Use ShortcutInfoCompat instead of the raw framework class
+            val shortcut = ShortcutInfoCompat.Builder(this, "mac_target")
+                .setShortLabel(macName)
+                .setLongLabel("Send to $macName")
+                .setIcon(IconCompat.createWithResource(this, android.R.drawable.ic_menu_share))
+                .setCategories(setOf(
+                    "com.shazan.airbridge.category.TEXT_SHARE_TARGET",
+                    "com.shazan.airbridge.category.FILE_SHARE_TARGET"
+                ))
+                .setIntent(shareIntent)
+                .setPerson(person) // CRITICAL: This puts it in the Direct Share row
+                .setLongLived(true)
+                .build()
+
+            // 3. Push it using the Compat manager
+            ShortcutManagerCompat.pushDynamicShortcut(this, shortcut)
+        } catch (e: Exception) {
+            Log.e("AirBridge", "Failed to update share shortcut", e)
         }
     }
 
@@ -189,6 +224,8 @@ class AirBridgeService : Service() {
             Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
         }
     }
+
+
 
     @SuppressLint("ClickableViewAccessibility")
     private fun setupFloatingButton() {
@@ -380,6 +417,7 @@ class AirBridgeService : Service() {
         webSocket = client.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 isWsConnected = true
+                broadcastConnectionState(true) // ADD THIS
                 Log.d("AirBridge", "Connected to Mac!")
             }
 
@@ -397,11 +435,13 @@ class AirBridgeService : Service() {
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                 isWsConnected = false
+                broadcastConnectionState(false) // ADD THIS
                 scheduleReconnect()
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 isWsConnected = false
+                broadcastConnectionState(false) // ADD THIS
                 scheduleReconnect()
             }
         })
@@ -455,6 +495,10 @@ class AirBridgeService : Service() {
         }
     }
 
+    private fun broadcastConnectionState(connected: Boolean) {
+        val intent = Intent("AIRBRIDGE_STATE_UPDATE").putExtra("isConnected", connected)
+        sendBroadcast(intent)
+    }
     private fun createNotification(): Notification {
         val channelId = "AirBridgeChannel"
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {

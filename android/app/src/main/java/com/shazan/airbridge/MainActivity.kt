@@ -33,6 +33,9 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import java.util.concurrent.Executors
+import android.content.BroadcastReceiver
+import android.content.IntentFilter
+import androidx.compose.runtime.DisposableEffect
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -176,6 +179,31 @@ fun CameraScannerScreen(onUrlScanned: (String) -> Unit) {
 
 @Composable
 fun ConnectedScreen(url: String, onDisconnect: () -> Unit) {
+    val context = LocalContext.current
+    var isLive by remember { mutableStateOf(true) }
+
+    DisposableEffect(context) {
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+                isLive = intent?.getBooleanExtra("isConnected", false) ?: false
+            }
+        }
+        val filter = IntentFilter("AIRBRIDGE_STATE_UPDATE")
+
+        // Use ContextCompat to resolve the export flag issue natively
+        ContextCompat.registerReceiver(
+            context,
+            receiver,
+            filter,
+            ContextCompat.RECEIVER_NOT_EXPORTED
+        )
+
+        onDispose { context.unregisterReceiver(receiver) }
+    }
+
+    val statusText = if (isLive) "✅ Connected" else "⚠️ Reconnecting..."
+    val statusColor = if (isLive) Color.Green else Color.Yellow
+
     Column(
         modifier = Modifier.fillMaxSize().background(Color(0xFF1E1E1E)).padding(24.dp),
         verticalArrangement = Arrangement.Center,
@@ -186,7 +214,7 @@ fun ConnectedScreen(url: String, onDisconnect: () -> Unit) {
             colors = CardDefaults.cardColors(containerColor = Color(0xFF2C2C2C))
         ) {
             Column(modifier = Modifier.padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("✅ Connected", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Color.Green)
+                Text(statusText, fontSize = 24.sp, fontWeight = FontWeight.Bold, color = statusColor)
                 Spacer(modifier = Modifier.height(16.dp))
                 Text("Syncing clipboard to:", color = Color.LightGray, fontSize = 14.sp)
                 Text(url, color = Color.White, fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = 4.dp))
