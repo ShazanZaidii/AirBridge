@@ -35,12 +35,15 @@ class AirBridgeTileService : TileService() {
         super.onStartListening()
 
         val prefs = getSharedPreferences("AirBridgePrefs", Context.MODE_PRIVATE)
-        val url = prefs.getString("WS_URL", null)
+        val urls = prefs.getStringSet("WS_URLS", emptySet()) ?: emptySet()
 
-        if (url != null) {
-            val uri = Uri.parse(url)
+        if (urls.size == 1) {
+            val uri = Uri.parse(urls.first())
             val macName = uri.getQueryParameter("name") ?: "Mac"
             qsTile?.label = "Send to $macName"
+            qsTile?.state = Tile.STATE_ACTIVE
+        } else if (urls.size > 1) {
+            qsTile?.label = "Sync ${urls.size} Macs"
             qsTile?.state = Tile.STATE_ACTIVE
         } else {
             qsTile?.label = "AirBridge"
