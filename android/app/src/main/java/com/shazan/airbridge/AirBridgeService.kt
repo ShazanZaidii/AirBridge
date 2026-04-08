@@ -71,8 +71,14 @@ class AirBridgeService : Service() {
     private val bubbleSize = 130
     private var isHoveringClose = false
 
+    companion object {
+        @SuppressLint("StaticFieldLeak")
+        var instance: AirBridgeService? = null
+    }
+
     override fun onCreate() {
         super.onCreate()
+        instance = this
         clipboardManager = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -141,6 +147,11 @@ class AirBridgeService : Service() {
         return START_STICKY
     }
 
+    // FIXED: Function is now at the class level so other classes can use it
+    fun broadcastToMac(text: String) {
+        activeSockets.values.forEach { it.send(text) }
+    }
+
     private fun formatEta(etaSeconds: Long): String {
         if (etaSeconds < 60) return "${etaSeconds}s remaining"
         val mins = etaSeconds / 60
@@ -160,12 +171,11 @@ class AirBridgeService : Service() {
             .setSmallIcon(android.R.drawable.ic_menu_share)
             .setProgress(100, progress, false)
             .setOngoing(true)
-            .setOnlyAlertOnce(true) // Updates silently without vibrating every second
+            .setOnlyAlertOnce(true)
             .build()
         getSystemService(NotificationManager::class.java).notify(1, notification)
     }
 
-    // COMPLETELY REPLACE THIS FUNCTION
     private fun streamBatchToMac(uris: List<Uri>, targetUrl: String?) {
         transferQueue.execute {
             var targetSocket = if (targetUrl != null) activeSockets[targetUrl] else activeSockets.values.firstOrNull()
@@ -178,7 +188,6 @@ class AirBridgeService : Service() {
             var filesSent = 0
             var totalBytes = 0L
 
-            // 1. Calculate Total Batch Size Upfront
             uris.forEach { uri ->
                 try {
                     contentResolver.query(uri, null, null, null, null)?.use { cursor ->
@@ -190,7 +199,6 @@ class AirBridgeService : Service() {
                 } catch (e: Exception) { e.printStackTrace() }
             }
 
-            // 2. Transmit enhanced Batch Header
             targetSocket.send("BATCH_START:$totalFiles:$totalBytes")
 
             var bytesSent = 0L
@@ -201,7 +209,6 @@ class AirBridgeService : Service() {
                 var retryCount = 0
                 var success = false
 
-                // Reduced to 50ms since the pipe is wider
                 Thread.sleep(50)
 
                 while (!success && retryCount < 3) {
@@ -226,7 +233,6 @@ class AirBridgeService : Service() {
                         if (!targetSocket.send("START_FILE:$fileName")) throw Exception("Socket closed at start")
 
                         contentResolver.openInputStream(uri)?.use { inputStream ->
-                            // Widen the pipe to 256KB chunks
                             val buffer = ByteArray(256 * 1024)
                             var bytesRead: Int
 
@@ -237,7 +243,6 @@ class AirBridgeService : Service() {
                                 bytesSent += bytesRead
                                 val now = System.currentTimeMillis()
 
-                                // Update Notification & UI every 1 second
                                 if (now - lastNotifTime > 1000) {
                                     val elapsed = (now - startTime) / 1000.0
                                     val speed = if (elapsed > 0) (bytesSent / elapsed).toLong() else 0L
@@ -251,7 +256,6 @@ class AirBridgeService : Service() {
                                     lastNotifTime = now
                                 }
 
-                                // Let OkHttp queue up to 8MB before pausing, and pause for just 5ms
                                 while ((targetSocket?.queueSize() ?: 0L) > 8_000_000L) {
                                     Thread.sleep(5)
                                 }
@@ -271,7 +275,6 @@ class AirBridgeService : Service() {
             }
             showToast("Sent $totalFiles files!")
 
-            // Revert back to the idle notification and clear UI
             getSystemService(NotificationManager::class.java).notify(1, createNotification())
             mainHandler.postDelayed({ broadcastTransferProgress(-1, -1, 0, "", "") }, 2000)
         }
@@ -348,6 +351,17 @@ class AirBridgeService : Service() {
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
+                // 1. Intercept Mac Inputs
+                if (text.startsWith("INP:")) {
+                    if (AirBridgeInputService.instance == null) {
+                        mainHandler.post { Toast.makeText(this@AirBridgeService, "Enable AirBridge in Android Accessibility Settings!", Toast.LENGTH_SHORT).show() }
+                    } else {
+                        AirBridgeInputService.processCommand(text)
+                    }
+                    return
+                }
+
+                // 2. Normal Clipboard text
                 if (text != lastClipboardText) {
                     isUpdatingFromMac = true
                     mainHandler.post {
