@@ -56,8 +56,6 @@ class AirBridgeInputService : AccessibilityService() {
     @Volatile private var pendingScrollX = 0f
     @Volatile private var isScrollDispatching = false
 
-
-
     private var isCommandDown = false
     private var commandHandled = false
     private var notifState = 0
@@ -226,6 +224,7 @@ class AirBridgeInputService : AccessibilityService() {
                     performStandardTap(cursorX, cursorY)
                 }
             }
+            // 🚀 NEW: State-managed CMD handler (Notification Panel toggling & Combo suppression)
             "CMD" -> {
                 if (parts[2] == "DOWN") {
                     isCommandDown = true
@@ -235,12 +234,29 @@ class AirBridgeInputService : AccessibilityService() {
                     if (!commandHandled) {
                         notifState = (notifState + 1) % 3
                         when (notifState) {
-                            1 -> performGlobalAction(GLOBAL_ACTION_NOTIFICATIONS)
-                            2 -> performGlobalAction(GLOBAL_ACTION_QUICK_SETTINGS)
-                            0 -> performGlobalAction(GLOBAL_ACTION_BACK)
+                            1 -> performGlobalAction(GLOBAL_ACTION_NOTIFICATIONS) // Tap 1
+                            2 -> performGlobalAction(GLOBAL_ACTION_QUICK_SETTINGS) // Tap 2 (Expanded)
+                            0 -> performGlobalAction(GLOBAL_ACTION_BACK) // Tap 3 (Close)
                         }
                     } else {
-                        notifState = 0
+                        notifState = 0 // Reset state if a combo was used
+                    }
+                } else if (parts[2] == "HANDLED") {
+                    // Suppresses the notification panel if Cmd was used with another key (like Space)
+                    commandHandled = true
+                }
+            }
+            "VOL" -> {
+                mainHandler.post {
+                    try {
+                        val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+                        when (parts[2]) {
+                            "UP" -> audioManager.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_RAISE, AudioManager.FLAG_SHOW_UI)
+                            "DOWN" -> audioManager.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_LOWER, AudioManager.FLAG_SHOW_UI)
+                            "MUTE" -> audioManager.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_TOGGLE_MUTE, AudioManager.FLAG_SHOW_UI)
+                        }
+                    } catch (e: Exception) {
+                        e.printStackTrace() // Catch silently if Android denies UI access
                     }
                 }
             }
@@ -248,6 +264,8 @@ class AirBridgeInputService : AccessibilityService() {
                 when (parts[2]) {
                     "RECENTS" -> performGlobalAction(GLOBAL_ACTION_RECENTS)
                     "HOME" -> performGlobalAction(GLOBAL_ACTION_HOME)
+                    "NOTIF" -> performGlobalAction(GLOBAL_ACTION_NOTIFICATIONS)
+                    "DRAWER" -> openAppDrawerPhysicalSwipe()
                     "LAST_APP" -> {
                         performGlobalAction(GLOBAL_ACTION_RECENTS)
                         mainHandler.postDelayed({ performGlobalAction(GLOBAL_ACTION_RECENTS) }, 250)
@@ -257,41 +275,11 @@ class AirBridgeInputService : AccessibilityService() {
             "KD" -> {
                 val keyCode = parts[2].toIntOrNull() ?: return
                 when (keyCode) {
-                    53 -> performGlobalAction(GLOBAL_ACTION_BACK)
-                    126 -> { // Up Arrow
-                        if (!isCommandDown) performDirectionalSwipe("DOWN")
-
-                    }
-                    125 -> { // Down Arrow
-                        if (isCommandDown) { commandHandled = true; performGlobalAction(GLOBAL_ACTION_RECENTS) }
-                        else performDirectionalSwipe("UP")
-                    }
-                    123 -> { // Left Arrow
-                        if (isCommandDown) {
-                            commandHandled = true
-                            performGlobalAction(GLOBAL_ACTION_RECENTS)
-                            mainHandler.postDelayed({ performGlobalAction(GLOBAL_ACTION_RECENTS) }, 250)
-                        } else {
-                            performDirectionalSwipe("RIGHT")
-                        }
-                    }
-                    124 -> { // Right Arrow
-                        if (isCommandDown) {
-                            commandHandled = true
-                            performGlobalAction(GLOBAL_ACTION_RECENTS)
-                            mainHandler.postDelayed({ performGlobalAction(GLOBAL_ACTION_RECENTS) }, 250)
-                        } else {
-                            performDirectionalSwipe("LEFT")
-                        }
-
-                    }
-                    49 -> { // Spacebar
-                        if (isCommandDown) {
-                            commandHandled = true
-                            // 🚀 Exclusively perform physical swipe to avoid OS conflict stutter
-                            openAppDrawerPhysicalSwipe()
-                        }
-                    }
+                    53 -> performGlobalAction(GLOBAL_ACTION_BACK) // Esc key
+                    126 -> performDirectionalSwipe("DOWN") // Up Arrow
+                    125 -> performDirectionalSwipe("UP") // Down Arrow
+                    123 -> performDirectionalSwipe("RIGHT") // Left Arrow
+                    124 -> performDirectionalSwipe("LEFT") // Right Arrow
                 }
             }
         }
