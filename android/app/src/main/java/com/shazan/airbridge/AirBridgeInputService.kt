@@ -1,5 +1,7 @@
 package com.shazan.airbridge
 
+import android.media.AudioManager
+import android.content.Context
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
 import android.annotation.SuppressLint
