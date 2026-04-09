@@ -2,8 +2,6 @@
 //  AirBridgeApp.swift
 //  AirBridge
 //
-//  Created by Shazan Zaidi on 29/03/26.
-//
 
 import SwiftUI
 import CoreImage.CIFilterBuiltins
@@ -43,24 +41,23 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         completionHandler()
     }
     
-    // Forces the notification banner to show even if the app is active
-        func userNotificationCenter(_ center: UNUserNotificationCenter,
-                                    willPresent notification: UNNotification,
-                                    withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
-            
-            // Use .banner for macOS 11+, or .alert for older targets
-            if #available(macOS 11.0, *) {
-                completionHandler([.banner, .sound])
-            } else {
-                completionHandler([.alert, .sound])
-            }
+    func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                willPresent notification: UNNotification,
+                                withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        
+        if #available(macOS 11.0, *) {
+            completionHandler([.banner, .sound])
+        } else {
+            completionHandler([.alert, .sound])
         }
+    }
 }
 
 @main
 struct AirBridgeApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject private var server = SyncServer()
+    @Environment(\.openWindow) private var openWindow
 
     var body: some Scene {
         MenuBarExtra("AirBridge", systemImage: "link.icloud") {
@@ -78,15 +75,38 @@ struct AirBridgeApp: App {
                     Text("⚠️ Waiting for connection...")
                         .foregroundColor(.orange)
                         .font(.subheadline)
-                    
-                    if server.port > 0, let qrImage = generateQRCode(from: "ws://\(server.localIP):\(server.port)?name=\(server.macName.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")") {
-                        Image(nsImage: qrImage)
-                            .interpolation(.none)
-                            .resizable()
-                            .frame(width: 160, height: 160)
-                            .cornerRadius(8)
+                }
+                
+                if server.isReceivingBatch {
+                    VStack(spacing: 4) {
+                        ProgressView(value: server.batchProgress)
+                            .progressViewStyle(LinearProgressViewStyle(tint: .blue))
+                        Text("\(server.batchStatus) • \(server.batchSpeed)")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Text(server.batchETA)
+                            .font(.caption2)
+                            .foregroundColor(.gray)
                     }
-                    Text("Scan from Android App").font(.caption).foregroundColor(.secondary)
+                    .padding(.top, 8)
+                }
+                
+                if server.port > 0, let qrImage = generateQRCode(from: "ws://\(server.localIP):\(server.port)?name=\(server.macName.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")") {
+                    Image(nsImage: qrImage)
+                        .interpolation(.none)
+                        .resizable()
+                        .frame(width: 160, height: 160)
+                        .cornerRadius(8)
+                    if(server.connectedClients >= 1){
+                        Text("Scan to add more devices").font(.caption).foregroundColor(.secondary)
+                    }
+                    else{
+                        Text("Scan to add device").font(.caption).foregroundColor(.secondary)
+                    }
+                }
+                
+                Button("Display Arrangement...") {
+                    openWindow(id: "arrangement")
                 }
                 
                 Divider()
@@ -94,8 +114,18 @@ struct AirBridgeApp: App {
             }
             .padding()
             .frame(width: 250)
+            .onAppear {
+                InputInterceptor.shared.setup(server: server)
+                InputInterceptor.shared.start()
+            }
         }
         .menuBarExtraStyle(.window)
+        
+        Window("AirBridge Display Arrangement", id: "arrangement") {
+            DisplayArrangementView()
+                .fixedSize()
+        }
+        .windowResizability(.contentSize)
     }
     
     private func generateQRCode(from string: String) -> NSImage? {

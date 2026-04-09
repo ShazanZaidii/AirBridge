@@ -10,6 +10,7 @@ import Foundation
 struct NetworkUtils {
     static func getLocalIPAddress() -> String? {
         var address: String?
+        var fallbackAddress: String?
         var ifaddr: UnsafeMutablePointer<ifaddrs>? = nil
         
         if getifaddrs(&ifaddr) == 0 {
@@ -33,15 +34,26 @@ struct NetworkUtils {
                                     nil, socklen_t(0), NI_NUMERICHOST)
                         
                         let ipString = String(cString: hostname)
-                        // Ignore virtual machine interfaces or docker bridges if possible
-                        if !ipString.hasPrefix("169.254") && address == nil {
+                        
+                        // 1. Blacklist internal virtual networks, Docker bridges, and VPN tunnels
+                        if ipString.hasPrefix("169.254") || name.hasPrefix("utun") || name.hasPrefix("bridge") || name.hasPrefix("vmnet") || name.hasPrefix("vnic") {
+                            continue
+                        }
+                        
+                        // 2. The Golden Standard: 'en0' is primary Wi-Fi, 'en1' is physical Ethernet
+                        if name == "en0" || name == "en1" {
                             address = ipString
+                            break // We found the true local router IP, stop searching
+                        } else if fallbackAddress == nil {
+                            // 3. Keep a fallback just in case they are using a weird USB-C adapter (like en3)
+                            fallbackAddress = ipString
                         }
                     }
                 }
             }
             freeifaddrs(ifaddr)
         }
-        return address
+        
+        return address ?? fallbackAddress
     }
 }
