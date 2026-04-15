@@ -41,16 +41,17 @@ class AirBridgeInputService : AccessibilityService() {
     private var screenWidth = 0
     private var screenHeight = 0
 
+    @Volatile private var targetX = 0f
+    @Volatile private var targetY = 0f
     @Volatile private var cursorX = 0f
     @Volatile private var cursorY = 0f
     private var activeEdge = "right"
 
     @Volatile private var isMouseDown = false
-    @Volatile private var isDraggingActive = false
+    @Volatile private var isDraggingMode = false
+
     private var dragStartX = 0f
     private var dragStartY = 0f
-    private var dragLastX = 0f
-    private var dragLastY = 0f
 
     @Volatile private var pendingScrollY = 0f
     @Volatile private var pendingScrollX = 0f
@@ -67,22 +68,17 @@ class AirBridgeInputService : AccessibilityService() {
 
     private val frameCallback = object : Choreographer.FrameCallback {
         override fun doFrame(frameTimeNanos: Long) {
+            cursorX += (targetX - cursorX) * 0.45f
+            cursorY += (targetY - cursorY) * 0.45f
+
             cursorView?.translationX = cursorX
             cursorView?.translationY = cursorY
+
             if (cursorView?.visibility == View.VISIBLE) {
                 Choreographer.getInstance().postFrameCallback(this)
             } else {
                 isRendering = false
             }
-        }
-    }
-
-    private val longPressRunnable = Runnable {
-        if (isMouseDown && !isDraggingActive) {
-            isDraggingActive = true
-            dragLastX = dragStartX
-            dragLastY = dragStartY
-            executeNextDragStroke()
         }
     }
 
@@ -100,8 +96,10 @@ class AirBridgeInputService : AccessibilityService() {
         screenWidth = metrics.widthPixels
         screenHeight = metrics.heightPixels
 
-        cursorX = screenWidth / 2f
-        cursorY = screenHeight / 2f
+        targetX = screenWidth / 2f
+        targetY = screenHeight / 2f
+        cursorX = targetX
+        cursorY = targetY
 
         containerView = FrameLayout(this)
         cursorView = ImageView(this).apply {
@@ -130,14 +128,10 @@ class AirBridgeInputService : AccessibilityService() {
     }
 
     private fun performCopyPaste(action: Int) {
-        // Find the text field that currently has keyboard focus
         var node = rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
-
-        // Fallback: check for general accessibility focus if no input focus is found
         if (node == null) {
             node = rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
         }
-
         if (node != null) {
             node.performAction(action)
             node.recycle()
@@ -155,18 +149,20 @@ class AirBridgeInputService : AccessibilityService() {
                     val relX = parts.getOrNull(4)?.toFloatOrNull() ?: 0.5f
                     val relY = parts.getOrNull(5)?.toFloatOrNull() ?: 0.5f
 
-                    cursorX = clampX(when (activeEdge) {
+                    targetX = clampX(when (activeEdge) {
                         "right" -> 5f; "left" -> screenWidth - 35f
-                        "top", "bottom" -> screenWidth * relX; else -> cursorX
+                        "top", "bottom" -> screenWidth * relX; else -> targetX
                     })
-                    cursorY = clampY(when (activeEdge) {
+                    targetY = clampY(when (activeEdge) {
                         "bottom" -> 5f; "top" -> screenHeight - 35f
-                        "right", "left" -> screenHeight * relY; else -> cursorY
+                        "right", "left" -> screenHeight * relY; else -> targetY
                     })
 
+                    cursorX = targetX
+                    cursorY = targetY
+
                     isMouseDown = false
-                    isDraggingActive = false
-                    mainHandler.removeCallbacks(longPressRunnable)
+                    isDraggingMode = false
 
                     mainHandler.post {
                         cursorView?.translationX = cursorX
@@ -184,10 +180,10 @@ class AirBridgeInputService : AccessibilityService() {
                 val scrollY = parts.getOrNull(4)?.toFloatOrNull() ?: 0f
                 val scrollX = parts.getOrNull(5)?.toFloatOrNull() ?: 0f
 
-                val newX = cursorX + (dx * 3.0f)
-                val newY = cursorY + (dy * 3.0f)
+                val newX = targetX + (dx * 1.6f)
+                val newY = targetY + (dy * 1.6f)
 
-                if (!isMouseDown) {
+                if (!isMouseDown && !isDraggingMode) {
                     if ((activeEdge == "right" && newX <= -20f) || (activeEdge == "left" && newX >= screenWidth + 20f) ||
                         (activeEdge == "bottom" && newY <= -20f) || (activeEdge == "top" && newY >= screenHeight + 20f)) {
                         mainHandler.post { cursorView?.visibility = View.GONE }
@@ -196,19 +192,8 @@ class AirBridgeInputService : AccessibilityService() {
                     }
                 }
 
-                cursorX = clampX(newX)
-                cursorY = clampY(newY)
-
-                if (isMouseDown && !isDraggingActive) {
-                    val dist = hypot((cursorX - dragStartX).toDouble(), (cursorY - dragStartY).toDouble())
-                    if (dist > 15) {
-                        mainHandler.removeCallbacks(longPressRunnable)
-                        isDraggingActive = true
-                        dragLastX = dragStartX
-                        dragLastY = dragStartY
-                        executeNextDragStroke()
-                    }
-                }
+                targetX = clampX(newX)
+                targetY = clampY(newY)
 
                 if ((scrollY != 0f || scrollX != 0f) && !isMouseDown) {
                     pendingScrollY += scrollY
@@ -220,20 +205,42 @@ class AirBridgeInputService : AccessibilityService() {
             }
             "CD" -> {
                 isMouseDown = true
-                isDraggingActive = false
-                dragStartX = cursorX
-                dragStartY = cursorY
-                mainHandler.postDelayed(longPressRunnable, 250)
             }
             "CU" -> {
                 isMouseDown = false
-                mainHandler.removeCallbacks(longPressRunnable)
-
-                if (!isDraggingActive) {
-                    performStandardTap(cursorX, cursorY)
+                performStandardTap(targetX, targetY)
+            }
+            "DRAG" -> {
+                isDraggingMode = true
+                dragStartX = targetX
+                dragStartY = targetY
+            }
+            "DRAG_RELEASE" -> {
+                isDraggingMode = false
+                val dist = hypot((targetX - dragStartX).toDouble(), (targetY - dragStartY).toDouble())
+                if (dist > 15f) {
+                    val path = Path().apply {
+                        moveTo(clampX(dragStartX), clampY(dragStartY))
+                        lineTo(clampX(targetX), clampY(targetY))
+                    }
+                    val duration = max(300L, min(800L, (dist * 1.5f).toLong()))
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        val stroke = GestureDescription.StrokeDescription(path, 0, duration)
+                        dispatchGesture(GestureDescription.Builder().addStroke(stroke).build(), null, null)
+                    }
+                } else {
+                    performStandardTap(targetX, targetY)
                 }
             }
-            // 🚀 NEW: Dedicated Left Cmd logic from Mac Payload
+            "HOLD" -> {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    val cx = clampX(targetX)
+                    val cy = clampY(targetY)
+                    val path = Path().apply { moveTo(cx, cy); lineTo(cx + 0.1f, cy + 0.1f) }
+                    val stroke = GestureDescription.StrokeDescription(path, 0, 600)
+                    dispatchGesture(GestureDescription.Builder().addStroke(stroke).build(), null, null)
+                }
+            }
             "CMD" -> {
                 when (parts[2]) {
                     "LEFT" -> {
@@ -254,7 +261,6 @@ class AirBridgeInputService : AccessibilityService() {
                 mainHandler.post {
                     try {
                         val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
-                        // Changed from adjustStreamVolume to adjustVolume to let OS pick the active stream
                         when (parts[2]) {
                             "UP" -> audioManager.adjustVolume(AudioManager.ADJUST_RAISE, AudioManager.FLAG_SHOW_UI)
                             "DOWN" -> audioManager.adjustVolume(AudioManager.ADJUST_LOWER, AudioManager.FLAG_SHOW_UI)
@@ -270,7 +276,7 @@ class AirBridgeInputService : AccessibilityService() {
                     "RECENTS" -> performGlobalAction(GLOBAL_ACTION_RECENTS)
                     "HOME" -> {
                         performGlobalAction(GLOBAL_ACTION_HOME)
-                        notifState = 0 // Reset Left Cmd state when taking user home
+                        notifState = 0
                     }
                     "NOTIF" -> performGlobalAction(GLOBAL_ACTION_NOTIFICATIONS)
                     "DRAWER" -> openAppDrawerPhysicalSwipe()
@@ -283,11 +289,11 @@ class AirBridgeInputService : AccessibilityService() {
             "KD" -> {
                 val keyCode = parts[2].toIntOrNull() ?: return
                 when (keyCode) {
-                    53 -> performGlobalAction(GLOBAL_ACTION_BACK) // Esc key
-                    126 -> performDirectionalSwipe("DOWN") // Up Arrow
-                    125 -> performDirectionalSwipe("UP") // Down Arrow
-                    123 -> performDirectionalSwipe("RIGHT") // Left Arrow
-                    124 -> performDirectionalSwipe("LEFT") // Right Arrow
+                    53 -> performGlobalAction(GLOBAL_ACTION_BACK)
+                    126 -> performDirectionalSwipe("DOWN")
+                    125 -> performDirectionalSwipe("UP")
+                    123 -> performDirectionalSwipe("RIGHT")
+                    124 -> performDirectionalSwipe("LEFT")
                 }
             }
         }
@@ -297,8 +303,8 @@ class AirBridgeInputService : AccessibilityService() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val cx = clampX(x)
         val cy = clampY(y)
-        val path = Path().apply { moveTo(cx, cy); lineTo(cx + 0.1f, cy) }
-        val stroke = GestureDescription.StrokeDescription(path, 0, 45)
+        val path = Path().apply { moveTo(cx, cy); lineTo(cx + 0.1f, cy + 0.1f) }
+        val stroke = GestureDescription.StrokeDescription(path, 0, 20)
         dispatchGesture(GestureDescription.Builder().addStroke(stroke).build(), null, null)
     }
 
@@ -306,21 +312,22 @@ class AirBridgeInputService : AccessibilityService() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
 
         val now = System.currentTimeMillis()
-        if (now - lastArrowSwipeTime < 500) return
+        if (now - lastArrowSwipeTime < 300) return
         lastArrowSwipeTime = now
 
-        val startX = screenWidth / 2f
-        val startY = screenHeight / 2f
+        val startX = clampX(cursorX)
+        val startY = clampY(cursorY)
         var endX = startX
         var endY = startY
 
-        val swipeDist = min(screenWidth, screenHeight) * 0.4f
+        // Increased to 50% for a stronger fling
+        val swipeDist = min(screenWidth, screenHeight) * 0.5f
 
         when (direction) {
-            "UP" -> endY -= swipeDist
-            "DOWN" -> endY += swipeDist
-            "LEFT" -> endX -= swipeDist
-            "RIGHT" -> endX += swipeDist
+            "UP" -> endY = max(0f, startY - swipeDist)
+            "DOWN" -> endY = min(screenHeight.toFloat(), startY + swipeDist)
+            "LEFT" -> endX = max(0f, startX - swipeDist)
+            "RIGHT" -> endX = min(screenWidth.toFloat(), startX + swipeDist)
         }
 
         val path = Path().apply { moveTo(startX, startY); lineTo(endX, endY) }
@@ -337,32 +344,6 @@ class AirBridgeInputService : AccessibilityService() {
         val path = Path().apply { moveTo(startX, startY); lineTo(startX, endY) }
         val stroke = GestureDescription.StrokeDescription(path, 0, 200)
         dispatchGesture(GestureDescription.Builder().addStroke(stroke).build(), null, null)
-    }
-
-    private fun executeNextDragStroke() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
-
-        val startX = clampX(dragLastX)
-        val startY = clampY(dragLastY)
-        var endX = clampX(cursorX)
-        var endY = clampY(cursorY)
-
-        if (startX == endX && startY == endY) { endY = clampY(endY + 0.1f) }
-
-        val path = Path().apply { moveTo(startX, startY); lineTo(endX, endY) }
-        val stroke = GestureDescription.StrokeDescription(path, 0, 80, isMouseDown)
-
-        dragLastX = endX
-        dragLastY = endY
-
-        dispatchGesture(GestureDescription.Builder().addStroke(stroke).build(), object : GestureResultCallback() {
-            override fun onCompleted(gestureDescription: GestureDescription?) {
-                if (isMouseDown) executeNextDragStroke() else isDraggingActive = false
-            }
-            override fun onCancelled(gestureDescription: GestureDescription?) {
-                isDraggingActive = false
-            }
-        }, null)
     }
 
     private fun executeNextScrollFlick() {
@@ -406,8 +387,6 @@ class AirBridgeInputService : AccessibilityService() {
         }, null)
     }
 
-
-
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
     override fun onInterrupt() {}
     override fun onDestroy() {
@@ -418,15 +397,14 @@ class AirBridgeInputService : AccessibilityService() {
     }
     override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
         super.onConfigurationChanged(newConfig)
-
-        // Dynamically update the screen bounds when orientation changes
         val metrics = DisplayMetrics()
         @Suppress("DEPRECATION")
         windowManager?.defaultDisplay?.getRealMetrics(metrics)
         screenWidth = metrics.widthPixels
         screenHeight = metrics.heightPixels
 
-        // Clamp the cursor so it doesn't get trapped outside the new screen bounds
+        targetX = clampX(targetX)
+        targetY = clampY(targetY)
         cursorX = clampX(cursorX)
         cursorY = clampY(cursorY)
     }

@@ -63,6 +63,7 @@ class AirBridgeService : Service() {
 
     private var lastClipboardText: String = ""
     private var isUpdatingFromMac = false
+    private var hasShownAccessibilityToast = false
 
     private val mainHandler = Handler(Looper.getMainLooper())
 
@@ -74,7 +75,6 @@ class AirBridgeService : Service() {
     private val bubbleSize = 130
     private var isHoveringClose = false
 
-    // Incoming File Tracking
     private var isReceivingFile = false
     private var incomingFileName = ""
     private var incomingFileOutputStream: java.io.OutputStream? = null
@@ -88,6 +88,12 @@ class AirBridgeService : Service() {
     companion object {
         @SuppressLint("StaticFieldLeak")
         var instance: AirBridgeService? = null
+
+        fun getActiveUrls(): Set<String> {
+            return instance?.activeSockets?.keys?.map {
+                if (it.endsWith("/")) it.dropLast(1) else it
+            }?.toSet() ?: emptySet()
+        }
     }
 
     override fun onCreate() {
@@ -124,7 +130,6 @@ class AirBridgeService : Service() {
             savedUrls = urls.toSet()
             updateDirectShareShortcuts(savedUrls)
 
-            // 🚀 Respect Auto-Pair toggle here
             if (autoConnect) {
                 savedUrls.forEach { url ->
                     if (!activeSockets.containsKey(url)) {
@@ -168,7 +173,6 @@ class AirBridgeService : Service() {
         return START_STICKY
     }
 
-    // FIXED: Function is now at the class level so other classes can use it
     fun broadcastToMac(text: String) {
         activeSockets.values.forEach { it.send(text) }
     }
@@ -199,7 +203,8 @@ class AirBridgeService : Service() {
 
     private fun streamBatchToMac(uris: List<Uri>, targetUrl: String?) {
         transferQueue.execute {
-            var targetSocket = if (targetUrl != null) activeSockets[targetUrl] else activeSockets.values.firstOrNull()
+            var targetSocket =
+                if (targetUrl != null) activeSockets[targetUrl] else activeSockets.values.firstOrNull()
             if (targetSocket == null) {
                 showToast("Mac disconnected. Aborting.")
                 return@execute
@@ -217,7 +222,9 @@ class AirBridgeService : Service() {
                             totalBytes += cursor.getLong(sizeIndex)
                         }
                     }
-                } catch (e: Exception) { e.printStackTrace() }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
             }
 
             targetSocket.send("BATCH_START:$totalFiles:$totalBytes")
@@ -234,11 +241,13 @@ class AirBridgeService : Service() {
 
                 while (!success && retryCount < 3) {
                     try {
-                        targetSocket = if (targetUrl != null) activeSockets[targetUrl] else activeSockets.values.firstOrNull()
+                        targetSocket =
+                            if (targetUrl != null) activeSockets[targetUrl] else activeSockets.values.firstOrNull()
                         var waitCount = 0
                         while (targetSocket == null && waitCount < 40) {
                             Thread.sleep(50)
-                            targetSocket = if (targetUrl != null) activeSockets[targetUrl] else activeSockets.values.firstOrNull()
+                            targetSocket =
+                                if (targetUrl != null) activeSockets[targetUrl] else activeSockets.values.firstOrNull()
                             waitCount++
                         }
                         if (targetSocket == null) return@execute
@@ -266,13 +275,25 @@ class AirBridgeService : Service() {
 
                                 if (now - lastNotifTime > 1000) {
                                     val elapsed = (now - startTime) / 1000.0
-                                    val speed = if (elapsed > 0) (bytesSent / elapsed).toLong() else 0L
+                                    val speed =
+                                        if (elapsed > 0) (bytesSent / elapsed).toLong() else 0L
                                     val remainingBytes = totalBytes - bytesSent
                                     val eta = if (speed > 0) remainingBytes / speed else 0L
-                                    val progressPct = if (totalBytes > 0) ((bytesSent.toDouble() / totalBytes) * 100).toInt() else 0
+                                    val progressPct =
+                                        if (totalBytes > 0) ((bytesSent.toDouble() / totalBytes) * 100).toInt() else 0
 
-                                    broadcastTransferProgress(filesSent, totalFiles, progressPct, formatSpeed(speed), formatEta(eta))
-                                    updateTransferNotification(progressPct, "Sending $totalFiles files to Mac", "${formatSpeed(speed)} • ${formatEta(eta)}")
+                                    broadcastTransferProgress(
+                                        filesSent,
+                                        totalFiles,
+                                        progressPct,
+                                        formatSpeed(speed),
+                                        formatEta(eta)
+                                    )
+                                    updateTransferNotification(
+                                        progressPct,
+                                        "Sending $totalFiles files to Mac",
+                                        "${formatSpeed(speed)} • ${formatEta(eta)}"
+                                    )
 
                                     lastNotifTime = now
                                 }
@@ -301,7 +322,13 @@ class AirBridgeService : Service() {
         }
     }
 
-    private fun broadcastTransferProgress(currentFiles: Int, totalFiles: Int, progressPct: Int, speed: String, eta: String) {
+    private fun broadcastTransferProgress(
+        currentFiles: Int,
+        totalFiles: Int,
+        progressPct: Int,
+        speed: String,
+        eta: String
+    ) {
         val intent = Intent("AIRBRIDGE_TRANSFER_PROGRESS")
             .putExtra("currentFiles", currentFiles)
             .putExtra("totalFiles", totalFiles)
@@ -339,10 +366,12 @@ class AirBridgeService : Service() {
                     .setShortLabel(shortName)
                     .setLongLabel("Send to $rawName")
                     .setIcon(IconCompat.createWithResource(this, android.R.drawable.ic_menu_share))
-                    .setCategories(setOf(
-                        "com.shazan.airbridge.category.TEXT_SHARE_TARGET",
-                        "com.shazan.airbridge.category.FILE_SHARE_TARGET"
-                    ))
+                    .setCategories(
+                        setOf(
+                            "com.shazan.airbridge.category.TEXT_SHARE_TARGET",
+                            "com.shazan.airbridge.category.FILE_SHARE_TARGET"
+                        )
+                    )
                     .setIntent(shareIntent)
                     .setPerson(person)
                     .setLongLived(true)
@@ -372,7 +401,6 @@ class AirBridgeService : Service() {
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
-                // 1. Handle File Transfer Commands
                 if (text.startsWith("BATCH_START:")) {
                     val parts = text.split(":")
                     incomingTotalFiles = parts.getOrNull(1)?.toIntOrNull() ?: 1
@@ -384,7 +412,7 @@ class AirBridgeService : Service() {
                     updateIncomingTransferUI(false)
                     return
                 }
-                // 1. Handle File Transfer Commands from Mac
+
                 if (text.startsWith("START_FILE:")) {
                     val myDate = Time.now
                     val customFormat = myDate.format("hh-mm a, EEEE, dd MMM yy")
@@ -394,25 +422,32 @@ class AirBridgeService : Service() {
                     val ext = cleanedName.substringAfterLast(".", "dat")
                     cleanedName = "AirBridge ${customFormat}_${System.currentTimeMillis()}.$ext"
 
-                    // Intercept macOS generic Share Extension names
-//                    if (cleanedName.startsWith("PNG image") || cleanedName.startsWith("JPEG image") || cleanedName.startsWith("SharedFile")) {
-//                        val ext = cleanedName.substringAfterLast(".", "dat")
-//                        cleanedName = "AirBridge_${System.currentTimeMillis()}.$ext"
-//                    }
-
                     incomingFileName = cleanedName
 
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                         val resolver = contentResolver
                         val contentValues = android.content.ContentValues().apply {
-                            put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, incomingFileName)
-                            put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, android.os.Environment.DIRECTORY_DOWNLOADS + "/AirBridge")
-                            put(android.provider.MediaStore.MediaColumns.IS_PENDING, 1) // Locks file from OS indexing during transfer
+                            put(
+                                android.provider.MediaStore.MediaColumns.DISPLAY_NAME,
+                                incomingFileName
+                            )
+                            put(
+                                android.provider.MediaStore.MediaColumns.RELATIVE_PATH,
+                                android.os.Environment.DIRECTORY_DOWNLOADS + "/AirBridge"
+                            )
+                            put(android.provider.MediaStore.MediaColumns.IS_PENDING, 1)
                         }
-                        incomingFileUri = resolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
-                        incomingFileOutputStream = incomingFileUri?.let { resolver.openOutputStream(it) }
+                        incomingFileUri = resolver.insert(
+                            android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+                            contentValues
+                        )
+                        incomingFileOutputStream =
+                            incomingFileUri?.let { resolver.openOutputStream(it) }
                     } else {
-                        val dir = java.io.File(android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS), "AirBridge")
+                        val dir = java.io.File(
+                            android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS),
+                            "AirBridge"
+                        )
                         dir.mkdirs()
                         val file = java.io.File(dir, incomingFileName)
                         incomingFileOutputStream = java.io.FileOutputStream(file)
@@ -423,10 +458,12 @@ class AirBridgeService : Service() {
 
                 if (text.startsWith("END_FILE:")) {
                     isReceivingFile = false
-                    try { incomingFileOutputStream?.close() } catch (e: Exception) { }
+                    try {
+                        incomingFileOutputStream?.close()
+                    } catch (e: Exception) {
+                    }
                     incomingFileOutputStream = null
 
-                    // Unlock the file so it appears in the Gallery/Files app properly
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && incomingFileUri != null) {
                         val contentValues = android.content.ContentValues().apply {
                             put(android.provider.MediaStore.MediaColumns.IS_PENDING, 0)
@@ -440,17 +477,24 @@ class AirBridgeService : Service() {
                     return
                 }
 
-                // 2. Intercept Mac Inputs
                 if (text.startsWith("INP:")) {
                     if (AirBridgeInputService.instance == null) {
-                        mainHandler.post { Toast.makeText(this@AirBridgeService, "Enable AirBridge in Android Accessibility Settings!", Toast.LENGTH_SHORT).show() }
+                        if (!hasShownAccessibilityToast) {
+                            hasShownAccessibilityToast = true
+                            mainHandler.post {
+                                Toast.makeText(
+                                    this@AirBridgeService,
+                                    "Enable Accessibility Service enabled in Android Settings to simulate Mouse",
+                                    Toast.LENGTH_LONG
+                                ).show()
+                            }
+                        }
                     } else {
                         AirBridgeInputService.processCommand(text)
                     }
                     return
                 }
 
-                // 3. Normal Clipboard text
                 if (text != lastClipboardText) {
                     isUpdatingFromMac = true
                     mainHandler.post {
@@ -462,7 +506,6 @@ class AirBridgeService : Service() {
                 }
             }
 
-            // NEW: Handle Incoming Binary Data
             override fun onMessage(webSocket: WebSocket, bytes: okio.ByteString) {
                 if (isReceivingFile) {
                     try {
@@ -470,7 +513,6 @@ class AirBridgeService : Service() {
                         incomingReceivedBytes += bytes.size
 
                         val now = System.currentTimeMillis()
-                        // Only update UI every 500ms to prevent lagging the phone
                         if (now - incomingLastUpdate > 500) {
                             incomingLastUpdate = now
                             updateIncomingTransferUI(false)
@@ -499,7 +541,6 @@ class AirBridgeService : Service() {
         val prefs = getSharedPreferences("AirBridgePrefs", Context.MODE_PRIVATE)
         val autoConnect = prefs.getBoolean("AUTO_CONNECT", true)
 
-        // Only loop reconnects if the user hasn't turned off Auto-Pair
         if (savedUrls.contains(url) && autoConnect) {
             mainHandler.postDelayed({
                 if (!activeSockets.containsKey(url)) {
@@ -518,7 +559,8 @@ class AirBridgeService : Service() {
                 val description = clip.description
                 val item = clip.getItemAt(0)
 
-                val isExplicitlyFile = description?.hasMimeType(android.content.ClipDescription.MIMETYPE_TEXT_URILIST) == true
+                val isExplicitlyFile =
+                    description?.hasMimeType(android.content.ClipDescription.MIMETYPE_TEXT_URILIST) == true
 
                 if (isExplicitlyFile && item.uri != null) {
                     val uriScheme = item.uri.scheme
@@ -530,7 +572,8 @@ class AirBridgeService : Service() {
                     }
                 }
 
-                val newText = item.coerceToText(this)?.toString() ?: return@addPrimaryClipChangedListener
+                val newText =
+                    item.coerceToText(this)?.toString() ?: return@addPrimaryClipChangedListener
 
                 if (newText != lastClipboardText) {
                     lastClipboardText = newText
@@ -543,14 +586,17 @@ class AirBridgeService : Service() {
     }
 
     private fun broadcastConnectionState() {
-        val intent = Intent("AIRBRIDGE_STATE_UPDATE").putExtra("isConnected", activeSockets.isNotEmpty())
+        val intent = Intent("AIRBRIDGE_STATE_UPDATE").apply {
+            setPackage(packageName) // Bypasses RECEIVER_NOT_EXPORTED block
+        }
+        intent.putStringArrayListExtra("ACTIVE_URLS", ArrayList(getActiveUrls()))
         sendBroadcast(intent)
     }
-
     private fun createNotification(): Notification {
         val channelId = "AirBridgeChannel"
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(channelId, "Clipboard Sync", NotificationManager.IMPORTANCE_LOW)
+            val channel =
+                NotificationChannel(channelId, "Clipboard Sync", NotificationManager.IMPORTANCE_LOW)
             getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
         }
 
@@ -634,6 +680,7 @@ class AirBridgeService : Service() {
                     showCloseZone()
                     true
                 }
+
                 MotionEvent.ACTION_MOVE -> {
                     val dx = (event.rawX - initialTouchX).toInt()
                     val dy = (event.rawY - initialTouchY).toInt()
@@ -650,14 +697,23 @@ class AirBridgeService : Service() {
                     if (isNearBottom && isNearCenter) {
                         isHoveringClose = true
                         closeZoneView?.alpha = 1.0f
-                        (closeZoneView?.background as? GradientDrawable)?.setColor(Color.parseColor("#E53935"))
+                        (closeZoneView?.background as? GradientDrawable)?.setColor(
+                            Color.parseColor(
+                                "#E53935"
+                            )
+                        )
                     } else {
                         isHoveringClose = false
                         closeZoneView?.alpha = 0.5f
-                        (closeZoneView?.background as? GradientDrawable)?.setColor(Color.parseColor("#80000000"))
+                        (closeZoneView?.background as? GradientDrawable)?.setColor(
+                            Color.parseColor(
+                                "#80000000"
+                            )
+                        )
                     }
                     true
                 }
+
                 MotionEvent.ACTION_UP -> {
                     view.animate().scaleX(1.0f).scaleY(1.0f).setDuration(100).start()
                     view.elevation = 0f
@@ -676,7 +732,8 @@ class AirBridgeService : Service() {
                         startActivity(intent)
                     } else {
                         val isLeftHalf = (layoutParams.x + (bubbleSize / 2)) < (realScreenWidth / 2)
-                        val targetX = if (isLeftHalf) -(bubbleSize / 2) else realScreenWidth - (bubbleSize / 2)
+                        val targetX =
+                            if (isLeftHalf) -(bubbleSize / 2) else realScreenWidth - (bubbleSize / 2)
 
                         val animator = ValueAnimator.ofInt(layoutParams.x, targetX)
                         animator.duration = 250
@@ -691,6 +748,7 @@ class AirBridgeService : Service() {
                     }
                     true
                 }
+
                 else -> false
             }
         }
@@ -746,31 +804,45 @@ class AirBridgeService : Service() {
     }
 
     private fun updateIncomingTransferUI(isComplete: Boolean) {
-        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val notificationManager =
+            getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel("transfer_channel", "File Transfers", NotificationManager.IMPORTANCE_LOW)
+            val channel = NotificationChannel(
+                "transfer_channel",
+                "File Transfers",
+                NotificationManager.IMPORTANCE_LOW
+            )
             notificationManager.createNotificationChannel(channel)
         }
 
         if (isComplete) {
             val intent = Intent(android.app.DownloadManager.ACTION_VIEW_DOWNLOADS)
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            val pendingIntent = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+            val pendingIntent = PendingIntent.getActivity(
+                this,
+                0,
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
 
             val builder = NotificationCompat.Builder(this, "transfer_channel")
                 .setSmallIcon(android.R.drawable.stat_sys_download_done)
                 .setContentTitle("Transfer Complete")
                 .setContentText("Received $incomingTotalFiles file(s) from Mac.")
                 .setContentIntent(pendingIntent)
-                .setOngoing(false)             // 🚀 CRITICAL: Removes the un-swipeable state
-                .setProgress(0, 0, false)      // 🚀 CRITICAL: Removes the progress bar UI
-                .setAutoCancel(true)           // Allows it to be dismissed on tap
+                .setOngoing(false)
+                .setProgress(0, 0, false)
+                .setAutoCancel(true)
 
             notificationManager.notify(2002, builder.build())
 
             mainHandler.post {
-                Toast.makeText(this, "Received $incomingTotalFiles files from Mac", Toast.LENGTH_LONG).show()
+                Toast.makeText(
+                    this,
+                    "Received $incomingTotalFiles files from Mac",
+                    Toast.LENGTH_LONG
+                ).show()
             }
 
             sendBroadcast(Intent("AIRBRIDGE_TRANSFER_UPDATE").apply {
@@ -778,14 +850,15 @@ class AirBridgeService : Service() {
             })
 
         } else {
-            val progress = if (incomingTotalBytes > 0) ((incomingReceivedBytes.toDouble() / incomingTotalBytes) * 100).toInt() else 0
+            val progress =
+                if (incomingTotalBytes > 0) ((incomingReceivedBytes.toDouble() / incomingTotalBytes) * 100).toInt() else 0
             val elapsed = (System.currentTimeMillis() - incomingStartTime) / 1000.0
             val speedBps = if (elapsed > 0) incomingReceivedBytes / elapsed else 0.0
             val speedMb = String.format("%.1f MB/s", speedBps / (1024 * 1024))
 
             val remainingBytes = incomingTotalBytes - incomingReceivedBytes
             val etaSecs = if (speedBps > 0) (remainingBytes / speedBps).toInt() else 0
-            val etaStr = if (etaSecs > 60) "${etaSecs/60}m ${etaSecs%60}s" else "${etaSecs}s"
+            val etaStr = if (etaSecs > 60) "${etaSecs / 60}m ${etaSecs % 60}s" else "${etaSecs}s"
 
             val builder = NotificationCompat.Builder(this, "transfer_channel")
                 .setSmallIcon(android.R.drawable.stat_sys_download)
