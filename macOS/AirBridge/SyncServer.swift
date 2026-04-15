@@ -10,68 +10,80 @@ import Combine
 import UserNotifications
 
 class SyncServer: ObservableObject {
-    @Published var localIP: String = "127.0.0.1"
-    @Published var connectedClients: Int = 0
-    @Published var port: UInt16 = 0
-    @Published var macName: String = Host.current().localizedName ?? "Mac"
-    
-    private var listener: NWListener?
-    private var connections: [NWConnection] = []
-    private let connectionsLock = NSLock()
+        @Published var localIP: String = "127.0.0.1"
+        @Published var connectedClients: Int = 0
+        @Published var port: UInt16 = 0
+        @Published var macName: String = Host.current().localizedName ?? "Mac"
+        
+        private var listener: NWListener?
+        private var connections: [NWConnection] = []
+        private let connectionsLock = NSLock()
 
-    private var lastChangeCount: Int = 0
-    private var timer: Timer?
-    
-    @Published var isReceivingBatch = false
-    @Published var batchProgress: Double = 0.0
-    @Published var batchStatus: String = ""
-    @Published var batchSpeed: String = ""
-    @Published var batchETA: String = ""
-    
-    private var totalIncomingFiles: Int = 0
-    private var receivedFilesCount: Int = 0
-    private var totalBatchBytes: Int = 0
-    private var receivedBatchBytes: Int = 0
-    private var batchStartTime: Date?
-    private var lastNotifTime: Date?
-    
-    private var isReceivingFile = false
-    private var currentFileHandle: FileHandle?
-    private var currentFileName: String = ""
-    private var currentFileURL: URL?
+        private var lastChangeCount: Int = 0
+        private var timer: Timer?
+        
+        @Published var isReceivingBatch = false
+        @Published var batchProgress: Double = 0.0
+        @Published var batchStatus: String = ""
+        @Published var batchSpeed: String = ""
+        @Published var batchETA: String = ""
+        
+        private var totalIncomingFiles: Int = 0
+        private var receivedFilesCount: Int = 0
+        private var totalBatchBytes: Int = 0
+        private var receivedBatchBytes: Int = 0
+        private var batchStartTime: Date?
+        private var lastNotifTime: Date?
+        
+        private var isReceivingFile = false
+        private var currentFileHandle: FileHandle?
+        private var currentFileName: String = ""
+        private var currentFileURL: URL?
+//    File Sharing:
+        @Published var isSendingBatch = false
+        @Published var sendProgress: Double = 0.0
+        @Published var sendStatus: String = ""
     
     
     init() {
-        self.localIP = NetworkUtils.getLocalIPAddress() ?? "127.0.0.1"
-        startServer()
-        startClipboardMonitor()
-    }
+            self.localIP = NetworkUtils.getLocalIPAddress() ?? "127.0.0.1"
+            startServer()
+            startClipboardMonitor()
+            
+            CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(), nil, darwinNotificationCallback, "com.shazan.airbridge.filesReady" as CFString, nil, .deliverImmediately)
+            
+            NotificationCenter.default.addObserver(forName: Notification.Name("AirBridgeFilesReady"), object: nil, queue: .main) { [weak self] _ in
+                self?.processPendingTransfers()
+            }
+        }
     
     private func startServer() {
-        let parameters = NWParameters.tcp
-        let wsOptions = NWProtocolWebSocket.Options()
-        wsOptions.autoReplyPing = true
-        wsOptions.maximumMessageSize = 1024 * 1024 * 500
-        
-        parameters.defaultProtocolStack.applicationProtocols.insert(wsOptions, at: 0)
-        
-        do {
-            listener = try NWListener(using: parameters)
-            listener?.newConnectionHandler = { [weak self] connection in
-                self?.handleNewConnection(connection)
-            }
-            listener?.stateUpdateHandler = { [weak self] state in
-                if case .ready = state, let actualPort = self?.listener?.port?.rawValue {
-                    DispatchQueue.main.async {
-                        self?.port = actualPort
+            let parameters = NWParameters.tcp
+            let wsOptions = NWProtocolWebSocket.Options()
+            wsOptions.autoReplyPing = true
+            wsOptions.maximumMessageSize = 1024 * 1024 * 500
+            
+            parameters.defaultProtocolStack.applicationProtocols.insert(wsOptions, at: 0)
+            
+            do {
+                listener = try NWListener(using: parameters)
+                
+                // 🚀 Broadcast Mac via Bonjour/mDNS
+                listener?.service = NWListener.Service(name: self.macName, type: "_airbridge._tcp", domain: "local.")
+                
+                listener?.newConnectionHandler = { [weak self] connection in
+                    self?.handleNewConnection(connection)
+                }
+                listener?.stateUpdateHandler = { [weak self] state in
+                    if case .ready = state, let actualPort = self?.listener?.port?.rawValue {
+                        DispatchQueue.main.async { self?.port = actualPort }
                     }
                 }
+                listener?.start(queue: .global(qos: .userInitiated))
+            } catch {
+                print("Failed to start server: \(error)")
             }
-            listener?.start(queue: .global(qos: .userInitiated))
-        } catch {
-            print("Failed to start server: \(error)")
         }
-    }
     
     private func handleIncomingFile(data: Data) {
         let downloadsURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
@@ -114,10 +126,28 @@ class SyncServer: ObservableObject {
     }
     
     private func handleNewConnection(_ connection: NWConnection) {
+            // 🚀 Strict active connection tracking
+            connection.stateUpdateHandler = { [weak self] state in
+                switch state {
+                case .failed(_), .cancelled:
+                    self?.removeConnection(connection)
+                default:
+                    break
+                }
+            }
+            
             connection.start(queue: .global(qos: .userInitiated))
             
             connectionsLock.lock()
             self.connections.append(connection)
+            self.connections.removeAll {
+                switch $0.state {
+                case .cancelled, .failed(_):
+                    return true
+                default:
+                    return false
+                }
+            }
             let activeCount = self.connections.count
             connectionsLock.unlock()
             
@@ -134,9 +164,16 @@ class SyncServer: ObservableObject {
     
     private func removeConnection(_ connection: NWConnection) {
             connection.cancel()
-            
             connectionsLock.lock()
-            self.connections.removeAll(where: { $0 === connection })
+            self.connections.removeAll {
+                if $0 === connection { return true }
+                switch $0.state {
+                case .cancelled, .failed(_):
+                    return true
+                default:
+                    return false
+                }
+            }
             let activeCount = self.connections.count
             connectionsLock.unlock()
             
@@ -315,4 +352,116 @@ class SyncServer: ObservableObject {
                 connection.send(content: data, contentContext: context, isComplete: true, completion: .contentProcessed({ _ in }))
             }
         }
+    
+    //File Sharing:
+
+    func processPendingTransfers() {
+        let userHome = FileManager.default.homeDirectoryForCurrentUser
+        let containersURL = userHome.appendingPathComponent("Library/Containers")
+        
+        guard let enumerator = FileManager.default.enumerator(at: containersURL, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsSubdirectoryDescendants, .skipsHiddenFiles]) else { return }
+        
+        var validFilesToSend: [URL] = []
+        
+        for case let fileURL as URL in enumerator {
+            // 🚀 Loosen the string match so it catches ANY AirBridge container
+            if fileURL.lastPathComponent.localizedCaseInsensitiveContains("AirBridge") {
+                let testURL = fileURL.appendingPathComponent("Data/Documents/AirBridgePending")
+                
+                if let fileURLs = try? FileManager.default.contentsOfDirectory(at: testURL, includingPropertiesForKeys: [.fileSizeKey]) {
+                    let files = fileURLs.filter { !$0.lastPathComponent.hasPrefix(".") }
+                    validFilesToSend.append(contentsOf: files)
+                }
+            }
+        }
+        
+        if validFilesToSend.isEmpty {
+            DispatchQueue.main.async {
+                self.sendStatus = "Error: Pending Folder is Empty"
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { self.sendStatus = "" }
+            }
+            return
+        }
+        
+        sendFiles(urls: validFilesToSend, fromSharedDir: true)
+    }
+
+        func sendFiles(urls: [URL], fromSharedDir: Bool = false) {
+            guard connectedClients > 0 else { return }
+            
+            DispatchQueue.global(qos: .userInitiated).async {
+                let totalFiles = urls.count
+                var totalBytes: Int = 0
+                for url in urls {
+                    if let attr = try? FileManager.default.attributesOfItem(atPath: url.path), let size = attr[.size] as? Int {
+                        totalBytes += size
+                    }
+                }
+                
+                DispatchQueue.main.async {
+                    self.isSendingBatch = true
+                    self.sendProgress = 0.0
+                    self.sendStatus = "Sending \(totalFiles) file(s)..."
+                }
+                
+                self.broadcastInput(command: "BATCH_START:\(totalFiles):\(totalBytes)")
+                var sentBytes: Int = 0
+                let startTime = Date()
+                var lastUpdate = Date()
+                
+                for url in urls {
+                    let fileName = url.lastPathComponent
+                    self.broadcastInput(command: "START_FILE:\(fileName)")
+                    if let stream = InputStream(url: url) {
+                        stream.open()
+                        let bufferSize = 256 * 1024
+                        let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: bufferSize)
+                        while stream.hasBytesAvailable {
+                            let read = stream.read(buffer, maxLength: bufferSize)
+                            if read > 0 {
+                                let data = Data(bytes: buffer, count: read)
+                                self.broadcastBinary(data: data)
+                                sentBytes += read
+                                let now = Date()
+                                if now.timeIntervalSince(lastUpdate) > 0.5 {
+                                    lastUpdate = now
+                                    let speed = Double(sentBytes) / now.timeIntervalSince(startTime)
+                                    let speedStr = String(format: "%.1f MB/s", speed / (1024 * 1024))
+                                    DispatchQueue.main.async {
+                                        self.sendProgress = Double(sentBytes) / Double(totalBytes)
+                                        self.sendStatus = "\(speedStr)"
+                                    }
+                                }
+                            } else { break }
+                            Thread.sleep(forTimeInterval: 0.005)
+                        }
+                        buffer.deallocate()
+                        stream.close()
+                    }
+                    self.broadcastInput(command: "END_FILE:\(fileName)")
+                    if fromSharedDir { try? FileManager.default.removeItem(at: url) }
+                }
+                DispatchQueue.main.async {
+                    self.isSendingBatch = false
+                    self.sendStatus = "Sent Successfully!"
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) { self.sendStatus = "" }
+                }
+            }
+        }
+        
+        private func broadcastBinary(data: Data) {
+            let metadata = NWProtocolWebSocket.Metadata(opcode: .binary)
+            let context = NWConnection.ContentContext(identifier: "binaryContext", metadata: [metadata])
+            connectionsLock.lock()
+            let activeConnections = connections
+            connectionsLock.unlock()
+            for connection in activeConnections {
+                connection.send(content: data, contentContext: context, isComplete: true, completion: .contentProcessed({ _ in }))
+            }
+        }
 }
+
+func darwinNotificationCallback(center: CFNotificationCenter?, observer: UnsafeMutableRawPointer?, name: CFNotificationName?, object: UnsafeRawPointer?, userInfo: CFDictionary?) {
+    NotificationCenter.default.post(name: Notification.Name("AirBridgeFilesReady"), object: nil)
+}
+

@@ -6,11 +6,58 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		36C982E92F890C4D00A8E7CC /* AirBridgeShare.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 36C982DD2F890C4C00A8E7CC /* AirBridgeShare.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		36C982E72F890C4D00A8E7CC /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 36EC24602F7958C700DE29D1 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 36C982DC2F890C4C00A8E7CC;
+			remoteInfo = AirBridgeShare;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		36C982EE2F890C4D00A8E7CC /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				36C982E92F890C4D00A8E7CC /* AirBridgeShare.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
+		36C982DD2F890C4C00A8E7CC /* AirBridgeShare.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = AirBridgeShare.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		36EC24682F7958C700DE29D1 /* AirBridge.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AirBridge.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		36C982EA2F890C4D00A8E7CC /* Exceptions for "AirBridgeShare" folder in "AirBridgeShare" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 36C982DC2F890C4C00A8E7CC /* AirBridgeShare */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		36C982DE2F890C4D00A8E7CC /* AirBridgeShare */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				36C982EA2F890C4D00A8E7CC /* Exceptions for "AirBridgeShare" folder in "AirBridgeShare" target */,
+			);
+			path = AirBridgeShare;
+			sourceTree = "<group>";
+		};
 		36EC246A2F7958C700DE29D1 /* AirBridge */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = AirBridge;
@@ -19,6 +66,13 @@
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		36C982DA2F890C4C00A8E7CC /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		36EC24652F7958C700DE29D1 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -33,6 +87,7 @@
 			isa = PBXGroup;
 			children = (
 				36EC246A2F7958C700DE29D1 /* AirBridge */,
+				36C982DE2F890C4D00A8E7CC /* AirBridgeShare */,
 				36EC24692F7958C700DE29D1 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -41,6 +96,7 @@
 			isa = PBXGroup;
 			children = (
 				36EC24682F7958C700DE29D1 /* AirBridge.app */,
+				36C982DD2F890C4C00A8E7CC /* AirBridgeShare.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -48,6 +104,28 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		36C982DC2F890C4C00A8E7CC /* AirBridgeShare */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 36C982EB2F890C4D00A8E7CC /* Build configuration list for PBXNativeTarget "AirBridgeShare" */;
+			buildPhases = (
+				36C982D92F890C4C00A8E7CC /* Sources */,
+				36C982DA2F890C4C00A8E7CC /* Frameworks */,
+				36C982DB2F890C4C00A8E7CC /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				36C982DE2F890C4D00A8E7CC /* AirBridgeShare */,
+			);
+			name = AirBridgeShare;
+			packageProductDependencies = (
+			);
+			productName = AirBridgeShare;
+			productReference = 36C982DD2F890C4C00A8E7CC /* AirBridgeShare.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 		36EC24672F7958C700DE29D1 /* AirBridge */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 36EC24732F7958C800DE29D1 /* Build configuration list for PBXNativeTarget "AirBridge" */;
@@ -55,10 +133,12 @@
 				36EC24642F7958C700DE29D1 /* Sources */,
 				36EC24652F7958C700DE29D1 /* Frameworks */,
 				36EC24662F7958C700DE29D1 /* Resources */,
+				36C982EE2F890C4D00A8E7CC /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				36C982E82F890C4D00A8E7CC /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				36EC246A2F7958C700DE29D1 /* AirBridge */,
@@ -80,6 +160,9 @@
 				LastSwiftUpdateCheck = 2610;
 				LastUpgradeCheck = 2610;
 				TargetAttributes = {
+					36C982DC2F890C4C00A8E7CC = {
+						CreatedOnToolsVersion = 26.1.1;
+					};
 					36EC24672F7958C700DE29D1 = {
 						CreatedOnToolsVersion = 26.1.1;
 					};
@@ -100,11 +183,19 @@
 			projectRoot = "";
 			targets = (
 				36EC24672F7958C700DE29D1 /* AirBridge */,
+				36C982DC2F890C4C00A8E7CC /* AirBridgeShare */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		36C982DB2F890C4C00A8E7CC /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		36EC24662F7958C700DE29D1 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -115,6 +206,13 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		36C982D92F890C4C00A8E7CC /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		36EC24642F7958C700DE29D1 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -124,7 +222,97 @@
 		};
 /* End PBXSourcesBuildPhase section */
 
+/* Begin PBXTargetDependency section */
+		36C982E82F890C4D00A8E7CC /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 36C982DC2F890C4C00A8E7CC /* AirBridgeShare */;
+			targetProxy = 36C982E72F890C4D00A8E7CC /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
 /* Begin XCBuildConfiguration section */
+		36C982EC2F890C4D00A8E7CC /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 7BTSHV79B5;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_INCOMING_NETWORK_CONNECTIONS = NO;
+				ENABLE_OUTGOING_NETWORK_CONNECTIONS = NO;
+				ENABLE_RESOURCE_ACCESS_AUDIO_INPUT = NO;
+				ENABLE_RESOURCE_ACCESS_BLUETOOTH = NO;
+				ENABLE_RESOURCE_ACCESS_CALENDARS = NO;
+				ENABLE_RESOURCE_ACCESS_CAMERA = NO;
+				ENABLE_RESOURCE_ACCESS_CONTACTS = NO;
+				ENABLE_RESOURCE_ACCESS_LOCATION = NO;
+				ENABLE_RESOURCE_ACCESS_PRINTING = NO;
+				ENABLE_RESOURCE_ACCESS_USB = NO;
+				ENABLE_USER_SELECTED_FILES = readonly;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = AirBridgeShare/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = AirBridgeShare;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.shazan.AirBridge.AirBridgeShare;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		36C982ED2F890C4D00A8E7CC /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 7BTSHV79B5;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_INCOMING_NETWORK_CONNECTIONS = NO;
+				ENABLE_OUTGOING_NETWORK_CONNECTIONS = NO;
+				ENABLE_RESOURCE_ACCESS_AUDIO_INPUT = NO;
+				ENABLE_RESOURCE_ACCESS_BLUETOOTH = NO;
+				ENABLE_RESOURCE_ACCESS_CALENDARS = NO;
+				ENABLE_RESOURCE_ACCESS_CAMERA = NO;
+				ENABLE_RESOURCE_ACCESS_CONTACTS = NO;
+				ENABLE_RESOURCE_ACCESS_LOCATION = NO;
+				ENABLE_RESOURCE_ACCESS_PRINTING = NO;
+				ENABLE_RESOURCE_ACCESS_USB = NO;
+				ENABLE_USER_SELECTED_FILES = readonly;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = AirBridgeShare/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = AirBridgeShare;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.shazan.AirBridge.AirBridgeShare;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
 		36EC24712F7958C800DE29D1 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -250,6 +438,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = "";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
@@ -283,6 +472,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = "";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
@@ -314,6 +504,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		36C982EB2F890C4D00A8E7CC /* Build configuration list for PBXNativeTarget "AirBridgeShare" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				36C982EC2F890C4D00A8E7CC /* Debug */,
+				36C982ED2F890C4D00A8E7CC /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		36EC24632F7958C700DE29D1 /* Build configuration list for PBXProject "AirBridge" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (

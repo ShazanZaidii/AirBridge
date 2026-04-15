@@ -91,6 +91,30 @@ struct AirBridgeApp: App {
                     .padding(.top, 8)
                 }
                 
+                if server.isSendingBatch || !server.sendStatus.isEmpty {
+                                    VStack(spacing: 4) {
+                                        HStack {
+                                            Text("Sending to Phone").font(.caption).bold()
+                                            Spacer()
+                                        }
+                                        if server.isSendingBatch {
+                                            ProgressView(value: server.sendProgress)
+                                                .progressViewStyle(LinearProgressViewStyle(tint: .green))
+                                        }
+                                        Text(server.sendStatus)
+                                            .font(.caption2)
+                                            .foregroundColor(.gray)
+                                    }
+                                    .padding(.top, 8)
+                                }
+                
+//                                Button("Force Check Pending Shares") {
+//                                    server.processPendingTransfers()
+//                                }
+//                                .disabled(server.connectedClients == 0)
+
+                                
+                
                 if server.port > 0, let qrImage = generateQRCode(from: "ws://\(server.localIP):\(server.port)?name=\(server.macName.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")") {
                     Image(nsImage: qrImage)
                         .interpolation(.none)
@@ -104,6 +128,19 @@ struct AirBridgeApp: App {
                         Text("Scan to add device").font(.caption).foregroundColor(.secondary)
                     }
                 }
+                
+                Button("Send File to Phone...") {
+                    let panel = NSOpenPanel()
+                    panel.allowsMultipleSelection = true
+                    panel.canChooseDirectories = false
+                    panel.canChooseFiles = true
+                    NSApp.activate(ignoringOtherApps: true)
+                    
+                    if panel.runModal() == .OK {
+                        server.sendFiles(urls: panel.urls)
+                    }
+                }
+                .disabled(server.connectedClients == 0)
                 
                 Button("Display Arrangement...") {
                     openWindow(id: "arrangement")
