@@ -117,29 +117,40 @@ class SyncServer: ObservableObject {
         }
     
     private func handleIncomingFile(data: Data) {
-        let downloadsURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
-        let fileName = "AirBridge_Transfer_\(Int(Date().timeIntervalSince1970)).dat"
-        let fileURL = downloadsURL.appendingPathComponent(fileName)
-        
-        do {
-            try data.write(to: fileURL)
-            if let image = NSImage(data: data) {
+            let downloadsURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
+            
+            // Ensure "AirBridge Transfers" folder exists
+            let targetDir = downloadsURL.appendingPathComponent("AirBridge Transfers")
+            try? FileManager.default.createDirectory(at: targetDir, withIntermediateDirectories: true, attributes: nil)
+            
+            let fileName = "AirBridge_Transfer_\(Int(Date().timeIntervalSince1970)).dat"
+            let fileURL = targetDir.appendingPathComponent(fileName)
+            
+            do {
+                try data.write(to: fileURL)
                 DispatchQueue.main.async {
                     let pb = NSPasteboard.general
                     pb.clearContents()
-                    pb.writeObjects([image])
+                    // Copy the actual file to clipboard so it can be pasted in Finder
+                    pb.writeObjects([fileURL as NSURL])
                     self.lastChangeCount = pb.changeCount
                 }
+                triggerTransferNotification(fileName: fileName, fileURL: fileURL)
+                
+            } catch {
+                print("Failed to save file: \(error)")
             }
-            triggerTransferNotification(fileName: fileName, fileURL: fileURL)
-            
-        } catch {
-            print("Failed to save file: \(error)")
         }
-    }
-    private func handleIncomingData(_ data: Data, from connection: NWConnection) {
+
+        private func handleIncomingData(_ data: Data, from connection: NWConnection) {
             // --- 1. HANDLE TEXT & COMMANDS ---
             if let text = String(data: data, encoding: .utf8) {
+                
+                // FIX 1: Ignore input control commands so they don't overwrite the clipboard
+                if text.hasPrefix("INP:") {
+                    return
+                }
+                
                 let parts = text.components(separatedBy: ":")
                 
                 if parts[0] == "BATCH_START" && parts.count >= 3 {
@@ -160,7 +171,12 @@ class SyncServer: ObservableObject {
                 if parts[0] == "START_FILE" && parts.count >= 2 {
                     self.currentFileName = parts.dropFirst().joined(separator: ":")
                     let downloadsURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
-                    let fileURL = downloadsURL.appendingPathComponent(self.currentFileName)
+                    
+                    // FIX 2: Route incoming files to "AirBridge Transfers"
+                    let targetDir = downloadsURL.appendingPathComponent("AirBridge Transfers")
+                    try? FileManager.default.createDirectory(at: targetDir, withIntermediateDirectories: true, attributes: nil)
+                    
+                    let fileURL = targetDir.appendingPathComponent(self.currentFileName)
                     self.currentFileURL = fileURL
                     
                     FileManager.default.createFile(atPath: fileURL.path, contents: nil, attributes: nil)
@@ -186,6 +202,13 @@ class SyncServer: ObservableObject {
                         self.receivedFilesCount += 1
                         if self.receivedFilesCount >= self.totalIncomingFiles {
                             self.isReceivingBatch = false
+                            
+                            // FIX 3: Copy all received files to Mac clipboard (Ready to Cmd+V)
+                            let pb = NSPasteboard.general
+                            pb.clearContents()
+                            pb.writeObjects(self.batchReceivedURLs as [NSURL])
+                            self.lastChangeCount = pb.changeCount
+                            
                             self.triggerTransferNotification(fileName: "Batch of \(self.receivedFilesCount) files", fileURL: self.currentFileURL ?? FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0])
                             self.batchStatus = "Complete!"
                             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { self.batchStatus = "" }
@@ -194,7 +217,7 @@ class SyncServer: ObservableObject {
                     return
                 }
                 
-                // If it's plain text and not a file command, it's a clipboard sync
+                // If it's plain text and not a file/input command, it's a clipboard sync
                 DispatchQueue.main.async {
                     let pb = NSPasteboard.general
                     pb.clearContents()
@@ -407,42 +430,45 @@ class SyncServer: ObservableObject {
     }
 
     func processPendingTransfers() {
-        let userHome = FileManager.default.homeDirectoryForCurrentUser
-        let containersURL = userHome.appendingPathComponent("Library/Containers")
-        
-        guard let enumerator = FileManager.default.enumerator(at: containersURL, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsSubdirectoryDescendants, .skipsHiddenFiles]) else { return }
-        
-        var validFilesToSend: [URL] = []
-        var seenFileNames = Set<String>()
-        
-        for case let fileURL as URL in enumerator {
-            if fileURL.lastPathComponent.localizedCaseInsensitiveContains("AirBridge") {
-                let testURL = fileURL.appendingPathComponent("Data/Documents/AirBridgePending")
-                
-                if let fileURLs = try? FileManager.default.contentsOfDirectory(at: testURL, includingPropertiesForKeys: [.fileSizeKey]) {
-                    for url in fileURLs {
-                        let name = url.lastPathComponent
-                        if !name.hasPrefix(".") && !seenFileNames.contains(name) {
-                            validFilesToSend.append(url)
-                            seenFileNames.insert(name)
-                        } else if seenFileNames.contains(name) {
-                            try? FileManager.default.removeItem(at: url)
+            let userHome = FileManager.default.homeDirectoryForCurrentUser
+            let containersURL = userHome.appendingPathComponent("Library/Containers")
+            
+            guard let enumerator = FileManager.default.enumerator(at: containersURL, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsSubdirectoryDescendants, .skipsHiddenFiles]) else { return }
+            
+            var validFilesToSend: [URL] = []
+            var seenFileNames = Set<String>()
+            
+            for case let fileURL as URL in enumerator {
+                if fileURL.lastPathComponent.localizedCaseInsensitiveContains("AirBridge") {
+                    let pendingDir = fileURL.appendingPathComponent("Data/Documents/AirBridgePending")
+                    
+                    // Recursively dive into any folders to extract only the real files
+                    if let deepEnumerator = FileManager.default.enumerator(at: pendingDir, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles]) {
+                        for case let deepURL as URL in deepEnumerator {
+                            if let resourceValues = try? deepURL.resourceValues(forKeys: [.isDirectoryKey]),
+                               let isDirectory = resourceValues.isDirectory, !isDirectory {
+                                
+                                let name = deepURL.lastPathComponent
+                                if !seenFileNames.contains(name) {
+                                    validFilesToSend.append(deepURL)
+                                    seenFileNames.insert(name)
+                                }
+                            }
                         }
                     }
                 }
             }
-        }
-        
-        if validFilesToSend.isEmpty {
-            DispatchQueue.main.async {
-                self.sendStatus = "Error: Pending Folder is Empty"
-                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { self.sendStatus = "" }
+            
+            if validFilesToSend.isEmpty {
+                DispatchQueue.main.async {
+                    self.sendStatus = "Error: Pending Folder is Empty"
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 3) { self.sendStatus = "" }
+                }
+                return
             }
-            return
+            
+            sendFiles(urls: validFilesToSend, fromSharedDir: true)
         }
-        
-        sendFiles(urls: validFilesToSend, fromSharedDir: true)
-    }
 
     func sendFiles(urls: [URL], fromSharedDir: Bool = false) {
         guard connectedClients > 0 else { return }

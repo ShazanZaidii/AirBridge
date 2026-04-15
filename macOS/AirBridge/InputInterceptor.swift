@@ -24,6 +24,7 @@ class InputInterceptor {
     private var isLeftCmdDown = false
     private var isRightCmdDown = false
     private var isEscDown = false
+    private var lastVolumeTime: Date = Date.distantPast
     
     // NEW: Anchor point to forcefully trap the cursor
     private var frozenAnchor: CGPoint = .zero
@@ -199,21 +200,22 @@ class InputInterceptor {
                 if let nsEvent = NSEvent(cgEvent: event), nsEvent.subtype.rawValue == 8 {
                     let data = nsEvent.data1
                     let keyCode = (data & 0xFFFF0000) >> 16
-                    let keyState = (data & 0xFF00) >> 8
                     
-                    // 10 = Key Down, 11 = Key Auto-Repeat (Holding volume)
-                    if keyState == 10 || keyState == 11 {
-                        switch keyCode {
-                        case 0: inputQueue.async { self.syncServer?.broadcastInput(command: "INP:VOL:UP") }
-                        case 1: inputQueue.async { self.syncServer?.broadcastInput(command: "INP:VOL:DOWN") }
-                        case 7: inputQueue.async { self.syncServer?.broadcastInput(command: "INP:VOL:MUTE") }
-                        case 16: inputQueue.async { self.syncServer?.broadcastInput(command: "INP:MEDIA:PLAY_PAUSE") }
-                        case 17, 19: inputQueue.async { self.syncServer?.broadcastInput(command: "INP:MEDIA:NEXT") }
-                        case 18, 20: inputQueue.async { self.syncServer?.broadcastInput(command: "INP:MEDIA:PREV") }
-                        default: break
-                        }
-                        return nil
+                    // Debounce rapid down/up firings instead of relying on brittle keyState bits
+                    let now = Date()
+                    if now.timeIntervalSince(self.lastVolumeTime) < 0.1 { return nil }
+                    self.lastVolumeTime = now
+                    
+                    switch keyCode {
+                    case 0: inputQueue.async { self.syncServer?.broadcastInput(command: "INP:VOL:UP") }
+                    case 1: inputQueue.async { self.syncServer?.broadcastInput(command: "INP:VOL:DOWN") }
+                    case 7: inputQueue.async { self.syncServer?.broadcastInput(command: "INP:VOL:MUTE") }
+                    case 16: inputQueue.async { self.syncServer?.broadcastInput(command: "INP:MEDIA:PLAY_PAUSE") }
+                    case 17, 19: inputQueue.async { self.syncServer?.broadcastInput(command: "INP:MEDIA:NEXT") }
+                    case 18, 20: inputQueue.async { self.syncServer?.broadcastInput(command: "INP:MEDIA:PREV") }
+                    default: break
                     }
+                    return nil
                 }
             }
 
