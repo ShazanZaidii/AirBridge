@@ -19,6 +19,7 @@ import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
+import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.FrameLayout
 import android.widget.ImageView
 import kotlin.math.hypot
@@ -51,16 +52,11 @@ class AirBridgeInputService : AccessibilityService() {
     private var dragLastX = 0f
     private var dragLastY = 0f
 
-    // 🚀 NEW: Dual-Axis Fling Tracking
     @Volatile private var pendingScrollY = 0f
     @Volatile private var pendingScrollX = 0f
     @Volatile private var isScrollDispatching = false
 
-    private var isCommandDown = false
-    private var commandHandled = false
     private var notifState = 0
-
-    // 🚀 NEW: Arrow Key Debouncer
     private var lastArrowSwipeTime = 0L
 
     private var isRendering = false
@@ -81,7 +77,6 @@ class AirBridgeInputService : AccessibilityService() {
         }
     }
 
-    // Snappier hold gesture execution (250ms)
     private val longPressRunnable = Runnable {
         if (isMouseDown && !isDraggingActive) {
             isDraggingActive = true
@@ -132,6 +127,21 @@ class AirBridgeInputService : AccessibilityService() {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
         }
         windowManager?.addView(containerView, layoutParams)
+    }
+
+    private fun performCopyPaste(action: Int) {
+        // Find the text field that currently has keyboard focus
+        var node = rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+
+        // Fallback: check for general accessibility focus if no input focus is found
+        if (node == null) {
+            node = rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+        }
+
+        if (node != null) {
+            node.performAction(action)
+            node.recycle()
+        }
     }
 
     private fun handleCommand(command: String) {
@@ -203,7 +213,6 @@ class AirBridgeInputService : AccessibilityService() {
                 if ((scrollY != 0f || scrollX != 0f) && !isMouseDown) {
                     pendingScrollY += scrollY
                     pendingScrollX += scrollX
-                    // 🚀 Inertia filter ensures we don't spam overlapping horizontal/vertical ticks
                     if (!isScrollDispatching && (Math.abs(pendingScrollY) > 1.5f || Math.abs(pendingScrollX) > 1.5f)) {
                         executeNextScrollFlick()
                     }
@@ -224,46 +233,45 @@ class AirBridgeInputService : AccessibilityService() {
                     performStandardTap(cursorX, cursorY)
                 }
             }
-            // 🚀 NEW: State-managed CMD handler (Notification Panel toggling & Combo suppression)
+            // 🚀 NEW: Dedicated Left Cmd logic from Mac Payload
             "CMD" -> {
-                if (parts[2] == "DOWN") {
-                    isCommandDown = true
-                    commandHandled = false
-                } else if (parts[2] == "UP") {
-                    isCommandDown = false
-                    if (!commandHandled) {
-                        notifState = (notifState + 1) % 3
-                        when (notifState) {
-                            1 -> performGlobalAction(GLOBAL_ACTION_NOTIFICATIONS) // Tap 1
-                            2 -> performGlobalAction(GLOBAL_ACTION_QUICK_SETTINGS) // Tap 2 (Expanded)
-                            0 -> performGlobalAction(GLOBAL_ACTION_BACK) // Tap 3 (Close)
+                when (parts[2]) {
+                    "LEFT" -> {
+                        if (parts.getOrNull(3) == "UP") {
+                            notifState = (notifState + 1) % 3
+                            when (notifState) {
+                                1 -> performGlobalAction(GLOBAL_ACTION_NOTIFICATIONS)
+                                2 -> performGlobalAction(GLOBAL_ACTION_QUICK_SETTINGS)
+                                0 -> performGlobalAction(GLOBAL_ACTION_BACK)
+                            }
                         }
-                    } else {
-                        notifState = 0 // Reset state if a combo was used
                     }
-                } else if (parts[2] == "HANDLED") {
-                    // Suppresses the notification panel if Cmd was used with another key (like Space)
-                    commandHandled = true
+                    "C" -> performCopyPaste(AccessibilityNodeInfo.ACTION_COPY)
+                    "V" -> performCopyPaste(AccessibilityNodeInfo.ACTION_PASTE)
                 }
             }
             "VOL" -> {
                 mainHandler.post {
                     try {
                         val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+                        // Changed from adjustStreamVolume to adjustVolume to let OS pick the active stream
                         when (parts[2]) {
-                            "UP" -> audioManager.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_RAISE, AudioManager.FLAG_SHOW_UI)
-                            "DOWN" -> audioManager.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_LOWER, AudioManager.FLAG_SHOW_UI)
-                            "MUTE" -> audioManager.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_TOGGLE_MUTE, AudioManager.FLAG_SHOW_UI)
+                            "UP" -> audioManager.adjustVolume(AudioManager.ADJUST_RAISE, AudioManager.FLAG_SHOW_UI)
+                            "DOWN" -> audioManager.adjustVolume(AudioManager.ADJUST_LOWER, AudioManager.FLAG_SHOW_UI)
+                            "MUTE" -> audioManager.adjustVolume(AudioManager.ADJUST_TOGGLE_MUTE, AudioManager.FLAG_SHOW_UI)
                         }
                     } catch (e: Exception) {
-                        e.printStackTrace() // Catch silently if Android denies UI access
+                        e.printStackTrace()
                     }
                 }
             }
             "SYS" -> {
                 when (parts[2]) {
                     "RECENTS" -> performGlobalAction(GLOBAL_ACTION_RECENTS)
-                    "HOME" -> performGlobalAction(GLOBAL_ACTION_HOME)
+                    "HOME" -> {
+                        performGlobalAction(GLOBAL_ACTION_HOME)
+                        notifState = 0 // Reset Left Cmd state when taking user home
+                    }
                     "NOTIF" -> performGlobalAction(GLOBAL_ACTION_NOTIFICATIONS)
                     "DRAWER" -> openAppDrawerPhysicalSwipe()
                     "LAST_APP" -> {
@@ -294,11 +302,9 @@ class AirBridgeInputService : AccessibilityService() {
         dispatchGesture(GestureDescription.Builder().addStroke(stroke).build(), null, null)
     }
 
-    // 🚀 NEW: Arrow Key Directional Swipes
     private fun performDirectionalSwipe(direction: String) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
 
-        // 500ms block prevents key-repeating from machine-gunning the screen
         val now = System.currentTimeMillis()
         if (now - lastArrowSwipeTime < 500) return
         lastArrowSwipeTime = now
@@ -308,7 +314,6 @@ class AirBridgeInputService : AccessibilityService() {
         var endX = startX
         var endY = startY
 
-        // 40% of the screen size guarantees a solid, functional swipe length
         val swipeDist = min(screenWidth, screenHeight) * 0.4f
 
         when (direction) {
@@ -326,8 +331,8 @@ class AirBridgeInputService : AccessibilityService() {
     private fun openAppDrawerPhysicalSwipe() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val startX = screenWidth / 2f
-        val startY = screenHeight * 0.9f // Clean start at bottom edge
-        val endY = screenHeight * 0.1f   // Clean finish at top edge
+        val startY = screenHeight * 0.9f
+        val endY = screenHeight * 0.1f
 
         val path = Path().apply { moveTo(startX, startY); lineTo(startX, endY) }
         val stroke = GestureDescription.StrokeDescription(path, 0, 200)
@@ -401,6 +406,8 @@ class AirBridgeInputService : AccessibilityService() {
         }, null)
     }
 
+
+
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
     override fun onInterrupt() {}
     override fun onDestroy() {
@@ -408,5 +415,19 @@ class AirBridgeInputService : AccessibilityService() {
         mainHandler.removeCallbacksAndMessages(null)
         containerView?.let { windowManager?.removeView(it) }
         instance = null
+    }
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+
+        // Dynamically update the screen bounds when orientation changes
+        val metrics = DisplayMetrics()
+        @Suppress("DEPRECATION")
+        windowManager?.defaultDisplay?.getRealMetrics(metrics)
+        screenWidth = metrics.widthPixels
+        screenHeight = metrics.heightPixels
+
+        // Clamp the cursor so it doesn't get trapped outside the new screen bounds
+        cursorX = clampX(cursorX)
+        cursorY = clampY(cursorY)
     }
 }

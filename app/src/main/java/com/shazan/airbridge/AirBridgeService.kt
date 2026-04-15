@@ -5,6 +5,7 @@ import android.annotation.SuppressLint
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.Service
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -39,6 +40,7 @@ import androidx.core.app.Person
 import androidx.core.content.pm.ShortcutInfoCompat
 import androidx.core.content.pm.ShortcutManagerCompat
 import androidx.core.graphics.drawable.IconCompat
+import com.example.driftui.core.Time
 import okhttp3.*
 import okio.ByteString.Companion.toByteString
 import java.util.concurrent.ConcurrentHashMap
@@ -47,6 +49,7 @@ import kotlin.math.abs
 
 class AirBridgeService : Service() {
 
+    private var incomingFileUri: android.net.Uri? = null
     private val transferQueue = java.util.concurrent.Executors.newSingleThreadExecutor()
 
     private val activeSockets = ConcurrentHashMap<String, WebSocket>()
@@ -70,6 +73,17 @@ class AirBridgeService : Service() {
 
     private val bubbleSize = 130
     private var isHoveringClose = false
+
+    // Incoming File Tracking
+    private var isReceivingFile = false
+    private var incomingFileName = ""
+    private var incomingFileOutputStream: java.io.OutputStream? = null
+    private var incomingTotalFiles = 0
+    private var incomingFilesReceived = 0
+    private var incomingTotalBytes = 0L
+    private var incomingReceivedBytes = 0L
+    private var incomingStartTime = 0L
+    private var incomingLastUpdate = 0L
 
     companion object {
         @SuppressLint("StaticFieldLeak")
@@ -102,13 +116,20 @@ class AirBridgeService : Service() {
             return START_STICKY
         }
 
+        val prefs = getSharedPreferences("AirBridgePrefs", Context.MODE_PRIVATE)
+        val autoConnect = prefs.getBoolean("AUTO_CONNECT", true)
+
         val urls = intent?.getStringArrayListExtra("WS_URLS")
         if (urls != null) {
             savedUrls = urls.toSet()
             updateDirectShareShortcuts(savedUrls)
-            savedUrls.forEach { url ->
-                if (!activeSockets.containsKey(url)) {
-                    connectWebSocket(url)
+
+            // 🚀 Respect Auto-Pair toggle here
+            if (autoConnect) {
+                savedUrls.forEach { url ->
+                    if (!activeSockets.containsKey(url)) {
+                        connectWebSocket(url)
+                    }
                 }
             }
         }
@@ -351,7 +372,75 @@ class AirBridgeService : Service() {
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
-                // 1. Intercept Mac Inputs
+                // 1. Handle File Transfer Commands
+                if (text.startsWith("BATCH_START:")) {
+                    val parts = text.split(":")
+                    incomingTotalFiles = parts.getOrNull(1)?.toIntOrNull() ?: 1
+                    incomingTotalBytes = parts.getOrNull(2)?.toLongOrNull() ?: 0L
+                    incomingFilesReceived = 0
+                    incomingReceivedBytes = 0L
+                    incomingStartTime = System.currentTimeMillis()
+                    incomingLastUpdate = 0L
+                    updateIncomingTransferUI(false)
+                    return
+                }
+                // 1. Handle File Transfer Commands from Mac
+                if (text.startsWith("START_FILE:")) {
+                    val myDate = Time.now
+                    val customFormat = myDate.format("hh-mm a, EEEE, dd MMM yy")
+                    isReceivingFile = true
+                    val rawFileName = text.substringAfter("START_FILE:")
+                    var cleanedName = rawFileName.replace(Regex("^[A-Fa-f0-9]{6}_"), "")
+                    val ext = cleanedName.substringAfterLast(".", "dat")
+                    cleanedName = "AirBridge ${customFormat}_${System.currentTimeMillis()}.$ext"
+
+                    // Intercept macOS generic Share Extension names
+//                    if (cleanedName.startsWith("PNG image") || cleanedName.startsWith("JPEG image") || cleanedName.startsWith("SharedFile")) {
+//                        val ext = cleanedName.substringAfterLast(".", "dat")
+//                        cleanedName = "AirBridge_${System.currentTimeMillis()}.$ext"
+//                    }
+
+                    incomingFileName = cleanedName
+
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        val resolver = contentResolver
+                        val contentValues = android.content.ContentValues().apply {
+                            put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, incomingFileName)
+                            put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, android.os.Environment.DIRECTORY_DOWNLOADS + "/AirBridge")
+                            put(android.provider.MediaStore.MediaColumns.IS_PENDING, 1) // Locks file from OS indexing during transfer
+                        }
+                        incomingFileUri = resolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
+                        incomingFileOutputStream = incomingFileUri?.let { resolver.openOutputStream(it) }
+                    } else {
+                        val dir = java.io.File(android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS), "AirBridge")
+                        dir.mkdirs()
+                        val file = java.io.File(dir, incomingFileName)
+                        incomingFileOutputStream = java.io.FileOutputStream(file)
+                    }
+                    updateIncomingTransferUI(false)
+                    return
+                }
+
+                if (text.startsWith("END_FILE:")) {
+                    isReceivingFile = false
+                    try { incomingFileOutputStream?.close() } catch (e: Exception) { }
+                    incomingFileOutputStream = null
+
+                    // Unlock the file so it appears in the Gallery/Files app properly
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && incomingFileUri != null) {
+                        val contentValues = android.content.ContentValues().apply {
+                            put(android.provider.MediaStore.MediaColumns.IS_PENDING, 0)
+                        }
+                        contentResolver.update(incomingFileUri!!, contentValues, null, null)
+                        incomingFileUri = null
+                    }
+
+                    incomingFilesReceived++
+                    updateIncomingTransferUI(incomingFilesReceived >= incomingTotalFiles)
+                    return
+                }
+
+                // 2. Intercept Mac Inputs
                 if (text.startsWith("INP:")) {
                     if (AirBridgeInputService.instance == null) {
                         mainHandler.post { Toast.makeText(this@AirBridgeService, "Enable AirBridge in Android Accessibility Settings!", Toast.LENGTH_SHORT).show() }
@@ -361,7 +450,7 @@ class AirBridgeService : Service() {
                     return
                 }
 
-                // 2. Normal Clipboard text
+                // 3. Normal Clipboard text
                 if (text != lastClipboardText) {
                     isUpdatingFromMac = true
                     mainHandler.post {
@@ -369,6 +458,25 @@ class AirBridgeService : Service() {
                         clipboardManager.setPrimaryClip(clip)
                         lastClipboardText = text
                         isUpdatingFromMac = false
+                    }
+                }
+            }
+
+            // NEW: Handle Incoming Binary Data
+            override fun onMessage(webSocket: WebSocket, bytes: okio.ByteString) {
+                if (isReceivingFile) {
+                    try {
+                        incomingFileOutputStream?.write(bytes.toByteArray())
+                        incomingReceivedBytes += bytes.size
+
+                        val now = System.currentTimeMillis()
+                        // Only update UI every 500ms to prevent lagging the phone
+                        if (now - incomingLastUpdate > 500) {
+                            incomingLastUpdate = now
+                            updateIncomingTransferUI(false)
+                        }
+                    } catch (e: Exception) {
+                        Log.e("AirBridge", "Error writing binary chunk", e)
                     }
                 }
             }
@@ -388,7 +496,11 @@ class AirBridgeService : Service() {
     }
 
     private fun scheduleReconnect(url: String) {
-        if (savedUrls.contains(url)) {
+        val prefs = getSharedPreferences("AirBridgePrefs", Context.MODE_PRIVATE)
+        val autoConnect = prefs.getBoolean("AUTO_CONNECT", true)
+
+        // Only loop reconnects if the user hasn't turned off Auto-Pair
+        if (savedUrls.contains(url) && autoConnect) {
             mainHandler.postDelayed({
                 if (!activeSockets.containsKey(url)) {
                     connectWebSocket(url)
@@ -631,6 +743,68 @@ class AirBridgeService : Service() {
                 action()
             }
         })
+    }
+
+    private fun updateIncomingTransferUI(isComplete: Boolean) {
+        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel("transfer_channel", "File Transfers", NotificationManager.IMPORTANCE_LOW)
+            notificationManager.createNotificationChannel(channel)
+        }
+
+        if (isComplete) {
+            val intent = Intent(android.app.DownloadManager.ACTION_VIEW_DOWNLOADS)
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            val pendingIntent = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+
+            val builder = NotificationCompat.Builder(this, "transfer_channel")
+                .setSmallIcon(android.R.drawable.stat_sys_download_done)
+                .setContentTitle("Transfer Complete")
+                .setContentText("Received $incomingTotalFiles file(s) from Mac.")
+                .setContentIntent(pendingIntent)
+                .setOngoing(false)             // 🚀 CRITICAL: Removes the un-swipeable state
+                .setProgress(0, 0, false)      // 🚀 CRITICAL: Removes the progress bar UI
+                .setAutoCancel(true)           // Allows it to be dismissed on tap
+
+            notificationManager.notify(2002, builder.build())
+
+            mainHandler.post {
+                Toast.makeText(this, "Received $incomingTotalFiles files from Mac", Toast.LENGTH_LONG).show()
+            }
+
+            sendBroadcast(Intent("AIRBRIDGE_TRANSFER_UPDATE").apply {
+                putExtra("isComplete", true)
+            })
+
+        } else {
+            val progress = if (incomingTotalBytes > 0) ((incomingReceivedBytes.toDouble() / incomingTotalBytes) * 100).toInt() else 0
+            val elapsed = (System.currentTimeMillis() - incomingStartTime) / 1000.0
+            val speedBps = if (elapsed > 0) incomingReceivedBytes / elapsed else 0.0
+            val speedMb = String.format("%.1f MB/s", speedBps / (1024 * 1024))
+
+            val remainingBytes = incomingTotalBytes - incomingReceivedBytes
+            val etaSecs = if (speedBps > 0) (remainingBytes / speedBps).toInt() else 0
+            val etaStr = if (etaSecs > 60) "${etaSecs/60}m ${etaSecs%60}s" else "${etaSecs}s"
+
+            val builder = NotificationCompat.Builder(this, "transfer_channel")
+                .setSmallIcon(android.R.drawable.stat_sys_download)
+                .setContentTitle("Receiving from Mac: $incomingFileName")
+                .setContentText("$incomingFilesReceived / $incomingTotalFiles files ($speedMb)")
+                .setProgress(100, progress, false)
+                .setOngoing(true)
+
+            notificationManager.notify(2002, builder.build())
+
+            sendBroadcast(Intent("AIRBRIDGE_TRANSFER_UPDATE").apply {
+                putExtra("isComplete", false)
+                putExtra("currentFiles", incomingFilesReceived)
+                putExtra("totalFiles", incomingTotalFiles)
+                putExtra("speed", speedMb)
+                putExtra("eta", etaStr)
+                putExtra("progress", progress / 100f)
+            })
+        }
     }
 
     override fun onDestroy() {
