@@ -431,9 +431,10 @@ class AirBridgeService : Service() {
                                 android.provider.MediaStore.MediaColumns.DISPLAY_NAME,
                                 incomingFileName
                             )
+                            // Updated path to match the Mac side
                             put(
                                 android.provider.MediaStore.MediaColumns.RELATIVE_PATH,
-                                android.os.Environment.DIRECTORY_DOWNLOADS + "/AirBridge"
+                                android.os.Environment.DIRECTORY_DOWNLOADS + "/AirBridge Transfers"
                             )
                             put(android.provider.MediaStore.MediaColumns.IS_PENDING, 1)
                         }
@@ -444,9 +445,10 @@ class AirBridgeService : Service() {
                         incomingFileOutputStream =
                             incomingFileUri?.let { resolver.openOutputStream(it) }
                     } else {
+                        // Updated path for pre-Android 10 devices
                         val dir = java.io.File(
                             android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS),
-                            "AirBridge"
+                            "AirBridge Transfers"
                         )
                         dir.mkdirs()
                         val file = java.io.File(dir, incomingFileName)
@@ -524,14 +526,45 @@ class AirBridgeService : Service() {
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                activeSockets.remove(url)
-                broadcastConnectionState()
-                scheduleReconnect(url)
+                handleDisconnect(url)
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                handleDisconnect(url)
+            }
+
+            private fun handleDisconnect(url: String) {
                 activeSockets.remove(url)
                 broadcastConnectionState()
+
+                // Clear the stuck UI if the socket drops during a transfer
+                if (isReceivingFile) {
+                    isReceivingFile = false
+                    try {
+                        incomingFileOutputStream?.close()
+                    } catch (e: Exception) {
+                    }
+                    incomingFileOutputStream = null
+
+                    val notificationManager =
+                        getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                    notificationManager.cancel(2002) // Force dismiss the progress bar
+
+                    mainHandler.post {
+                        Toast.makeText(
+                            this@AirBridgeService,
+                            "Transfer interrupted (Mac disconnected)",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
+                    sendBroadcast(Intent("AIRBRIDGE_TRANSFER_UPDATE").apply {
+                        putExtra(
+                            "isComplete",
+                            true
+                        )
+                    })
+                }
+
                 scheduleReconnect(url)
             }
         })
@@ -592,6 +625,7 @@ class AirBridgeService : Service() {
         intent.putStringArrayListExtra("ACTIVE_URLS", ArrayList(getActiveUrls()))
         sendBroadcast(intent)
     }
+
     private fun createNotification(): Notification {
         val channelId = "AirBridgeChannel"
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
