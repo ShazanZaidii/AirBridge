@@ -6,13 +6,14 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.net.Uri
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
-import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -41,12 +42,22 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import java.util.concurrent.Executors
+
+// Issue 7 Fix: Setup VPN check on launch
+fun isVpnActive(context: Context): Boolean {
+    val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+        val activeNetwork = connectivityManager.activeNetwork ?: return false
+        val caps = connectivityManager.getNetworkCapabilities(activeNetwork) ?: return false
+        return caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
+    }
+    return false
+}
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -73,6 +84,7 @@ fun AirBridgeApp() {
     var autoPairEnabled by remember { mutableStateOf(prefs.getBoolean("AUTO_CONNECT", true)) }
 
     var currentScreen by remember { mutableStateOf(if (connectedUrls.isEmpty()) "DISCOVERY" else "CONNECTED") }
+    var showVpnWarning by remember { mutableStateOf(isVpnActive(context)) }
 
     val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { p ->
         hasCameraPermission = p[Manifest.permission.CAMERA] == true
@@ -96,6 +108,18 @@ fun AirBridgeApp() {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(intent)
             else context.startService(intent)
         }
+    }
+
+    // Issue 7 Fix: Inject VPN Warning dialog
+    if (showVpnWarning) {
+        AlertDialog(
+            onDismissRequest = { showVpnWarning = false },
+            title = { Text("VPN Detected") },
+            text = { Text("You have a VPN active. AirBridge uses local network connections and may not work correctly unless your VPN allows local network access (split tunneling).") },
+            confirmButton = {
+                TextButton(onClick = { showVpnWarning = false }) { Text("I Understand") }
+            }
+        )
     }
 
     if (!hasOverlayPermission) {
@@ -133,7 +157,14 @@ fun AirBridgeApp() {
             )
             "DISCOVERY" -> DiscoveryScreen(
                 onDevicePaired = { url ->
-                    val newUrls = connectedUrls + url
+                    val newMacName = Uri.parse(url).getQueryParameter("name") ?: "Mac"
+
+                    // Filter out any ghost devices with the same Mac name
+                    val filteredUrls = connectedUrls.filterNot {
+                        Uri.parse(it).getQueryParameter("name") == newMacName
+                    }.toSet()
+
+                    val newUrls = filteredUrls + url
                     prefs.edit().putStringSet("WS_URLS", newUrls).apply()
                     connectedUrls = newUrls
                     currentScreen = "CONNECTED"
@@ -147,7 +178,14 @@ fun AirBridgeApp() {
                     CameraScannerScreen(
                         onCancel = { currentScreen = "DISCOVERY" },
                         onUrlScanned = { url ->
-                            val newUrls = connectedUrls + url
+                            val newMacName = Uri.parse(url).getQueryParameter("name") ?: "Mac"
+
+                            // Filter out any ghost devices with the same Mac name
+                            val filteredUrls = connectedUrls.filterNot {
+                                Uri.parse(it).getQueryParameter("name") == newMacName
+                            }.toSet()
+
+                            val newUrls = filteredUrls + url
                             prefs.edit().putStringSet("WS_URLS", newUrls).apply()
                             connectedUrls = newUrls
                             currentScreen = "CONNECTED"
@@ -237,7 +275,9 @@ fun DiscoveryScreen(onDevicePaired: (String) -> Unit, onCancel: () -> Unit, onOp
 @Composable
 fun ConnectedScreen(urls: Set<String>, autoPairEnabled: Boolean, onAutoPairChange: (Boolean) -> Unit, onAddDevice: () -> Unit, onRemoveDevice: (String) -> Unit) {
     val context = LocalContext.current
-    var isLive by remember { mutableStateOf(true) }
+
+    var activeMacs by remember { mutableStateOf(AirBridgeService.getActiveUrls()) }
+    var isMouseControlEnabled by remember { mutableStateOf(AirBridgeInputService.instance != null) }
 
     var transferCurrentFiles by remember { mutableStateOf(0) }
     var transferTotalFiles by remember { mutableStateOf(0) }
@@ -245,16 +285,29 @@ fun ConnectedScreen(urls: Set<String>, autoPairEnabled: Boolean, onAutoPairChang
     var transferEta by remember { mutableStateOf("") }
     var transferProgress by remember { mutableStateOf(0f) }
 
+    // Bulletproof polling loop to ensure UI never gets stuck
+    LaunchedEffect(Unit) {
+        while(true) {
+            isMouseControlEnabled = AirBridgeInputService.instance != null
+            val liveUrls = AirBridgeService.getActiveUrls()
+            if (activeMacs != liveUrls) {
+                activeMacs = liveUrls
+            }
+            kotlinx.coroutines.delay(1000)
+        }
+    }
+
     DisposableEffect(context) {
         val stateReceiver = object : BroadcastReceiver() {
             override fun onReceive(c: Context?, intent: Intent?) {
                 when (intent?.action) {
                     "AIRBRIDGE_STATE_UPDATE" -> {
-                        isLive = intent.getBooleanExtra("isConnected", false)
+                        val activeList = intent.getStringArrayListExtra("ACTIVE_URLS") ?: arrayListOf()
+                        activeMacs = activeList.toSet()
                     }
                     "AIRBRIDGE_TRANSFER_UPDATE" -> {
                         if (intent.getBooleanExtra("isComplete", false)) {
-                            transferTotalFiles = 0 // Hides the progress bar
+                            transferTotalFiles = 0
                         } else {
                             transferCurrentFiles = intent.getIntExtra("currentFiles", 0)
                             transferTotalFiles = intent.getIntExtra("totalFiles", 0)
@@ -269,7 +322,7 @@ fun ConnectedScreen(urls: Set<String>, autoPairEnabled: Boolean, onAutoPairChang
 
         val filter = IntentFilter().apply {
             addAction("AIRBRIDGE_STATE_UPDATE")
-            addAction("AIRBRIDGE_TRANSFER_UPDATE") // Listen for the new transfer intents
+            addAction("AIRBRIDGE_TRANSFER_UPDATE")
         }
 
         ContextCompat.registerReceiver(context, stateReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
@@ -283,6 +336,10 @@ fun ConnectedScreen(urls: Set<String>, autoPairEnabled: Boolean, onAutoPairChang
             val uri = Uri.parse(url)
             val rawName = uri.getQueryParameter("name") ?: "Mac"
 
+            // Match Base URL only (IP:Port) to avoid query parameter encoding mismatches
+            val baseUrl = url.substringBefore("?")
+            val isLive = activeMacs.any { it.startsWith(baseUrl) }
+
             Card(
                 shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(containerColor = Color(0xFF2C2C2C)),
@@ -291,7 +348,7 @@ fun ConnectedScreen(urls: Set<String>, autoPairEnabled: Boolean, onAutoPairChang
                 Row(modifier = Modifier.padding(20.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(rawName, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                        Text(if (isLive) "   Active" else "⚠️ Disconnected", color = if (isLive) Color.Green else Color.Yellow, fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 4.dp))
+                        Text(if (isLive) "🟢 Active" else "⚠️ Disconnected", color = if (isLive) Color.Green else Color.Yellow, fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 4.dp))
                     }
                     IconButton(onClick = { onRemoveDevice(url) }) { Icon(Icons.Default.Delete, contentDescription = "Remove", tint = Color.Red.copy(alpha = 0.8f)) }
                 }
@@ -317,10 +374,25 @@ fun ConnectedScreen(urls: Set<String>, autoPairEnabled: Boolean, onAutoPairChang
             Spacer(modifier = Modifier.width(8.dp))
             Text("Add another Mac", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
         }
+
+        if (!isMouseControlEnabled) {
+            Spacer(modifier = Modifier.height(16.dp))
+            Button(
+                onClick = {
+                    val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+                    intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                    context.startActivity(intent)
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF333333)),
+                modifier = Modifier.fillMaxWidth().height(56.dp),
+                shape = RoundedCornerShape(16.dp)
+            ) {
+                Text("Enable Mouse Control (Accessibility)", color = Color(0xFFFFB74D), fontSize = 15.sp, fontWeight = FontWeight.Bold)
+            }
+        }
     }
 }
 
-// ... Keep CameraScannerScreen exact same as your current file ...
 @Composable
 fun CameraScannerScreen(onCancel: () -> Unit, onUrlScanned: (String) -> Unit) {
     val context = LocalContext.current
