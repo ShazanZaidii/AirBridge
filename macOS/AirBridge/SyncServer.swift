@@ -87,8 +87,7 @@ class SyncServer: ObservableObject {
             }
         }
 
-        private func handleNewConnection(_ connection: NWConnection) {
-            // Extract only the IP address (host) to prevent duplicate port connections
+    private func handleNewConnection(_ connection: NWConnection) {
             guard case .hostPort(let host, _) = connection.endpoint else {
                 connection.cancel()
                 return
@@ -104,15 +103,15 @@ class SyncServer: ObservableObject {
                 }
             }
             
-            connection.start(queue: .global(qos: .userInitiated))
-            
             connectionsLock.lock()
+            // Kill any ghost connection from this exact IP before starting the new one
             if let existing = connectionDict[clientId] {
                 existing.cancel()
             }
             connectionDict[clientId] = connection
             connectionsLock.unlock()
             
+            connection.start(queue: .global(qos: .userInitiated))
             updateConnectionUI()
             receive(on: connection, id: clientId)
         }
@@ -138,6 +137,105 @@ class SyncServer: ObservableObject {
             print("Failed to save file: \(error)")
         }
     }
+    private func handleIncomingData(_ data: Data, from connection: NWConnection) {
+            // --- 1. HANDLE TEXT & COMMANDS ---
+            if let text = String(data: data, encoding: .utf8) {
+                let parts = text.components(separatedBy: ":")
+                
+                if parts[0] == "BATCH_START" && parts.count >= 3 {
+                    DispatchQueue.main.async {
+                        self.isReceivingBatch = true
+                        self.totalIncomingFiles = Int(parts[1]) ?? 0
+                        self.totalBatchBytes = Int(parts[2]) ?? 0
+                        self.receivedFilesCount = 0
+                        self.receivedBatchBytes = 0
+                        self.batchProgress = 0.0
+                        self.batchStartTime = Date()
+                        self.batchReceivedURLs.removeAll()
+                        self.updateProgressNotification(total: self.totalIncomingFiles)
+                    }
+                    return
+                }
+                
+                if parts[0] == "START_FILE" && parts.count >= 2 {
+                    self.currentFileName = parts.dropFirst().joined(separator: ":")
+                    let downloadsURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
+                    let fileURL = downloadsURL.appendingPathComponent(self.currentFileName)
+                    self.currentFileURL = fileURL
+                    
+                    FileManager.default.createFile(atPath: fileURL.path, contents: nil, attributes: nil)
+                    self.currentFileHandle = try? FileHandle(forWritingTo: fileURL)
+                    self.isReceivingFile = true
+                    
+                    DispatchQueue.main.async {
+                        self.batchStatus = "Receiving: \(self.currentFileName)"
+                    }
+                    return
+                }
+                
+                if parts[0] == "END_FILE" {
+                    self.currentFileHandle?.closeFile()
+                    self.currentFileHandle = nil
+                    self.isReceivingFile = false
+                    
+                    if let url = self.currentFileURL {
+                        self.batchReceivedURLs.append(url)
+                    }
+                    
+                    DispatchQueue.main.async {
+                        self.receivedFilesCount += 1
+                        if self.receivedFilesCount >= self.totalIncomingFiles {
+                            self.isReceivingBatch = false
+                            self.triggerTransferNotification(fileName: "Batch of \(self.receivedFilesCount) files", fileURL: self.currentFileURL ?? FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0])
+                            self.batchStatus = "Complete!"
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { self.batchStatus = "" }
+                        }
+                    }
+                    return
+                }
+                
+                // If it's plain text and not a file command, it's a clipboard sync
+                DispatchQueue.main.async {
+                    let pb = NSPasteboard.general
+                    pb.clearContents()
+                    pb.setString(text, forType: .string)
+                    self.lastChangeCount = pb.changeCount
+                }
+                return
+            }
+            
+            // --- 2. HANDLE BINARY DATA (FILE CHUNKS) ---
+            if isReceivingFile {
+                if #available(macOS 10.15.4, *) {
+                    let _ = try? currentFileHandle?.seekToEnd()
+                } else {
+                    currentFileHandle?.seekToEndOfFile()
+                }
+                currentFileHandle?.write(data)
+                
+                DispatchQueue.main.async {
+                    self.receivedBatchBytes += data.count
+                    if self.totalBatchBytes > 0 {
+                        self.batchProgress = Double(self.receivedBatchBytes) / Double(self.totalBatchBytes)
+                    }
+                    
+                    if let startTime = self.batchStartTime {
+                        let elapsed = Date().timeIntervalSince(startTime)
+                        if elapsed > 0.5 {
+                            let speed = Double(self.receivedBatchBytes) / elapsed
+                            self.batchSpeed = String(format: "%.1f MB/s", speed / (1024 * 1024))
+                            
+                            let remainingBytes = Double(self.totalBatchBytes - self.receivedBatchBytes)
+                            let etaSeconds = speed > 0 ? remainingBytes / speed : 0
+                            self.batchETA = self.formatETA(seconds: etaSeconds)
+                        }
+                    }
+                }
+            } else {
+                // Fallback for direct binary paste (e.g., copied images)
+                handleIncomingFile(data: data)
+            }
+        }
     
     private func triggerTransferNotification(fileName: String, fileURL: URL) {
         let content = UNMutableNotificationContent()
@@ -156,19 +254,38 @@ class SyncServer: ObservableObject {
         let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
         UNUserNotificationCenter.current().add(request)
     }
-
+    
 
     private func removeConnection(id: String) {
-        connectionsLock.lock()
-        connectionDict[id]?.cancel()
-        connectionDict.removeValue(forKey: id)
-        connectionsLock.unlock()
-        updateConnectionUI()
-    }
+            connectionsLock.lock()
+            if let conn = connectionDict.removeValue(forKey: id) {
+                conn.cancel() // Explicitly terminate the dead socket
+            }
+            connectionsLock.unlock()
+            updateConnectionUI()
+            
+            DispatchQueue.main.async {
+                if self.connectedClients == 0 {
+                    InputInterceptor.shared.forceReturnToMac()
+                }
+            }
+        }
 
     func disconnect(id: String) {
         removeConnection(id: id)
     }
+    
+    func stopServer() {
+            listener?.cancel()
+            listener = nil
+            
+            connectionsLock.lock()
+            for (_, conn) in connectionDict {
+                conn.cancel()
+            }
+            connectionDict.removeAll()
+            connectionsLock.unlock()
+        }
 
     private func updateConnectionUI() {
         connectionsLock.lock()
@@ -252,123 +369,28 @@ class SyncServer: ObservableObject {
         UNUserNotificationCenter.current().add(request)
     }
 
-    private func receive(on connection: NWConnection, id: String) {
-        connection.receiveMessage { [weak self] (content, context, isComplete, error) in
-            guard let self = self else { return }
-            
-            if error != nil {
-                self.removeConnection(id: id)
-                return
-            }
-            
-            if let metadata = context?.protocolMetadata(definition: NWProtocolWebSocket.definition) as? NWProtocolWebSocket.Metadata {
-                if metadata.opcode == .text, let data = content, let text = String(data: data, encoding: .utf8) {
-                    
-                    if text.hasPrefix("BATCH_START:") {
-                        let components = text.replacingOccurrences(of: "BATCH_START:", with: "").components(separatedBy: ":")
-                        self.totalIncomingFiles = Int(components.first ?? "1") ?? 1
-                        self.totalBatchBytes = components.count > 1 ? (Int(components[1]) ?? 0) : 0
-                        
-                        self.receivedFilesCount = 0
-                        self.receivedBatchBytes = 0
-                        self.batchReceivedURLs.removeAll()
-                        self.batchStartTime = Date()
-                        self.lastNotifTime = Date()
-                        
-                        DispatchQueue.main.async {
-                            self.isReceivingBatch = true
-                            self.batchProgress = 0.0
-                            self.batchStatus = "Receiving 0 of \(self.totalIncomingFiles)"
-                            self.batchSpeed = "Calculating..."
-                            self.batchETA = "..."
-                            self.updateProgressNotification(total: self.totalIncomingFiles)
-                        }
-                    } else if text.hasPrefix("START_FILE:") {
-                        self.isReceivingFile = true
-                        self.currentFileName = String(text.dropFirst("START_FILE:".count))
-                        
-                        let downloadsURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
-                        let airBridgeDir = downloadsURL.appendingPathComponent("AirBridge Transfers")
-                        try? FileManager.default.createDirectory(at: airBridgeDir, withIntermediateDirectories: true)
-                        
-                        self.currentFileURL = airBridgeDir.appendingPathComponent(self.currentFileName)
-                        
-                        if let fileURL = self.currentFileURL {
-                            FileManager.default.createFile(atPath: fileURL.path, contents: nil, attributes: nil)
-                            self.currentFileHandle = try? FileHandle(forWritingTo: fileURL)
-                        }
-                    } else if text.hasPrefix("END_FILE:") {
-                        self.isReceivingFile = false
-                        self.currentFileHandle?.closeFile()
-                        self.currentFileHandle = nil
-                        self.receivedFilesCount += 1
-                        
-                        if let fileURL = self.currentFileURL {
-                            self.batchReceivedURLs.append(fileURL)
-                        }
-                        
-                        DispatchQueue.main.async {
-                            self.batchStatus = "Receiving \(self.receivedFilesCount) of \(self.totalIncomingFiles)"
-                            
-                            if self.receivedFilesCount >= self.totalIncomingFiles {
-                                let pb = NSPasteboard.general
-                                pb.clearContents()
-                                pb.writeObjects(self.batchReceivedURLs as [NSURL])
-                                self.lastChangeCount = pb.changeCount
-                                
-                                self.isReceivingBatch = false
-                                UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [self.progressNotificationID])
-                                self.triggerTransferNotification(fileName: "\(self.totalIncomingFiles) files", fileURL: self.currentFileURL!)
-                            }
-                        }
-                    } else if text == "INP:TRANSITION:MAC" {
-                        InputInterceptor.shared.forceReturnToMac()
-                   } else if text.hasPrefix("INP:") {
-                        // Ignore other input commands
-                   } else {
-                        DispatchQueue.main.async {
-                            let pb = NSPasteboard.general
-                            pb.clearContents()
-                            pb.setString(text, forType: .string)
-                            self.lastChangeCount = pb.changeCount
-                        }
-                    }
-                    
-                } else if metadata.opcode == .binary, let data = content {
-                    if self.isReceivingFile {
-                        if #available(macOS 10.15.4, *) {
-                           _ = try? self.currentFileHandle?.seekToEnd()
-                        } else {
-                            self.currentFileHandle?.seekToEndOfFile()
-                        }
-                        self.currentFileHandle?.write(data)
-                        
-                        self.receivedBatchBytes += data.count
-                        let now = Date()
-                        if let startTime = self.batchStartTime, now.timeIntervalSince(self.lastNotifTime ?? startTime) > 1.0 {
-                            self.lastNotifTime = now
-                            let elapsed = now.timeIntervalSince(startTime)
-                            let speed = Double(self.receivedBatchBytes) / elapsed
-                            let remainingBytes = Double(self.totalBatchBytes - self.receivedBatchBytes)
-                            let etaSeconds = speed > 0 ? remainingBytes / speed : 0
-                            
-                            let speedStr = String(format: "%.1f MB/s", speed / (1024 * 1024))
-                            let etaStr = self.formatETA(seconds: etaSeconds)
-                            
-                            DispatchQueue.main.async {
-                                self.batchProgress = self.totalBatchBytes > 0 ? Double(self.receivedBatchBytes) / Double(self.totalBatchBytes) : 0
-                                self.batchSpeed = speedStr
-                                self.batchETA = etaStr
-                            }
-                        }
-                    } else {
-                        self.handleIncomingFile(data: data)
-                    }
+     private func receive(on connection: NWConnection, id: String) {
+            connection.receiveMessage { [weak self] (content, context, isComplete, error) in
+                // BUG FIX: Stop the read loop immediately if the socket errors out
+                if let _ = error {
+                    self?.removeConnection(id: id)
+                    return
+                }
+                
+                if let data = content, !data.isEmpty {
+                    self?.handleIncomingData(data, from: connection)
+                }
+                
+                // Only queue the next receive if this connection is still officially active
+                self?.connectionsLock.lock()
+                let isActive = self?.connectionDict[id] != nil
+                self?.connectionsLock.unlock()
+                
+                if isActive {
+                    self?.receive(on: connection, id: id)
                 }
             }
-            self.receive(on: connection, id: id)
         }
-    }
     
     func broadcastInput(command: String) {
         guard let data = command.data(using: .utf8) else { return }

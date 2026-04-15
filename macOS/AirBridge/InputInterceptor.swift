@@ -18,14 +18,15 @@ class InputInterceptor {
     private let inputQueue = DispatchQueue(label: "com.airbridge.input", qos: .userInteractive)
     
     private var lastSystemSwipeTime: Date = Date.distantPast
-    
-    // ADDED: Cooldown tracker to prevent warp-bouncing
     private var lastTransitionTime: Date = Date.distantPast
     
     private var commandHandled = false
     private var isLeftCmdDown = false
     private var isRightCmdDown = false
     private var isEscDown = false
+    
+    // NEW: Anchor point to forcefully trap the cursor
+    private var frozenAnchor: CGPoint = .zero
     
     private var swipeMonitorLocal: Any?
     private var swipeMonitorGlobal: Any?
@@ -57,7 +58,7 @@ class InputInterceptor {
                         (1 << CGEventType.keyDown.rawValue) |
                         (1 << CGEventType.keyUp.rawValue) |
                         (1 << CGEventType.flagsChanged.rawValue) |
-                        (1 << 14)
+                        (1 << 14) // System Defined (Media/Volume)
         
         let callback: CGEventTapCallBack = { (proxy, type, event, refcon) in
             let interceptor = Unmanaged<InputInterceptor>.fromOpaque(refcon!).takeUnretainedValue()
@@ -101,8 +102,10 @@ class InputInterceptor {
             if !self.isCursorOnPhone { return }
             self.isCursorOnPhone = false
             
+            // Re-enable native cursor behavior safely
             CGAssociateMouseAndMouseCursorPosition(1)
-            DispatchQueue.main.async { NSCursor.unhide() }
+            CGDisplayShowCursor(CGMainDisplayID())
+            NSCursor.unhide()
             
             let screenBounds = CGDisplayBounds(CGMainDisplayID())
             var returnPoint = CGEvent(source: nil)?.location ?? CGPoint(x: screenBounds.midX, y: screenBounds.midY)
@@ -125,6 +128,11 @@ class InputInterceptor {
     }
     
     private func handleEvent(event: CGEvent, type: CGEventType) -> Unmanaged<CGEvent>? {
+        if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+            if let tap = self.eventTap { CGEvent.tapEnable(tap: tap, enable: true) }
+            return nil
+        }
+        
         let screenBounds = CGDisplayBounds(CGMainDisplayID())
         let location = event.location
         
@@ -141,15 +149,17 @@ class InputInterceptor {
             
             if hitPortal && (syncServer?.connectedClients ?? 0) > 0 {
                 isCursorOnPhone = true
-                
-                // Track the exact moment of transition to ignore warp deltas
                 lastTransitionTime = Date()
+                frozenAnchor = location // Trap anchor
                 
-                // Warp cursor to absolute bottom-right corner to hide it, then detach hardware mouse
-                let hiddenPoint = CGPoint(x: screenBounds.maxX, y: screenBounds.maxY)
-                CGWarpMouseCursorPosition(hiddenPoint)
+                // Explicitly break association and heavily enforce hiding synchronously
                 CGAssociateMouseAndMouseCursorPosition(0)
-                DispatchQueue.main.async { NSCursor.hide() }
+                CGDisplayHideCursor(CGMainDisplayID())
+                
+                DispatchQueue.main.async {
+                    NSCursor.arrow.set() // Kill I-Beam text cursor states
+                    NSCursor.hide()
+                }
                 
                 let relX: CGFloat
                 let relY: CGFloat
@@ -170,16 +180,39 @@ class InputInterceptor {
             }
             return Unmanaged.passRetained(event)
         } else {
+            
+            // --- BUG FIX: Enforce Cursor Death ---
+            // macOS text fields heavily attempt to restore cursor association
+            // when typing occurs. We continuously sever the hardware link.
+            CGAssociateMouseAndMouseCursorPosition(0)
+            
+            if type == .mouseMoved || type == .leftMouseDragged || type == .rightMouseDragged {
+                // If the OS bypassed dissociation, nail the cursor back to the frozen anchor
+                if abs(location.x - frozenAnchor.x) > 5 || abs(location.y - frozenAnchor.y) > 5 {
+                    CGWarpMouseCursorPosition(frozenAnchor)
+                }
+            }
+            // -------------------------------------
+            
+            // SYSTEM DEFINED KEYS (Media/Volume)
             if type.rawValue == 14 {
                 if let nsEvent = NSEvent(cgEvent: event), nsEvent.subtype.rawValue == 8 {
                     let data = nsEvent.data1
                     let keyCode = (data & 0xFFFF0000) >> 16
                     let keyState = (data & 0xFF00) >> 8
                     
-                    if keyState == 10 {
-                        if keyCode == 0 { inputQueue.async { self.syncServer?.broadcastInput(command: "INP:VOL:UP") }; return nil }
-                        else if keyCode == 1 { inputQueue.async { self.syncServer?.broadcastInput(command: "INP:VOL:DOWN") }; return nil }
-                        else if keyCode == 7 { inputQueue.async { self.syncServer?.broadcastInput(command: "INP:VOL:MUTE") }; return nil }
+                    // 10 = Key Down, 11 = Key Auto-Repeat (Holding volume)
+                    if keyState == 10 || keyState == 11 {
+                        switch keyCode {
+                        case 0: inputQueue.async { self.syncServer?.broadcastInput(command: "INP:VOL:UP") }
+                        case 1: inputQueue.async { self.syncServer?.broadcastInput(command: "INP:VOL:DOWN") }
+                        case 7: inputQueue.async { self.syncServer?.broadcastInput(command: "INP:VOL:MUTE") }
+                        case 16: inputQueue.async { self.syncServer?.broadcastInput(command: "INP:MEDIA:PLAY_PAUSE") }
+                        case 17, 19: inputQueue.async { self.syncServer?.broadcastInput(command: "INP:MEDIA:NEXT") }
+                        case 18, 20: inputQueue.async { self.syncServer?.broadcastInput(command: "INP:MEDIA:PREV") }
+                        default: break
+                        }
+                        return nil
                     }
                 }
             }
@@ -189,11 +222,7 @@ class InputInterceptor {
                 let dx = event.getIntegerValueField(.mouseEventDeltaX)
                 let dy = event.getIntegerValueField(.mouseEventDeltaY)
                 
-                // CRITICAL FIX: Ignore massive synthetic deltas caused by CGWarpMouseCursorPosition
-                // and give a 100ms cooldown so the warp doesn't instantly trigger the escape velocity.
-                if abs(dx) > 500 || abs(dy) > 500 || Date().timeIntervalSince(lastTransitionTime) < 0.1 {
-                    return nil
-                }
+                if Date().timeIntervalSince(lastTransitionTime) < 0.1 { return nil }
                 
                 var escapeTriggered = false
                 let escapeVelocity: Int64 = 60
@@ -251,6 +280,13 @@ class InputInterceptor {
                     if !isRepeat { inputQueue.async { self.syncServer?.broadcastInput(command: "INP:DRAG") } }
                     return nil
                 }
+                
+                if keycode == 103 { inputQueue.async { self.syncServer?.broadcastInput(command: "INP:VOL:DOWN") }; return nil }
+                if keycode == 111 { inputQueue.async { self.syncServer?.broadcastInput(command: "INP:VOL:UP") }; return nil }
+                if keycode == 109 { inputQueue.async { self.syncServer?.broadcastInput(command: "INP:VOL:MUTE") }; return nil }
+                if keycode == 98 { inputQueue.async { self.syncServer?.broadcastInput(command: "INP:MEDIA:PREV") }; return nil }
+                if keycode == 100 { inputQueue.async { self.syncServer?.broadcastInput(command: "INP:MEDIA:PLAY_PAUSE") }; return nil }
+                if keycode == 101 { inputQueue.async { self.syncServer?.broadcastInput(command: "INP:MEDIA:NEXT") }; return nil }
                 
                 if flags.contains(.maskCommand) {
                     commandHandled = true

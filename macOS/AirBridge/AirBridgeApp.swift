@@ -170,7 +170,10 @@ struct AirBridgeApp: App {
                 }
                 
                 Divider()
-                Button("Quit") { NSApplication.shared.terminate(nil) }.keyboardShortcut("q")
+                Button("Quit") {
+                    server.stopServer()
+                    NSApplication.shared.terminate(nil)
+                }.keyboardShortcut("q")
             }
             .padding()
             .frame(width: 250)
