@@ -60,6 +60,8 @@ dependencies {
     // Google ML Kit for lightning-fast local QR scanning
     implementation("com.google.mlkit:barcode-scanning:17.2.0")
 
+    implementation("com.example:driftui:3.6.1")
+
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
