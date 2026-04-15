@@ -22,9 +22,12 @@ import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.FrameLayout
 import android.widget.ImageView
+import android.widget.Toast
 import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
+import android.content.Intent
+import android.provider.Settings
 
 class AirBridgeInputService : AccessibilityService() {
 
@@ -62,6 +65,10 @@ class AirBridgeInputService : AccessibilityService() {
 
     private var isRendering = false
     private val mainHandler = Handler(Looper.getMainLooper())
+
+    private var lastMediaCommandTime = 0L
+    private var lastVolumeUiTime = 0L
+
 
     private fun clampX(x: Float): Float = max(0f, min(screenWidth.toFloat() - 1f, x))
     private fun clampY(y: Float): Float = max(0f, min(screenHeight.toFloat() - 1f, y))
@@ -271,11 +278,51 @@ class AirBridgeInputService : AccessibilityService() {
                 mainHandler.post {
                     try {
                         val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
-                        when (parts[2]) {
-                            "UP" -> audioManager.adjustVolume(AudioManager.ADJUST_RAISE, AudioManager.FLAG_SHOW_UI)
-                            "DOWN" -> audioManager.adjustVolume(AudioManager.ADJUST_LOWER, AudioManager.FLAG_SHOW_UI)
-                            "MUTE" -> audioManager.adjustVolume(AudioManager.ADJUST_TOGGLE_MUTE, AudioManager.FLAG_SHOW_UI)
+
+                        // 1. Manually calculate absolute volume to bypass OEM step logic
+                        val maxVol = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+                        val currentVol = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
+
+                        val newVol = when (parts[2]) {
+                            "UP" -> min(maxVol, currentVol + 1)
+                            "DOWN" -> max(0, currentVol - 1)
+                            else -> currentVol
                         }
+
+                        // The function that actually executes the change
+                        val applyVolume = {
+                            if (parts[2] == "MUTE") {
+                                audioManager.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_TOGGLE_MUTE, AudioManager.FLAG_SHOW_UI)
+                            } else {
+                                audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, newVol, AudioManager.FLAG_SHOW_UI)
+                            }
+                        }
+
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                            val now = System.currentTimeMillis()
+
+                            // If it has been more than 2 seconds since the last press, the panel is likely closed
+                            if (now - lastVolumeUiTime > 2000) {
+                                val panelIntent = Intent(Settings.Panel.ACTION_VOLUME).apply {
+                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                                }
+                                startActivity(panelIntent)
+
+                                // DELAY: Give the OS 200ms to make the panel the active foreground window
+                                // before we strike. This completely disarms the background-execution blocker!
+                                mainHandler.postDelayed({ applyVolume() }, 200)
+
+                                lastVolumeUiTime = System.currentTimeMillis()
+                                return@post
+                            }
+
+                            // Extend the timer so rapid presses don't keep re-launching the Intent
+                            lastVolumeUiTime = now
+                        }
+
+                        // If the panel is already established on screen, apply immediately
+                        applyVolume()
+
                     } catch (e: Exception) {
                         e.printStackTrace()
                     }
@@ -283,6 +330,11 @@ class AirBridgeInputService : AccessibilityService() {
             }
 
             "MEDIA" -> {
+                // Debounce rapid double-fires from the Mac keyboard so Android doesn't interpret it as "Skip Track"
+                val now = System.currentTimeMillis()
+                if (now - lastMediaCommandTime < 300) return
+                lastMediaCommandTime = now
+
                 mainHandler.post {
                     try {
                         val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
