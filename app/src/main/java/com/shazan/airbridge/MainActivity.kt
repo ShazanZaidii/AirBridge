@@ -59,6 +59,7 @@ fun isVpnActive(context: Context): Boolean {
     return false
 }
 
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -157,11 +158,12 @@ fun AirBridgeApp() {
             )
             "DISCOVERY" -> DiscoveryScreen(
                 onDevicePaired = { url ->
-                    val newMacName = Uri.parse(url).getQueryParameter("name") ?: "Mac"
+                    val newUri = Uri.parse(url)
+                    val newHostIp = newUri.host
 
-                    // Filter out any ghost devices with the same Mac name
-                    val filteredUrls = connectedUrls.filterNot {
-                        Uri.parse(it).getQueryParameter("name") == newMacName
+                    // Filter out any older connections from this exact same IP
+                    val filteredUrls = connectedUrls.filterNot { existingUrl ->
+                        Uri.parse(existingUrl).host == newHostIp
                     }.toSet()
 
                     val newUrls = filteredUrls + url
@@ -178,11 +180,13 @@ fun AirBridgeApp() {
                     CameraScannerScreen(
                         onCancel = { currentScreen = "DISCOVERY" },
                         onUrlScanned = { url ->
-                            val newMacName = Uri.parse(url).getQueryParameter("name") ?: "Mac"
+                            val newUri = Uri.parse(url)
+                            val rawName = newUri.getQueryParameter("name") ?: "Mac"
+                            val newHostIp = newUri.host
 
                             // Filter out any ghost devices with the same Mac name
-                            val filteredUrls = connectedUrls.filterNot {
-                                Uri.parse(it).getQueryParameter("name") == newMacName
+                            val filteredUrls = connectedUrls.filterNot { existingUrl ->
+                                Uri.parse(existingUrl).host == newHostIp
                             }.toSet()
 
                             val newUrls = filteredUrls + url
@@ -214,12 +218,16 @@ fun DiscoveryScreen(onDevicePaired: (String) -> Unit, onCancel: () -> Unit, onOp
                 nsdManager.resolveService(service, object : NsdManager.ResolveListener {
                     override fun onResolveFailed(serviceInfo: NsdServiceInfo, errorCode: Int) {}
                     override fun onServiceResolved(serviceInfo: NsdServiceInfo) {
-                        val host = serviceInfo.host.hostAddress
+                        val hostIp = serviceInfo.host.hostAddress ?: return
                         val port = serviceInfo.port
                         val name = serviceInfo.serviceName
-                        val url = "ws://$host:$port?name=${Uri.encode(name)}"
 
-                        discoveredDevices = (discoveredDevices + DiscoveredMac(name, url)).distinctBy { it.url }
+                        val cleanUrl = "ws://$hostIp:$port?name=${Uri.encode(name)}"
+
+                        // Deduplicate by IP Address instead of Name
+                        discoveredDevices = discoveredDevices.filterNot {
+                            Uri.parse(it.url).host == hostIp
+                        } + DiscoveredMac(name, cleanUrl)
                     }
                 })
             }

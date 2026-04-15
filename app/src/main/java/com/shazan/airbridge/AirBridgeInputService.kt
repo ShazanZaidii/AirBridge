@@ -168,10 +168,16 @@ class AirBridgeInputService : AccessibilityService() {
                         cursorView?.translationX = cursorX
                         cursorView?.translationY = cursorY
                         cursorView?.visibility = View.VISIBLE
-                        if (!isRendering) { isRendering = true; Choreographer.getInstance().postFrameCallback(frameCallback) }
+                        if (!isRendering) {
+                            isRendering = true
+                            Choreographer.getInstance().postFrameCallback(frameCallback)
+                        }
                     }
                 } else if (parts[2] == "MAC") {
-                    mainHandler.post { cursorView?.visibility = View.GONE }
+                    mainHandler.post {
+                        cursorView?.visibility = View.GONE
+                        isRendering = false // Issue 1 Fix: Kill the render loop immediately
+                    }
                 }
             }
             "M" -> {
@@ -186,7 +192,11 @@ class AirBridgeInputService : AccessibilityService() {
                 if (!isMouseDown && !isDraggingMode) {
                     if ((activeEdge == "right" && newX <= -20f) || (activeEdge == "left" && newX >= screenWidth + 20f) ||
                         (activeEdge == "bottom" && newY <= -20f) || (activeEdge == "top" && newY >= screenHeight + 20f)) {
-                        mainHandler.post { cursorView?.visibility = View.GONE }
+
+                        mainHandler.post {
+                            cursorView?.visibility = View.GONE
+                            isRendering = false // Issue 1 Fix: Kill the render loop immediately
+                        }
                         AirBridgeService.instance?.broadcastToMac("INP:TRANSITION:MAC")
                         return
                     }
@@ -271,6 +281,27 @@ class AirBridgeInputService : AccessibilityService() {
                     }
                 }
             }
+
+            "MEDIA" -> {
+                mainHandler.post {
+                    try {
+                        val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+                        val keyCode = when (parts[2]) {
+                            "PLAY_PAUSE" -> android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE
+                            "NEXT" -> android.view.KeyEvent.KEYCODE_MEDIA_NEXT
+                            "PREV" -> android.view.KeyEvent.KEYCODE_MEDIA_PREVIOUS
+                            else -> return@post
+                        }
+
+                        // Dispatch key down, then key up to simulate a full physical press
+                        audioManager.dispatchMediaKeyEvent(android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, keyCode))
+                        audioManager.dispatchMediaKeyEvent(android.view.KeyEvent(android.view.KeyEvent.ACTION_UP, keyCode))
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
+                }
+            }
+
             "SYS" -> {
                 when (parts[2]) {
                     "RECENTS" -> performGlobalAction(GLOBAL_ACTION_RECENTS)
