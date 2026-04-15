@@ -119,18 +119,18 @@ struct DisplayArrangementView: View {
         let edge: DeviceEdge
         var range: ClosedRange<CGFloat>
         
-        // Determine edge and calculate real-pixel range
-        if position.x >= macWidth {
+        // Issue 1 Fix: Added 0.5 tolerances to prevent floating-point fallthrough
+        if position.x >= macWidth - 0.5 {
             edge = .right
             let startY = position.y * scaleY
             let endY = (position.y + phoneHeight) * scaleY
             range = startY...endY
-        } else if position.x <= -phoneWidth {
+        } else if position.x <= -phoneWidth + 0.5 {
             edge = .left
             let startY = position.y * scaleY
             let endY = (position.y + phoneHeight) * scaleY
             range = startY...endY
-        } else if position.y >= macHeight {
+        } else if position.y >= macHeight - 0.5 {
             edge = .bottom
             let startX = position.x * scaleX
             let endX = (position.x + phoneWidth) * scaleX

@@ -1,8 +1,3 @@
-//
-//  InputInterceptor.swift
-//  AirBridge
-//
-
 import Cocoa
 import CoreGraphics
 
@@ -21,20 +16,16 @@ class InputInterceptor {
     var phoneEdgeRange: ClosedRange<CGFloat> = -5000...5000
     
     private let inputQueue = DispatchQueue(label: "com.airbridge.input", qos: .userInteractive)
-    private var movementTimer: DispatchSourceTimer?
-    private let movementLock = NSLock()
-    
-    private var pendingDx: Int64 = 0
-    private var pendingDy: Int64 = 0
-    private var pendingScrollY: Int64 = 0
-    private var pendingScrollX: Int64 = 0
     
     private var lastSystemSwipeTime: Date = Date.distantPast
     
-    // 🚀 NEW: State tracking for precise Command Key behavior
+    // ADDED: Cooldown tracker to prevent warp-bouncing
+    private var lastTransitionTime: Date = Date.distantPast
+    
     private var commandHandled = false
     private var isLeftCmdDown = false
     private var isRightCmdDown = false
+    private var isEscDown = false
     
     private var swipeMonitorLocal: Any?
     private var swipeMonitorGlobal: Any?
@@ -56,15 +47,17 @@ class InputInterceptor {
         }
         
         let eventMask = (1 << CGEventType.mouseMoved.rawValue) |
-                                (1 << CGEventType.leftMouseDown.rawValue) |
-                                (1 << CGEventType.leftMouseUp.rawValue) |
-                                (1 << CGEventType.rightMouseDown.rawValue) |
-                                (1 << CGEventType.rightMouseUp.rawValue) |
-                                (1 << CGEventType.scrollWheel.rawValue) |
-                                (1 << CGEventType.keyDown.rawValue) |
-                                (1 << CGEventType.keyUp.rawValue) |
-                                (1 << CGEventType.flagsChanged.rawValue) |
-                                (1 << 14) //NX_SYSDEFINED (Media Keys like Volume)
+                        (1 << CGEventType.leftMouseDown.rawValue) |
+                        (1 << CGEventType.leftMouseUp.rawValue) |
+                        (1 << CGEventType.rightMouseDown.rawValue) |
+                        (1 << CGEventType.rightMouseUp.rawValue) |
+                        (1 << CGEventType.leftMouseDragged.rawValue) |
+                        (1 << CGEventType.rightMouseDragged.rawValue) |
+                        (1 << CGEventType.scrollWheel.rawValue) |
+                        (1 << CGEventType.keyDown.rawValue) |
+                        (1 << CGEventType.keyUp.rawValue) |
+                        (1 << CGEventType.flagsChanged.rawValue) |
+                        (1 << 14)
         
         let callback: CGEventTapCallBack = { (proxy, type, event, refcon) in
             let interceptor = Unmanaged<InputInterceptor>.fromOpaque(refcon!).takeUnretainedValue()
@@ -87,7 +80,7 @@ class InputInterceptor {
         if !isCursorOnPhone { return }
         
         let now = Date()
-        if now.timeIntervalSince(lastSystemSwipeTime) < 0.8 { return }
+        if now.timeIntervalSince(lastSystemSwipeTime) < 0.3 { return }
         lastSystemSwipeTime = now
         
         if abs(event.deltaY) > abs(event.deltaX) {
@@ -103,50 +96,13 @@ class InputInterceptor {
         }
     }
     
-    private func startMovementTimer() {
-        movementLock.lock()
-        defer { movementLock.unlock() }
-        guard movementTimer == nil else { return }
-        
-        let timer = DispatchSource.makeTimerSource(queue: inputQueue)
-        timer.schedule(deadline: .now(), repeating: .milliseconds(12))
-        timer.setEventHandler { [weak self] in self?.flushMovement() }
-        timer.resume()
-        movementTimer = timer
-    }
-    
-    private func stopMovementTimer() {
-        movementLock.lock()
-        defer { movementLock.unlock() }
-        movementTimer?.cancel()
-        movementTimer = nil
-    }
-    
-    private func flushMovement() {
-        movementLock.lock()
-        let dx = pendingDx
-        let dy = pendingDy
-        let dsY = pendingScrollY
-        let dsX = pendingScrollX
-        pendingDx = 0
-        pendingDy = 0
-        pendingScrollY = 0
-        pendingScrollX = 0
-        movementLock.unlock()
-        
-        if dx != 0 || dy != 0 || dsY != 0 || dsX != 0 {
-            syncServer?.broadcastInput(command: "INP:M:\(dx):\(dy):\(dsY):\(dsX)")
-        }
-    }
-    
     func forceReturnToMac() {
         let action = {
             if !self.isCursorOnPhone { return }
             self.isCursorOnPhone = false
-            self.stopMovementTimer()
             
             CGAssociateMouseAndMouseCursorPosition(1)
-            CGDisplayShowCursor(CGMainDisplayID())
+            DispatchQueue.main.async { NSCursor.unhide() }
             
             let screenBounds = CGDisplayBounds(CGMainDisplayID())
             var returnPoint = CGEvent(source: nil)?.location ?? CGPoint(x: screenBounds.midX, y: screenBounds.midY)
@@ -185,9 +141,15 @@ class InputInterceptor {
             
             if hitPortal && (syncServer?.connectedClients ?? 0) > 0 {
                 isCursorOnPhone = true
-                startMovementTimer()
-                DispatchQueue.main.async { CGDisplayHideCursor(CGMainDisplayID()) }
+                
+                // Track the exact moment of transition to ignore warp deltas
+                lastTransitionTime = Date()
+                
+                // Warp cursor to absolute bottom-right corner to hide it, then detach hardware mouse
+                let hiddenPoint = CGPoint(x: screenBounds.maxX, y: screenBounds.maxY)
+                CGWarpMouseCursorPosition(hiddenPoint)
                 CGAssociateMouseAndMouseCursorPosition(0)
+                DispatchQueue.main.async { NSCursor.hide() }
                 
                 let relX: CGFloat
                 let relY: CGFloat
@@ -215,24 +177,24 @@ class InputInterceptor {
                     let keyState = (data & 0xFF00) >> 8
                     
                     if keyState == 10 {
-                        if keyCode == 0 {
-                            inputQueue.async { self.syncServer?.broadcastInput(command: "INP:VOL:UP") }
-                            return nil
-                        } else if keyCode == 1 {
-                            inputQueue.async { self.syncServer?.broadcastInput(command: "INP:VOL:DOWN") }
-                            return nil
-                        } else if keyCode == 7 {
-                            inputQueue.async { self.syncServer?.broadcastInput(command: "INP:VOL:MUTE") }
-                            return nil
-                        }
+                        if keyCode == 0 { inputQueue.async { self.syncServer?.broadcastInput(command: "INP:VOL:UP") }; return nil }
+                        else if keyCode == 1 { inputQueue.async { self.syncServer?.broadcastInput(command: "INP:VOL:DOWN") }; return nil }
+                        else if keyCode == 7 { inputQueue.async { self.syncServer?.broadcastInput(command: "INP:VOL:MUTE") }; return nil }
                     }
                 }
             }
 
             switch type {
-            case .mouseMoved:
+            case .mouseMoved, .leftMouseDragged, .rightMouseDragged:
                 let dx = event.getIntegerValueField(.mouseEventDeltaX)
                 let dy = event.getIntegerValueField(.mouseEventDeltaY)
+                
+                // CRITICAL FIX: Ignore massive synthetic deltas caused by CGWarpMouseCursorPosition
+                // and give a 100ms cooldown so the warp doesn't instantly trigger the escape velocity.
+                if abs(dx) > 500 || abs(dy) > 500 || Date().timeIntervalSince(lastTransitionTime) < 0.1 {
+                    return nil
+                }
+                
                 var escapeTriggered = false
                 let escapeVelocity: Int64 = 60
                 
@@ -248,43 +210,26 @@ class InputInterceptor {
                     inputQueue.async { self.syncServer?.broadcastInput(command: "INP:TRANSITION:MAC") }
                     return nil
                 }
-                movementLock.lock()
-                pendingDx += dx
-                pendingDy += dy
-                movementLock.unlock()
+                
+                inputQueue.async { self.syncServer?.broadcastInput(command: "INP:M:\(dx):\(dy):0:0") }
                 
             case .scrollWheel:
                 let scrollY = event.getIntegerValueField(.scrollWheelEventDeltaAxis1)
                 let scrollX = event.getIntegerValueField(.scrollWheelEventDeltaAxis2)
-                movementLock.lock()
-                pendingScrollY += scrollY
-                pendingScrollX += scrollX
-                movementLock.unlock()
+                inputQueue.async { self.syncServer?.broadcastInput(command: "INP:M:0:0:\(scrollY):\(scrollX)") }
                 
             case .flagsChanged:
                 let keycode = event.getIntegerValueField(.keyboardEventKeycode)
-                
-                if keycode == 55 { // Right Command -> Home Button
+                if keycode == 55 {
                     isRightCmdDown.toggle()
-                    if isRightCmdDown {
-                        commandHandled = false
-                    } else {
-                        if !commandHandled {
-                            inputQueue.async { self.syncServer?.broadcastInput(command: "INP:SYS:HOME") }
-                        }
-                    }
+                    if isRightCmdDown { commandHandled = false }
+                    else { if !commandHandled { inputQueue.async { self.syncServer?.broadcastInput(command: "INP:SYS:HOME") } } }
                     return nil
                 }
-                
-                if keycode == 54 { // Left Command -> Notification Toggle
+                if keycode == 54 {
                     isLeftCmdDown.toggle()
-                    if isLeftCmdDown {
-                        commandHandled = false
-                    } else {
-                        if !commandHandled {
-                            inputQueue.async { self.syncServer?.broadcastInput(command: "INP:CMD:LEFT:UP") }
-                        }
-                    }
+                    if isLeftCmdDown { commandHandled = false }
+                    else { if !commandHandled { inputQueue.async { self.syncServer?.broadcastInput(command: "INP:CMD:LEFT:UP") } } }
                     return nil
                 }
                 
@@ -294,46 +239,55 @@ class InputInterceptor {
             case .rightMouseUp: inputQueue.async { self.syncServer?.broadcastInput(command: "INP:RCU") }
             
             case .keyDown:
-                            let keycode = event.getIntegerValueField(.keyboardEventKeycode)
-                            let flags = event.flags
-                            
-                            //NEW: Detect if this is an auto-repeat from holding the key
-                            let isRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
-                            
-                            if flags.contains(.maskCommand) {
-                                commandHandled = true // Marks combination as handled, suppresses single-tap releases
-                                
-                                if keycode == 49 { // Cmd + Space -> App Drawer
-                                    if !isRepeat { inputQueue.async { self.syncServer?.broadcastInput(command: "INP:SYS:DRAWER") } }
-                                    return nil
-                                }
-                                if keycode == 48 { // Cmd + Tab -> App Switcher
-                                    if !isRepeat { inputQueue.async { self.syncServer?.broadcastInput(command: "INP:SYS:LAST_APP") } }
-                                    return nil
-                                }
-                                if keycode == 8 { // Cmd + C
-                                    if !isRepeat { inputQueue.async { self.syncServer?.broadcastInput(command: "INP:CMD:C") } }
-                                    return nil
-                                }
-                                if keycode == 9 { // Cmd + V
-                                    if !isRepeat { inputQueue.async { self.syncServer?.broadcastInput(command: "INP:CMD:V") } }
-                                    return nil
-                                }
-                            }
-                            
-                            if keycode == 51 { // Delete Key -> Recent Apps
-                                if !isRepeat { inputQueue.async { self.syncServer?.broadcastInput(command: "INP:SYS:RECENTS") } }
-                                return nil
-                            }
-                            
-                            if keycode == 53 { // Escape -> Back
-                                // Block auto-repeats to prevent double-backs
-                                if !isRepeat { inputQueue.async { self.syncServer?.broadcastInput(command: "INP:KD:\(keycode)") } }
-                                return nil
-                            }
-                            
-                            // Allow other keys (like arrows for scrolling) to auto-repeat normally
-                            inputQueue.async { self.syncServer?.broadcastInput(command: "INP:KD:\(keycode)") }
+                let keycode = event.getIntegerValueField(.keyboardEventKeycode)
+                let flags = event.flags
+                let isRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
+                
+                if keycode == 4 {
+                    if !isRepeat { inputQueue.async { self.syncServer?.broadcastInput(command: "INP:HOLD") } }
+                    return nil
+                }
+                if keycode == 2 {
+                    if !isRepeat { inputQueue.async { self.syncServer?.broadcastInput(command: "INP:DRAG") } }
+                    return nil
+                }
+                
+                if flags.contains(.maskCommand) {
+                    commandHandled = true
+                    if keycode == 49 { if !isRepeat { inputQueue.async { self.syncServer?.broadcastInput(command: "INP:SYS:DRAWER") } }; return nil }
+                    if keycode == 48 { if !isRepeat { inputQueue.async { self.syncServer?.broadcastInput(command: "INP:SYS:LAST_APP") } }; return nil }
+                    if keycode == 8 { if !isRepeat { inputQueue.async { self.syncServer?.broadcastInput(command: "INP:CMD:C") } }; return nil }
+                    if keycode == 9 { if !isRepeat { inputQueue.async { self.syncServer?.broadcastInput(command: "INP:CMD:V") } }; return nil }
+                }
+                
+                if keycode == 51 {
+                    if !isRepeat { inputQueue.async { self.syncServer?.broadcastInput(command: "INP:SYS:RECENTS") } }
+                    return nil
+                }
+                
+                if keycode == 53 {
+                    if !isEscDown {
+                        isEscDown = true
+                        inputQueue.async { self.syncServer?.broadcastInput(command: "INP:KD:\(keycode)") }
+                    }
+                    return nil
+                }
+                
+                inputQueue.async { self.syncServer?.broadcastInput(command: "INP:KD:\(keycode)") }
+                
+            case .keyUp:
+                let keycode = event.getIntegerValueField(.keyboardEventKeycode)
+                
+                if keycode == 4 { inputQueue.async { self.syncServer?.broadcastInput(command: "INP:HOLD_RELEASE") }; return nil }
+                if keycode == 2 { inputQueue.async { self.syncServer?.broadcastInput(command: "INP:DRAG_RELEASE") }; return nil }
+                
+                if keycode == 53 {
+                    isEscDown = false
+                    inputQueue.async { self.syncServer?.broadcastInput(command: "INP:KU:\(keycode)") }
+                    return nil
+                }
+                
+                inputQueue.async { self.syncServer?.broadcastInput(command: "INP:KU:\(keycode)") }
                 
             default: break
             }

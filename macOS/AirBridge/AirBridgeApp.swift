@@ -1,12 +1,19 @@
-//
-//  AirBridgeApp.swift
-//  AirBridge
-//
-
 import SwiftUI
 import CoreImage.CIFilterBuiltins
 import UserNotifications
 import AppKit
+
+enum FilterType: String, Codable, CaseIterable {
+    case startsWith = "Starts With"
+    case endsWith = "Ends With"
+    case contains = "Contains"
+}
+
+struct ClipboardFilter: Codable, Identifiable, Hashable {
+    var id = UUID()
+    var type: FilterType
+    var keyword: String
+}
 
 class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -59,20 +66,33 @@ struct AirBridgeApp: App {
     @StateObject private var server = SyncServer()
     @Environment(\.openWindow) private var openWindow
 
+    private func bringWindowToFront(_ title: String) {
+        NSApp.activate(ignoringOtherApps: true)
+        if let window = NSApplication.shared.windows.first(where: { $0.title == title }) {
+            window.collectionBehavior = [.moveToActiveSpace]
+            window.makeKeyAndOrderFront(nil)
+            window.orderFrontRegardless()
+        }
+    }
+
     var body: some Scene {
         MenuBarExtra("AirBridge", systemImage: "link.icloud") {
             VStack(spacing: 16) {
                 Text("AirBridge Server").font(.headline)
                 
-                if server.connectedClients > 0 {
-                    HStack {
-                        Image(systemName: "bolt.badge.checkmark.fill").foregroundStyle(Color.green)
-                        Text("\(server.connectedClients) Device(s) Connected")
+                if !server.activeConnectionsInfo.isEmpty {
+                    Menu {
+                        ForEach(server.activeConnectionsInfo, id: \.id) { conn in
+                            Button("Disconnect \(conn.name)") {
+                                server.disconnect(id: conn.id)
+                            }
+                        }
+                    } label: {
+                        Text("\(server.activeConnectionsInfo.count) Device(s) Connected")
                             .foregroundColor(.green)
-                            .font(.subheadline)
                     }
                 } else {
-                    Text("⚠️ Waiting for connection...")
+                    Text("Waiting for connection...")
                         .foregroundColor(.orange)
                         .font(.subheadline)
                 }
@@ -92,28 +112,21 @@ struct AirBridgeApp: App {
                 }
                 
                 if server.isSendingBatch || !server.sendStatus.isEmpty {
-                                    VStack(spacing: 4) {
-                                        HStack {
-                                            Text("Sending to Phone").font(.caption).bold()
-                                            Spacer()
-                                        }
-                                        if server.isSendingBatch {
-                                            ProgressView(value: server.sendProgress)
-                                                .progressViewStyle(LinearProgressViewStyle(tint: .green))
-                                        }
-                                        Text(server.sendStatus)
-                                            .font(.caption2)
-                                            .foregroundColor(.gray)
-                                    }
-                                    .padding(.top, 8)
-                                }
-                
-//                                Button("Force Check Pending Shares") {
-//                                    server.processPendingTransfers()
-//                                }
-//                                .disabled(server.connectedClients == 0)
-
-                                
+                    VStack(spacing: 4) {
+                        HStack {
+                            Text("Sending to Phone").font(.caption).bold()
+                            Spacer()
+                        }
+                        if server.isSendingBatch {
+                            ProgressView(value: server.sendProgress)
+                                .progressViewStyle(LinearProgressViewStyle(tint: .green))
+                        }
+                        Text(server.sendStatus)
+                            .font(.caption2)
+                            .foregroundColor(.gray)
+                    }
+                    .padding(.top, 8)
+                }
                 
                 if server.port > 0, let qrImage = generateQRCode(from: "ws://\(server.localIP):\(server.port)?name=\(server.macName.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")") {
                     Image(nsImage: qrImage)
@@ -140,10 +153,20 @@ struct AirBridgeApp: App {
                         server.sendFiles(urls: panel.urls)
                     }
                 }
-                .disabled(server.connectedClients == 0)
+                .disabled(server.activeConnectionsInfo.isEmpty)
                 
                 Button("Display Arrangement...") {
                     openWindow(id: "arrangement")
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                        bringWindowToFront("AirBridge Display Arrangement")
+                    }
+                }
+                
+                Button("Clipboard Filters...") {
+                    openWindow(id: "filters")
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                        bringWindowToFront("Clipboard Filters")
+                    }
                 }
                 
                 Divider()
@@ -163,6 +186,12 @@ struct AirBridgeApp: App {
                 .fixedSize()
         }
         .windowResizability(.contentSize)
+        
+        Window("Clipboard Filters", id: "filters") {
+            ClipboardFiltersView()
+                .frame(minWidth: 400, minHeight: 300)
+        }
+        .windowResizability(.contentSize)
     }
     
     private func generateQRCode(from string: String) -> NSImage? {
@@ -178,5 +207,69 @@ struct AirBridgeApp: App {
             }
         }
         return nil
+    }
+}
+
+struct ClipboardFiltersView: View {
+    @AppStorage("ClipboardFilters") private var filtersData: Data = Data()
+    @State private var filters: [ClipboardFilter] = []
+    
+    @State private var newKeyword: String = ""
+    @State private var selectedType: FilterType = .startsWith
+    
+    var body: some View {
+        VStack(spacing: 16) {
+            Text("Ignore copied text matching these rules:")
+                .font(.headline)
+            
+            List {
+                ForEach(filters) { filter in
+                    HStack {
+                        Text(filter.type.rawValue)
+                            .fontWeight(.semibold)
+                            .frame(width: 100, alignment: .leading)
+                        Text("\"\(filter.keyword)\"")
+                        Spacer()
+                        Button("Delete") {
+                            filters.removeAll { $0.id == filter.id }
+                            saveFilters()
+                        }
+                    }
+                }
+            }
+            .border(Color.gray.opacity(0.2))
+            
+            HStack {
+                Picker("", selection: $selectedType) {
+                    ForEach(FilterType.allCases, id: \.self) { type in
+                        Text(type.rawValue).tag(type)
+                    }
+                }
+                .frame(width: 120)
+                
+                TextField("Keyword", text: $newKeyword)
+                    .textFieldStyle(RoundedBorderTextFieldStyle())
+                
+                Button("Add") {
+                    guard !newKeyword.isEmpty else { return }
+                    filters.append(ClipboardFilter(type: selectedType, keyword: newKeyword))
+                    newKeyword = ""
+                    saveFilters()
+                }
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding()
+        .onAppear {
+            if let decoded = try? JSONDecoder().decode([ClipboardFilter].self, from: filtersData) {
+                self.filters = decoded
+            }
+        }
+    }
+    
+    private func saveFilters() {
+        if let encoded = try? JSONEncoder().encode(filters) {
+            filtersData = encoded
+        }
     }
 }
