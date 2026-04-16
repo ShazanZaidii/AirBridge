@@ -130,6 +130,15 @@ class AirBridgeService : Service() {
             savedUrls = urls.toSet()
             updateDirectShareShortcuts(savedUrls)
 
+            // KILL ORPHANED SOCKETS
+            val currentActiveUrls = activeSockets.keys.toList()
+            for (url in currentActiveUrls) {
+                if (!savedUrls.contains(url)) {
+                    activeSockets[url]?.close(1000, "Replaced by new connection")
+                    activeSockets.remove(url)
+                }
+            }
+
             if (autoConnect) {
                 savedUrls.forEach { url ->
                     if (!activeSockets.containsKey(url)) {
@@ -486,7 +495,7 @@ class AirBridgeService : Service() {
                             mainHandler.post {
                                 Toast.makeText(
                                     this@AirBridgeService,
-                                    "Enable Accessibility Service enabled in Android Settings to simulate Mouse",
+                                    "Enable Accessibility Service in Android Settings to simulate Mouse (or from the App)",
                                     Toast.LENGTH_LONG
                                 ).show()
                             }
@@ -526,47 +535,53 @@ class AirBridgeService : Service() {
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                handleDisconnect(url)
+                handleDisconnect(url, webSocket)
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                handleDisconnect(url)
+                handleDisconnect(url, webSocket)
             }
 
-            private fun handleDisconnect(url: String) {
-                activeSockets.remove(url)
-                broadcastConnectionState()
+            // --- THE FIX: Pass the specific WebSocket instance into this function ---
+            private fun handleDisconnect(url: String, dyingSocket: WebSocket) {
 
-                // Clear the stuck UI if the socket drops during a transfer
-                if (isReceivingFile) {
-                    isReceivingFile = false
-                    try {
-                        incomingFileOutputStream?.close()
-                    } catch (e: Exception) {
+                // IDENTITY CHECK: Only wipe the dictionary if the dying socket is the currently tracked one
+                if (activeSockets[url] === dyingSocket) {
+                    activeSockets.remove(url)
+                    broadcastConnectionState()
+
+                    // Clear the stuck UI if the socket drops during a transfer
+                    if (isReceivingFile) {
+                        isReceivingFile = false
+                        try {
+                            incomingFileOutputStream?.close()
+                        } catch (e: Exception) {
+                        }
+                        incomingFileOutputStream = null
+
+                        val notificationManager =
+                            getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                        notificationManager.cancel(2002) // Force dismiss the progress bar
+
+                        mainHandler.post {
+                            Toast.makeText(
+                                this@AirBridgeService,
+                                "Transfer interrupted (Mac disconnected)",
+                                Toast.LENGTH_LONG
+                            ).show()
+                        }
+                        sendBroadcast(Intent("AIRBRIDGE_TRANSFER_UPDATE").apply {
+                            putExtra(
+                                "isComplete",
+                                true
+                            )
+                        })
                     }
-                    incomingFileOutputStream = null
 
-                    val notificationManager =
-                        getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-                    notificationManager.cancel(2002) // Force dismiss the progress bar
-
-                    mainHandler.post {
-                        Toast.makeText(
-                            this@AirBridgeService,
-                            "Transfer interrupted (Mac disconnected)",
-                            Toast.LENGTH_LONG
-                        ).show()
-                    }
-                    sendBroadcast(Intent("AIRBRIDGE_TRANSFER_UPDATE").apply {
-                        putExtra(
-                            "isComplete",
-                            true
-                        )
-                    })
+                    scheduleReconnect(url)
                 }
-
-                scheduleReconnect(url)
             }
+
         })
     }
 

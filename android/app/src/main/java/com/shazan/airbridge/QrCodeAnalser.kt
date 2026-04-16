@@ -17,9 +17,16 @@ class QrCodeAnalyzer(
         .build()
 
     private val scanner = BarcodeScanning.getClient(options)
+    private var isScanned = false
 
     @SuppressLint("UnsafeOptInUsageError")
     override fun analyze(imageProxy: ImageProxy) {
+
+        if (isScanned) {
+            imageProxy.close()
+            return
+        }
+
         val mediaImage = imageProxy.image
         if (mediaImage != null) {
             val image = InputImage.fromMediaImage(mediaImage, imageProxy.imageInfo.rotationDegrees)
@@ -29,6 +36,7 @@ class QrCodeAnalyzer(
                     for (barcode in barcodes) {
                         barcode.rawValue?.let { value ->
                             if (value.startsWith("ws://")) {
+                                isScanned = true
                                 onQrCodeScanned(value)
                             }
                         }

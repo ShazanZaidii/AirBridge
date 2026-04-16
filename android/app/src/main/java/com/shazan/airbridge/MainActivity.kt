@@ -50,7 +50,8 @@ import java.util.concurrent.Executors
 
 // Issue 7 Fix: Setup VPN check on launch
 fun isVpnActive(context: Context): Boolean {
-    val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+    val connectivityManager =
+        context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
         val activeNetwork = connectivityManager.activeNetwork ?: return false
         val caps = connectivityManager.getNetworkCapabilities(activeNetwork) ?: return false
@@ -65,7 +66,10 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setContent {
             MaterialTheme {
-                Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = MaterialTheme.colorScheme.background
+                ) {
                     AirBridgeApp()
                 }
             }
@@ -78,22 +82,35 @@ fun AirBridgeApp() {
     val context = LocalContext.current
     val prefs = context.getSharedPreferences("AirBridgePrefs", Context.MODE_PRIVATE)
 
-    var hasCameraPermission by remember { mutableStateOf(ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) }
+    var hasCameraPermission by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.CAMERA
+            ) == PackageManager.PERMISSION_GRANTED
+        )
+    }
     var hasOverlayPermission by remember { mutableStateOf(Settings.canDrawOverlays(context)) }
 
-    var connectedUrls by remember { mutableStateOf(prefs.getStringSet("WS_URLS", emptySet())?.toSet() ?: emptySet()) }
+    var connectedUrls by remember {
+        mutableStateOf(
+            prefs.getStringSet("WS_URLS", emptySet())?.toSet() ?: emptySet()
+        )
+    }
     var autoPairEnabled by remember { mutableStateOf(prefs.getBoolean("AUTO_CONNECT", true)) }
 
     var currentScreen by remember { mutableStateOf(if (connectedUrls.isEmpty()) "DISCOVERY" else "CONNECTED") }
     var showVpnWarning by remember { mutableStateOf(isVpnActive(context)) }
 
-    val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { p ->
-        hasCameraPermission = p[Manifest.permission.CAMERA] == true
-    }
+    val permissionLauncher =
+        rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { p ->
+            hasCameraPermission = p[Manifest.permission.CAMERA] == true
+        }
 
-    val overlayPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
-        hasOverlayPermission = Settings.canDrawOverlays(context)
-    }
+    val overlayPermissionLauncher =
+        rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+            hasOverlayPermission = Settings.canDrawOverlays(context)
+        }
 
     LaunchedEffect(Unit) {
         val perms = mutableListOf(Manifest.permission.CAMERA)
@@ -106,7 +123,9 @@ fun AirBridgeApp() {
             val intent = Intent(context, AirBridgeService::class.java).apply {
                 putStringArrayListExtra("WS_URLS", ArrayList(connectedUrls))
             }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(intent)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(
+                intent
+            )
             else context.startService(intent)
         }
     }
@@ -124,14 +143,81 @@ fun AirBridgeApp() {
     }
 
     if (!hasOverlayPermission) {
-        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("AirBridge needs Overlay Permission", color = Color.White)
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color(0xFF1E1E1E)), // Explicit dark background added here
+            contentAlignment = Alignment.Center
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.padding(32.dp)
+            ) {
+                Text(
+                    "Overlay Permission Required",
+                    color = Color.White,
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.Bold
+                )
                 Spacer(modifier = Modifier.height(16.dp))
-                Button(onClick = {
-                    val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${context.packageName}"))
-                    overlayPermissionLauncher.launch(intent)
-                }) { Text("Grant Permission") }
+                Text(
+                    "AirBridge requires the 'Display over other apps' permission to sync " +
+                            "your Clipboard with Mac (and to control your mobile from mac later if you want)",
+                    color = Color.LightGray,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                )
+
+                Spacer(modifier = Modifier.height(32.dp))
+
+                // Step 1: Restricted Settings Bypass
+                Text(
+                    "Step 1: Allow Restricted Settings",
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    "Tap below to open App Info. Tap the 3 dots (⋮) in the top right, and select 'Allow restricted settings'.",
+                    color = Color.Gray,
+                    fontSize = 14.sp,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    modifier = Modifier.padding(top = 4.dp, bottom = 12.dp)
+                )
+                Button(
+                    onClick = {
+                        val intent = Intent(
+                            Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                            Uri.parse("package:${context.packageName}")
+                        )
+                        context.startActivity(intent)
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF333333))
+                ) {
+                    Text("Open App Info", color = Color.White)
+                }
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                // Step 2: Grant the Overlay Permission
+                Text("Step 2: Grant Permission", color = Color.White, fontWeight = FontWeight.Bold)
+                Text(
+                    "Once Step 1 is complete, tap below to turn on the toggle.",
+                    color = Color.Gray,
+                    fontSize = 14.sp,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    modifier = Modifier.padding(top = 4.dp, bottom = 12.dp)
+                )
+                Button(
+                    onClick = {
+                        val intent = Intent(
+                            Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                            Uri.parse("package:${context.packageName}")
+                        )
+                        overlayPermissionLauncher.launch(intent)
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4285F4))
+                ) {
+                    Text("Enable Overlay", color = Color.White)
+                }
             }
         }
     } else {
@@ -152,10 +238,16 @@ fun AirBridgeApp() {
                         context.stopService(Intent(context, AirBridgeService::class.java))
                         currentScreen = "DISCOVERY"
                     } else {
-                        context.startService(Intent(context, AirBridgeService::class.java).putExtra("DISCONNECT_URL", url))
+                        context.startService(
+                            Intent(context, AirBridgeService::class.java).putExtra(
+                                "DISCONNECT_URL",
+                                url
+                            )
+                        )
                     }
                 }
             )
+
             "DISCOVERY" -> DiscoveryScreen(
                 onDevicePaired = { url ->
                     val newUri = Uri.parse(url)
@@ -175,6 +267,7 @@ fun AirBridgeApp() {
                 onOpenScanner = { currentScreen = "SCANNER" },
                 showCancel = connectedUrls.isNotEmpty()
             )
+
             "SCANNER" -> {
                 if (hasCameraPermission) {
                     CameraScannerScreen(
@@ -196,7 +289,10 @@ fun AirBridgeApp() {
                         }
                     )
                 } else {
-                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("Camera permission required", color = Color.White) }
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) { Text("Camera permission required", color = Color.White) }
                 }
             }
         }
@@ -206,7 +302,12 @@ fun AirBridgeApp() {
 data class DiscoveredMac(val name: String, val url: String)
 
 @Composable
-fun DiscoveryScreen(onDevicePaired: (String) -> Unit, onCancel: () -> Unit, onOpenScanner: () -> Unit, showCancel: Boolean) {
+fun DiscoveryScreen(
+    onDevicePaired: (String) -> Unit,
+    onCancel: () -> Unit,
+    onOpenScanner: () -> Unit,
+    showCancel: Boolean
+) {
     val context = LocalContext.current
     var discoveredDevices by remember { mutableStateOf(listOf<DiscoveredMac>()) }
 
@@ -231,36 +332,79 @@ fun DiscoveryScreen(onDevicePaired: (String) -> Unit, onCancel: () -> Unit, onOp
                     }
                 })
             }
+
             override fun onServiceLost(service: NsdServiceInfo) {
                 discoveredDevices = discoveredDevices.filterNot { it.name == service.serviceName }
             }
+
             override fun onDiscoveryStopped(serviceType: String) {}
-            override fun onStartDiscoveryFailed(serviceType: String, errorCode: Int) { nsdManager.stopServiceDiscovery(this) }
-            override fun onStopDiscoveryFailed(serviceType: String, errorCode: Int) { nsdManager.stopServiceDiscovery(this) }
+            override fun onStartDiscoveryFailed(serviceType: String, errorCode: Int) {
+                nsdManager.stopServiceDiscovery(this)
+            }
+
+            override fun onStopDiscoveryFailed(serviceType: String, errorCode: Int) {
+                nsdManager.stopServiceDiscovery(this)
+            }
         }
 
-        nsdManager.discoverServices("_airbridge._tcp.", NsdManager.PROTOCOL_DNS_SD, discoveryListener)
+        nsdManager.discoverServices(
+            "_airbridge._tcp.",
+            NsdManager.PROTOCOL_DNS_SD,
+            discoveryListener
+        )
         onDispose { nsdManager.stopServiceDiscovery(discoveryListener) }
     }
 
-    Column(modifier = Modifier.fillMaxSize().background(Color(0xFF1E1E1E)).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        Text("Looking for Macs...", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = Color.White, modifier = Modifier.padding(bottom = 8.dp, top = 32.dp))
-        Text("Ensure both devices are on the same Wi-Fi", color = Color.Gray, fontSize = 14.sp, modifier = Modifier.padding(bottom = 24.dp))
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFF1E1E1E))
+            .padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(
+            "Looking for Macs...",
+            fontSize = 28.sp,
+            fontWeight = FontWeight.Bold,
+            color = Color.White,
+            modifier = Modifier.padding(bottom = 8.dp, top = 32.dp)
+        )
+        Text(
+            "Ensure both devices are on the same Wi-Fi",
+            color = Color.Gray,
+            fontSize = 14.sp,
+            modifier = Modifier.padding(bottom = 24.dp)
+        )
 
         if (discoveredDevices.isEmpty()) {
             Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator(color = Color(0xFF4285F4))
             }
         } else {
-            LazyColumn(modifier = Modifier.weight(1f).fillMaxWidth()) {
+            LazyColumn(modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()) {
                 items(discoveredDevices) { mac ->
                     Card(
                         shape = RoundedCornerShape(16.dp),
                         colors = CardDefaults.cardColors(containerColor = Color(0xFF2C2C2C)),
-                        modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp).clickable { onDevicePaired(mac.url) }
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 12.dp)
+                            .clickable { onDevicePaired(mac.url) }
                     ) {
-                        Row(modifier = Modifier.padding(20.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                            Text(mac.name, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        Row(
+                            modifier = Modifier
+                                .padding(20.dp)
+                                .fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                mac.name,
+                                fontSize = 20.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
                         }
                     }
                 }
@@ -273,7 +417,13 @@ fun DiscoveryScreen(onDevicePaired: (String) -> Unit, onCancel: () -> Unit, onOp
 
         if (showCancel) {
             Spacer(modifier = Modifier.height(16.dp))
-            Button(onClick = onCancel, colors = ButtonDefaults.buttonColors(containerColor = Color.DarkGray), modifier = Modifier.fillMaxWidth().height(56.dp)) {
+            Button(
+                onClick = onCancel,
+                colors = ButtonDefaults.buttonColors(containerColor = Color.DarkGray),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp)
+            ) {
                 Text("Cancel", color = Color.White, fontSize = 16.sp)
             }
         }
@@ -281,7 +431,13 @@ fun DiscoveryScreen(onDevicePaired: (String) -> Unit, onCancel: () -> Unit, onOp
 }
 
 @Composable
-fun ConnectedScreen(urls: Set<String>, autoPairEnabled: Boolean, onAutoPairChange: (Boolean) -> Unit, onAddDevice: () -> Unit, onRemoveDevice: (String) -> Unit) {
+fun ConnectedScreen(
+    urls: Set<String>,
+    autoPairEnabled: Boolean,
+    onAutoPairChange: (Boolean) -> Unit,
+    onAddDevice: () -> Unit,
+    onRemoveDevice: (String) -> Unit
+) {
     val context = LocalContext.current
 
     var activeMacs by remember { mutableStateOf(AirBridgeService.getActiveUrls()) }
@@ -295,7 +451,7 @@ fun ConnectedScreen(urls: Set<String>, autoPairEnabled: Boolean, onAutoPairChang
 
     // Bulletproof polling loop to ensure UI never gets stuck
     LaunchedEffect(Unit) {
-        while(true) {
+        while (true) {
             isMouseControlEnabled = AirBridgeInputService.instance != null
             val liveUrls = AirBridgeService.getActiveUrls()
             if (activeMacs != liveUrls) {
@@ -310,9 +466,11 @@ fun ConnectedScreen(urls: Set<String>, autoPairEnabled: Boolean, onAutoPairChang
             override fun onReceive(c: Context?, intent: Intent?) {
                 when (intent?.action) {
                     "AIRBRIDGE_STATE_UPDATE" -> {
-                        val activeList = intent.getStringArrayListExtra("ACTIVE_URLS") ?: arrayListOf()
+                        val activeList =
+                            intent.getStringArrayListExtra("ACTIVE_URLS") ?: arrayListOf()
                         activeMacs = activeList.toSet()
                     }
+
                     "AIRBRIDGE_TRANSFER_UPDATE" -> {
                         if (intent.getBooleanExtra("isComplete", false)) {
                             transferTotalFiles = 0
@@ -333,12 +491,30 @@ fun ConnectedScreen(urls: Set<String>, autoPairEnabled: Boolean, onAutoPairChang
             addAction("AIRBRIDGE_TRANSFER_UPDATE")
         }
 
-        ContextCompat.registerReceiver(context, stateReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
+        ContextCompat.registerReceiver(
+            context,
+            stateReceiver,
+            filter,
+            ContextCompat.RECEIVER_NOT_EXPORTED
+        )
         onDispose { context.unregisterReceiver(stateReceiver) }
     }
 
-    Column(modifier = Modifier.fillMaxSize().background(Color(0xFF1E1E1E)).padding(24.dp).verticalScroll(rememberScrollState()), horizontalAlignment = Alignment.CenterHorizontally) {
-        Text("Your Devices", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = Color.White, modifier = Modifier.padding(bottom = 24.dp, top = 32.dp))
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFF1E1E1E))
+            .padding(24.dp)
+            .verticalScroll(rememberScrollState()),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(
+            "Your Devices",
+            fontSize = 28.sp,
+            fontWeight = FontWeight.Bold,
+            color = Color.White,
+            modifier = Modifier.padding(bottom = 24.dp, top = 32.dp)
+        )
 
         urls.forEach { url ->
             val uri = Uri.parse(url)
@@ -351,36 +527,77 @@ fun ConnectedScreen(urls: Set<String>, autoPairEnabled: Boolean, onAutoPairChang
             Card(
                 shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(containerColor = Color(0xFF2C2C2C)),
-                modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 16.dp)
             ) {
-                Row(modifier = Modifier.padding(20.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                Row(
+                    modifier = Modifier
+                        .padding(20.dp)
+                        .fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text(rawName, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                        Text(if (isLive) "🟢 Active" else "⚠️ Disconnected", color = if (isLive) Color.Green else Color.Yellow, fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 4.dp))
+                        Text(
+                            rawName,
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                        Text(
+                            if (isLive) "🟢 Active" else "⚠️ Disconnected",
+                            color = if (isLive) Color.Green else Color.Yellow,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
                     }
-                    IconButton(onClick = { onRemoveDevice(url) }) { Icon(Icons.Default.Delete, contentDescription = "Remove", tint = Color.Red.copy(alpha = 0.8f)) }
+                    IconButton(onClick = { onRemoveDevice(url) }) {
+                        Icon(
+                            Icons.Default.Delete,
+                            contentDescription = "Remove",
+                            tint = Color.Red.copy(alpha = 0.8f)
+                        )
+                    }
                 }
             }
         }
 
         Row(
-            modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 16.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Text("Auto-Reconnect to known devices", color = Color.White, fontSize = 16.sp)
-            Switch(checked = autoPairEnabled, onCheckedChange = onAutoPairChange, colors = SwitchDefaults.colors(checkedThumbColor = Color(0xFF4285F4), checkedTrackColor = Color(0xFF4285F4).copy(alpha = 0.5f)))
+            Switch(
+                checked = autoPairEnabled,
+                onCheckedChange = onAutoPairChange,
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = Color(0xFF4285F4),
+                    checkedTrackColor = Color(0xFF4285F4).copy(alpha = 0.5f)
+                )
+            )
         }
 
         Button(
             onClick = onAddDevice,
             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4285F4)),
-            modifier = Modifier.fillMaxWidth().height(56.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(56.dp),
             shape = RoundedCornerShape(16.dp)
         ) {
             Icon(Icons.Default.Add, contentDescription = null, tint = Color.White)
             Spacer(modifier = Modifier.width(8.dp))
-            Text("Add another Mac", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            Text(
+                "Add another Mac",
+                color = Color.White,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold
+            )
         }
 
         if (!isMouseControlEnabled) {
@@ -392,10 +609,17 @@ fun ConnectedScreen(urls: Set<String>, autoPairEnabled: Boolean, onAutoPairChang
                     context.startActivity(intent)
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF333333)),
-                modifier = Modifier.fillMaxWidth().height(56.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp),
                 shape = RoundedCornerShape(16.dp)
             ) {
-                Text("Enable Mouse Control (Accessibility)", color = Color(0xFFFFB74D), fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                Text(
+                    "Enable Mouse Control (Accessibility)",
+                    color = Color(0xFFFFB74D),
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold
+                )
             }
         }
     }
@@ -435,8 +659,14 @@ fun CameraScannerScreen(onCancel: () -> Unit, onUrlScanned: (String) -> Unit) {
 
                     try {
                         cameraProvider.unbindAll()
-                        cameraProvider.bindToLifecycle(lifecycleOwner, cameraSelector, preview, imageAnalysis)
-                    } catch (exc: Exception) {}
+                        cameraProvider.bindToLifecycle(
+                            lifecycleOwner,
+                            cameraSelector,
+                            preview,
+                            imageAnalysis
+                        )
+                    } catch (exc: Exception) {
+                    }
                 }, executor)
                 previewView
             },
@@ -444,14 +674,23 @@ fun CameraScannerScreen(onCancel: () -> Unit, onUrlScanned: (String) -> Unit) {
         )
 
         Column(
-            modifier = Modifier.fillMaxWidth().padding(top = 64.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 64.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text("AirBridge", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = Color.White)
-            Text("Scan the QR code on your Mac", color = Color.White, modifier = Modifier.padding(top = 8.dp))
+            Text(
+                "Scan the QR code on your Mac",
+                color = Color.White,
+                modifier = Modifier.padding(top = 8.dp)
+            )
 
             Spacer(modifier = Modifier.height(32.dp))
-            Button(onClick = onCancel, colors = ButtonDefaults.buttonColors(containerColor = Color.Red.copy(alpha = 0.8f))) {
+            Button(
+                onClick = onCancel,
+                colors = ButtonDefaults.buttonColors(containerColor = Color.Red.copy(alpha = 0.8f))
+            ) {
                 Text("Cancel")
             }
         }

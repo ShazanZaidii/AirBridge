@@ -328,6 +328,79 @@ class AirBridgeInputService : AccessibilityService() {
                     }
                 }
             }
+            "BRIGHTNESS" -> {
+                mainHandler.post {
+                    // Android 6.0+ requires explicit permission to modify system settings
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.System.canWrite(this@AirBridgeInputService)) {
+                        Toast.makeText(this@AirBridgeInputService, "Grant 'Modify System Settings' to AirBridge in Android Settings", Toast.LENGTH_LONG).show()
+                        return@post
+                    }
+
+                    try {
+                        val cr = contentResolver
+
+                        // Disable auto-brightness temporarily so our manual changes actually stick
+                        val currentMode = Settings.System.getInt(cr, Settings.System.SCREEN_BRIGHTNESS_MODE, Settings.System.SCREEN_BRIGHTNESS_MODE_MANUAL)
+                        if (currentMode == Settings.System.SCREEN_BRIGHTNESS_MODE_AUTOMATIC) {
+                            Settings.System.putInt(cr, Settings.System.SCREEN_BRIGHTNESS_MODE, Settings.System.SCREEN_BRIGHTNESS_MODE_MANUAL)
+                        }
+
+                        val currentBrightness = Settings.System.getInt(cr, Settings.System.SCREEN_BRIGHTNESS, 128)
+                        val step = 20 // Standard adjustment step out of a max 255
+
+                        val newBrightness = when (parts[2]) {
+                            "UP" -> min(255, currentBrightness + step)
+                            "DOWN" -> max(0, currentBrightness - step)
+                            else -> currentBrightness
+                        }
+
+                        Settings.System.putInt(cr, Settings.System.SCREEN_BRIGHTNESS, newBrightness)
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
+                }
+            }
+
+            "DND" -> {
+                mainHandler.post {
+                    val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+
+                    // Android requires explicit permission to toggle Do Not Disturb
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !notificationManager.isNotificationPolicyAccessGranted) {
+                        Toast.makeText(this@AirBridgeInputService, "Grant 'Do Not Disturb Access' to AirBridge in Android Settings", Toast.LENGTH_LONG).show()
+                        return@post
+                    }
+
+                    try {
+                        val currentFilter = notificationManager.currentInterruptionFilter
+
+                        // Toggle between Priority Only (DND on) and All (DND off)
+                        if (currentFilter == android.app.NotificationManager.INTERRUPTION_FILTER_ALL) {
+                            notificationManager.setInterruptionFilter(android.app.NotificationManager.INTERRUPTION_FILTER_PRIORITY)
+                            Toast.makeText(this@AirBridgeInputService, "DND: ON", Toast.LENGTH_SHORT).show()
+                        } else {
+                            notificationManager.setInterruptionFilter(android.app.NotificationManager.INTERRUPTION_FILTER_ALL)
+                            Toast.makeText(this@AirBridgeInputService, "DND: OFF", Toast.LENGTH_SHORT).show()
+                        }
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
+                }
+            }
+
+            "MIC" -> {
+                mainHandler.post {
+                    try {
+                        // Fires the global intent to wake up Google Assistant or Gemini
+                        val intent = Intent(Intent.ACTION_VOICE_COMMAND).apply {
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                        }
+                        startActivity(intent)
+                    } catch (e: Exception) {
+                        Toast.makeText(this@AirBridgeInputService, "No Assistant App found", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
 
             "MEDIA" -> {
                 // Debounce rapid double-fires from the Mac keyboard so Android doesn't interpret it as "Skip Track"
