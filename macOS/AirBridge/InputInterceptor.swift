@@ -207,14 +207,19 @@ class InputInterceptor {
                     self.lastVolumeTime = now
                     
                     switch keyCode {
-                    case 0: inputQueue.async { self.syncServer?.broadcastInput(command: "INP:VOL:UP") }
-                    case 1: inputQueue.async { self.syncServer?.broadcastInput(command: "INP:VOL:DOWN") }
-                    case 7: inputQueue.async { self.syncServer?.broadcastInput(command: "INP:VOL:MUTE") }
-                    case 16: inputQueue.async { self.syncServer?.broadcastInput(command: "INP:MEDIA:PLAY_PAUSE") }
-                    case 17, 19: inputQueue.async { self.syncServer?.broadcastInput(command: "INP:MEDIA:NEXT") }
-                    case 18, 20: inputQueue.async { self.syncServer?.broadcastInput(command: "INP:MEDIA:PREV") }
-                    default: break
-                    }
+                            case 0: inputQueue.async { self.syncServer?.broadcastInput(command: "INP:VOL:UP") }
+                            case 1: inputQueue.async { self.syncServer?.broadcastInput(command: "INP:VOL:DOWN") }
+                            
+                            // --- NEW: Brightness Keys ---
+                            case 2: inputQueue.async { self.syncServer?.broadcastInput(command: "INP:BRIGHTNESS:UP") }
+                            case 3: inputQueue.async { self.syncServer?.broadcastInput(command: "INP:BRIGHTNESS:DOWN") }
+                            
+                            case 7: inputQueue.async { self.syncServer?.broadcastInput(command: "INP:VOL:MUTE") }
+                            case 16: inputQueue.async { self.syncServer?.broadcastInput(command: "INP:MEDIA:PLAY_PAUSE") }
+                            case 17, 19: inputQueue.async { self.syncServer?.broadcastInput(command: "INP:MEDIA:NEXT") }
+                            case 18, 20: inputQueue.async { self.syncServer?.broadcastInput(command: "INP:MEDIA:PREV") }
+                            default: break
+                            }
                     return nil
                 }
             }
@@ -274,6 +279,17 @@ class InputInterceptor {
                 let flags = event.flags
                 let isRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
                 
+                // --- NEW: Mic/Dictation (Standard F4/F5 = 118/96 | M1 Native = 160/144) ---
+                            if keycode == 118 || keycode == 96 || keycode == 160 || keycode == 144 {
+                                if !isRepeat { inputQueue.async { self.syncServer?.broadcastInput(command: "INP:MIC:TOGGLE") } }
+                                return nil
+                            }
+                            
+                            // --- NEW: DND/Focus (Standard F6 = 97 | M1 Native = 145) ---
+                            if keycode == 97 || keycode == 145 {
+                                if !isRepeat { inputQueue.async { self.syncServer?.broadcastInput(command: "INP:DND:TOGGLE") } }
+                                return nil
+                            }
                 if keycode == 4 {
                     if !isRepeat { inputQueue.async { self.syncServer?.broadcastInput(command: "INP:HOLD") } }
                     return nil

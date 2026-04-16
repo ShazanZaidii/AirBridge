@@ -94,17 +94,18 @@ class SyncServer: ObservableObject {
             }
             let clientId = host.debugDescription
             
-            connection.stateUpdateHandler = { [weak self] state in
+            connection.stateUpdateHandler = { [weak self, weak connection] state in
+                guard let conn = connection else { return }
                 switch state {
                 case .failed(_), .cancelled:
-                    self?.removeConnection(id: clientId)
+                    // Pass the exact connection instance to prevent assassinating the wrong socket
+                    self?.removeConnection(id: clientId, connection: conn)
                 default:
                     break
                 }
             }
             
             connectionsLock.lock()
-            // Kill any ghost connection from this exact IP before starting the new one
             if let existing = connectionDict[clientId] {
                 existing.cancel()
             }
@@ -279,12 +280,17 @@ class SyncServer: ObservableObject {
     }
     
 
-    private func removeConnection(id: String) {
+    private func removeConnection(id: String, connection: NWConnection) {
             connectionsLock.lock()
-            if let conn = connectionDict.removeValue(forKey: id) {
-                conn.cancel() // Explicitly terminate the dead socket
+            // ONLY remove from dictionary if the failing connection is the one currently active
+            if let current = connectionDict[id], current === connection {
+                connectionDict.removeValue(forKey: id)
+                current.cancel()
+            } else {
+                connection.cancel()
             }
             connectionsLock.unlock()
+            
             updateConnectionUI()
             
             DispatchQueue.main.async {
@@ -295,8 +301,14 @@ class SyncServer: ObservableObject {
         }
 
     func disconnect(id: String) {
-        removeConnection(id: id)
-    }
+            connectionsLock.lock()
+            if let conn = connectionDict[id] {
+                connectionDict.removeValue(forKey: id)
+                conn.cancel()
+            }
+            connectionsLock.unlock()
+            updateConnectionUI()
+        }
     
     func stopServer() {
             listener?.cancel()
@@ -392,11 +404,10 @@ class SyncServer: ObservableObject {
         UNUserNotificationCenter.current().add(request)
     }
 
-     private func receive(on connection: NWConnection, id: String) {
+    private func receive(on connection: NWConnection, id: String) {
             connection.receiveMessage { [weak self] (content, context, isComplete, error) in
-                // BUG FIX: Stop the read loop immediately if the socket errors out
                 if let _ = error {
-                    self?.removeConnection(id: id)
+                    self?.removeConnection(id: id, connection: connection)
                     return
                 }
                 
@@ -404,9 +415,10 @@ class SyncServer: ObservableObject {
                     self?.handleIncomingData(data, from: connection)
                 }
                 
-                // Only queue the next receive if this connection is still officially active
+                // Check if THIS specific connection is still the active one before queuing another read
                 self?.connectionsLock.lock()
-                let isActive = self?.connectionDict[id] != nil
+                let current = self?.connectionDict[id]
+                let isActive = (current === connection)
                 self?.connectionsLock.unlock()
                 
                 if isActive {
