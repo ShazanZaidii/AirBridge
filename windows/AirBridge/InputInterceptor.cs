@@ -31,12 +31,12 @@ namespace AirBridge
 
         private bool _isCursorOnRemote = false;
         private NativeMethods.POINT _frozenAnchor;
+        private NativeMethods.POINT _portalEntry;
         private readonly Channel<string> _inputQueue;
 
-        // Display Arrangement Properties
-        public static DeviceEdge PhoneEdge { get; set; } = DeviceEdge.Left;
-        public static double PhoneOffset { get; set; } = 0.25; // Start 25% down the screen
-        public static double PhoneSize { get; set; } = 0.50;   // Take up 50% of the screen edge
+        public static DeviceEdge PhoneEdge { get; set; } = DeviceEdge.Right;
+        public static double PhoneOffset { get; set; } = 0.25;
+        public static double PhoneSize { get; set; } = 0.50;
 
         [StructLayout(LayoutKind.Sequential)]
         private struct KBDLLHOOKSTRUCT
@@ -61,6 +61,7 @@ namespace AirBridge
 
         public void Stop()
         {
+            if (_isCursorOnRemote) ForceReturnToWindows();
             NativeMethods.UnhookWindowsHookEx(_mouseHookID);
             NativeMethods.UnhookWindowsHookEx(_keyboardHookID);
         }
@@ -82,6 +83,46 @@ namespace AirBridge
             }
         }
 
+        public void ForceReturnToWindows()
+        {
+            if (!_isCursorOnRemote) return;
+            _isCursorOnRemote = false;
+
+            // 1. Calculate a safe landing spot slightly inside the Windows screen
+            int safeX = _portalEntry.x, safeY = _portalEntry.y;
+            switch (PhoneEdge)
+            {
+                case DeviceEdge.Left: safeX += 30; break;
+                case DeviceEdge.Right: safeX -= 30; break;
+                case DeviceEdge.Top: safeY += 30; break;
+                case DeviceEdge.Bottom: safeY -= 30; break;
+            }
+
+            // 2. Restore System Cursors
+            NativeMethods.SystemParametersInfo(NativeMethods.SPI_SETCURSORS, 0, IntPtr.Zero, 0);
+
+            // 3. Move the physical cursor back
+            NativeMethods.SetCursorPos(safeX, safeY);
+            System.Media.SystemSounds.Hand.Play();
+        }
+
+        private void HideCursorSystemWide()
+        {
+            byte[] andMask = new byte[128];
+            byte[] xorMask = new byte[128];
+            for (int i = 0; i < 128; i++) { andMask[i] = 0xFF; xorMask[i] = 0x00; }
+
+            IntPtr blankCursor = NativeMethods.CreateCursor(IntPtr.Zero, 0, 0, 32, 32, andMask, xorMask);
+            uint[] cursors = { NativeMethods.OCR_NORMAL, NativeMethods.OCR_IBEAM, NativeMethods.OCR_HAND, NativeMethods.OCR_WAIT, NativeMethods.OCR_APPSTARTING };
+
+            foreach (uint cursor in cursors)
+            {
+                IntPtr copy = NativeMethods.CopyImage(blankCursor, NativeMethods.IMAGE_CURSOR, 0, 0, 0);
+                NativeMethods.SetSystemCursor(copy, cursor);
+            }
+            NativeMethods.DestroyCursor(blankCursor);
+        }
+
         private IntPtr MouseHookCallback(int nCode, IntPtr wParam, IntPtr lParam)
         {
             if (nCode >= 0)
@@ -90,17 +131,17 @@ namespace AirBridge
 
                 if ((hookStruct.flags & LLMHF_INJECTED) != 0) return NativeMethods.CallNextHookEx(_mouseHookID, nCode, wParam, lParam);
 
+                int physWidth = NativeMethods.GetSystemMetrics(0);
+                int physHeight = NativeMethods.GetSystemMetrics(1);
+
                 if (!_isCursorOnRemote)
                 {
-                    int physWidth = NativeMethods.GetSystemMetrics(0);
-                    int physHeight = NativeMethods.GetSystemMetrics(1);
-
                     double relativeY = (double)hookStruct.pt.y / physHeight;
                     double relativeX = (double)hookStruct.pt.x / physWidth;
 
                     bool hitEdge = false;
                     bool withinBounds = false;
-                    double entryRatio = 0.5; // Where on the phone's screen the cursor should appear
+                    double entryRatio = 0.5;
 
                     switch (PhoneEdge)
                     {
@@ -128,12 +169,22 @@ namespace AirBridge
 
                     if (hitEdge && withinBounds && App.Server != null && App.Server.HasActiveClient)
                     {
-                        _isCursorOnRemote = true;
-                        _frozenAnchor = hookStruct.pt;
-                        entryRatio = Math.Max(0.01, Math.Min(0.99, entryRatio)); // Clamp safely
+                        _portalEntry = hookStruct.pt;
 
-                        // Send precise entry ratio so Android knows exactly where to spawn the cursor
-                        _ = App.Server?.SendAsync($"INP:TRANSITION:PHONE:{PhoneEdge.ToString().ToLower()}:{entryRatio:F2}:{entryRatio:F2}");
+                        // FIX: Snap to dead center to prevent OS edge clamping
+                        _frozenAnchor.x = physWidth / 2;
+                        _frozenAnchor.y = physHeight / 2;
+                        NativeMethods.SetCursorPos(_frozenAnchor.x, _frozenAnchor.y);
+
+                        _isCursorOnRemote = true;
+                        HideCursorSystemWide();
+
+                        entryRatio = Math.Max(0.01, Math.Min(0.99, entryRatio));
+
+                        string relX = (PhoneEdge == DeviceEdge.Top || PhoneEdge == DeviceEdge.Bottom) ? $"{entryRatio:F2}" : "0.5";
+                        string relY = (PhoneEdge == DeviceEdge.Left || PhoneEdge == DeviceEdge.Right) ? $"{entryRatio:F2}" : "0.5";
+
+                        _inputQueue.Writer.TryWrite($"INP:TRANSITION:PHONE:{PhoneEdge.ToString().ToLower()}:{relX}:{relY}");
                         System.Media.SystemSounds.Beep.Play();
                         return (IntPtr)1;
                     }
@@ -141,58 +192,29 @@ namespace AirBridge
                 else
                 {
                     int msg = (int)wParam;
-                    int dx = hookStruct.pt.x - _frozenAnchor.x;
-                    int dy = hookStruct.pt.y - _frozenAnchor.y;
-
-                    bool escapeTriggered = false;
-                    int escapeVelocity = 80;
-
-                    switch (PhoneEdge)
-                    {
-                        case DeviceEdge.Left: escapeTriggered = dx > escapeVelocity; break;
-                        case DeviceEdge.Right: escapeTriggered = dx < -escapeVelocity; break;
-                        case DeviceEdge.Top: escapeTriggered = dy > escapeVelocity; break;
-                        case DeviceEdge.Bottom: escapeTriggered = dy < -escapeVelocity; break;
-                    }
-
-                    if (escapeTriggered)
-                    {
-                        _isCursorOnRemote = false;
-                        _ = App.Server?.SendAsync("INP:TRANSITION:MAC");
-
-                        int safeX = _frozenAnchor.x, safeY = _frozenAnchor.y;
-                        switch (PhoneEdge)
-                        {
-                            case DeviceEdge.Left: safeX += 30; break;
-                            case DeviceEdge.Right: safeX -= 30; break;
-                            case DeviceEdge.Top: safeY += 30; break;
-                            case DeviceEdge.Bottom: safeY -= 30; break;
-                        }
-
-                        NativeMethods.SetCursorPos(safeX, safeY);
-                        System.Media.SystemSounds.Hand.Play();
-                        return NativeMethods.CallNextHookEx(_mouseHookID, nCode, wParam, lParam);
-                    }
 
                     if (msg == WM_MOUSEMOVE)
                     {
+                        // Because we return 1, the OS cursor never actually moves from the center. 
+                        // The dx/dy is mathematically perfect hardware raw delta.
+                        int dx = hookStruct.pt.x - _frozenAnchor.x;
+                        int dy = hookStruct.pt.y - _frozenAnchor.y;
+
                         if (dx != 0 || dy != 0)
                         {
-                            // RESTORED THE NATIVE ANDROID PROTOCOL
                             _inputQueue.Writer.TryWrite($"INP:M:{dx}:{dy}:0:0");
-                            NativeMethods.SetCursorPos(_frozenAnchor.x, _frozenAnchor.y);
                         }
                     }
-                    else if (msg == WM_LBUTTONDOWN) _inputQueue.Writer.TryWrite("INP:CLK:L:DOWN");
-                    else if (msg == WM_LBUTTONUP) _inputQueue.Writer.TryWrite("INP:CLK:L:UP");
-                    else if (msg == WM_RBUTTONDOWN) _inputQueue.Writer.TryWrite("INP:CLK:R:DOWN");
-                    else if (msg == WM_RBUTTONUP) _inputQueue.Writer.TryWrite("INP:CLK:R:UP");
+                    else if (msg == WM_LBUTTONDOWN) _inputQueue.Writer.TryWrite("INP:CD");
+                    else if (msg == WM_LBUTTONUP) _inputQueue.Writer.TryWrite("INP:CU");
                     else if (msg == WM_MOUSEWHEEL)
                     {
                         int delta = (short)((hookStruct.mouseData >> 16) & 0xffff);
-                        _inputQueue.Writer.TryWrite($"INP:SCROLL:{delta}");
+                        int scrollY = delta / 120; // Normalize scroll ticks
+                        _inputQueue.Writer.TryWrite($"INP:M:0:0:{scrollY}:0");
                     }
 
+                    // ALWAYS block events while controlling phone
                     return (IntPtr)1;
                 }
             }
@@ -206,15 +228,15 @@ namespace AirBridge
                 var hookStruct = (KBDLLHOOKSTRUCT)Marshal.PtrToStructure(lParam, typeof(KBDLLHOOKSTRUCT));
                 int msg = (int)wParam;
 
+                // Fallback manual escape (Ctrl+Shift+Esc) just in case network drops
                 if (hookStruct.vkCode == 0x1B && Keyboard.IsKeyDown(Key.LeftCtrl) && Keyboard.IsKeyDown(Key.LeftShift))
                 {
-                    _isCursorOnRemote = false;
-                    NativeMethods.SetCursorPos(_frozenAnchor.x + 50, _frozenAnchor.y);
+                    ForceReturnToWindows();
                     return (IntPtr)1;
                 }
 
-                if (msg == WM_KEYDOWN) _inputQueue.Writer.TryWrite($"INP:KEY:{hookStruct.vkCode}:DOWN");
-                else if (msg == WM_KEYUP) _inputQueue.Writer.TryWrite($"INP:KEY:{hookStruct.vkCode}:UP");
+                if (msg == WM_KEYDOWN) _inputQueue.Writer.TryWrite($"INP:KD:{hookStruct.vkCode}");
+                else if (msg == WM_KEYUP) _inputQueue.Writer.TryWrite($"INP:KU:{hookStruct.vkCode}");
 
                 return (IntPtr)1;
             }

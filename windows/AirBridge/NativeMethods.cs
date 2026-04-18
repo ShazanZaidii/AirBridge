@@ -5,6 +5,31 @@ namespace AirBridge
 {
     internal static class NativeMethods
     {
+        // Add these to NativeMethods.cs
+
+        public const uint SPI_SETCURSORS = 0x0057;
+        public const uint OCR_NORMAL = 32512;
+        public const uint OCR_IBEAM = 32513;
+        public const uint OCR_HAND = 32649;
+        public const uint OCR_WAIT = 32514;
+        public const uint OCR_APPSTARTING = 32650;
+        public const int IMAGE_CURSOR = 2;
+
+        [DllImport("user32.dll")]
+        public static extern bool SystemParametersInfo(uint uiAction, uint uiParam, IntPtr pvParam, uint fWinIni);
+
+        [DllImport("user32.dll")]
+        public static extern IntPtr CreateCursor(IntPtr hInst, int xHotSpot, int yHotSpot, int nWidth, int nHeight, byte[] pvANDPlane, byte[] pvXORPlane);
+
+        [DllImport("user32.dll")]
+        public static extern bool SetSystemCursor(IntPtr hcur, uint id);
+
+        [DllImport("user32.dll")]
+        public static extern bool DestroyCursor(IntPtr hcur);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        public static extern IntPtr CopyImage(IntPtr hImage, uint uType, int cxDesired, int cyDesired, uint fuFlags);
+
         // --- HOOK CONSTANTS ---
         public const int WH_MOUSE_LL = 14;
         public const int WH_KEYBOARD_LL = 13;

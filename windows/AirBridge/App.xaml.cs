@@ -232,7 +232,11 @@ namespace AirBridge
             }
             else if (command.StartsWith("INP:"))
             {
-                System.Diagnostics.Debug.WriteLine($"System Command: {command}");
+                // Actually release the cursor back to Windows!
+                if (command == "INP:TRANSITION:MAC")
+                {
+                    Application.Current.Dispatcher.Invoke(() => Interceptor?.ForceReturnToWindows());
+                }
             }
             else
             {
