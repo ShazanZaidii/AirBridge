@@ -440,16 +440,24 @@ class AirBridgeInputService : AccessibilityService() {
                         performGlobalAction(GLOBAL_ACTION_RECENTS)
                         mainHandler.postDelayed({ performGlobalAction(GLOBAL_ACTION_RECENTS) }, 250)
                     }
+                    // --- NEW: Windows OS-Agnostic Commands ---
+                    "BACK" -> performGlobalAction(GLOBAL_ACTION_BACK)
+                    "QUICK_SETTINGS" -> performGlobalAction(GLOBAL_ACTION_QUICK_SETTINGS)
                 }
+            }
+            // --- NEW: Windows OS-Agnostic Swipe Commands ---
+            "SWIPE" -> {
+                if (parts.size > 2) performDirectionalSwipe(parts[2])
             }
             "KD" -> {
                 val keyCode = parts[2].toIntOrNull() ?: return
                 when (keyCode) {
-                    53 -> performGlobalAction(GLOBAL_ACTION_BACK)
-                    126 -> performDirectionalSwipe("DOWN")
-                    125 -> performDirectionalSwipe("UP")
-                    123 -> performDirectionalSwipe("RIGHT")
-                    124 -> performDirectionalSwipe("LEFT")
+                    // --- MAC SPECIFIC KEYCODES (UNTOUCHED AND PERFECTLY SAFE) ---
+                    53 -> performGlobalAction(GLOBAL_ACTION_BACK) // Mac ESC
+                    126 -> performDirectionalSwipe("DOWN")        // Mac Up Arrow
+                    125 -> performDirectionalSwipe("UP")          // Mac Down Arrow
+                    123 -> performDirectionalSwipe("RIGHT")       // Mac Left Arrow
+                    124 -> performDirectionalSwipe("LEFT")        // Mac Right Arrow
                 }
             }
         }
@@ -471,15 +479,28 @@ class AirBridgeInputService : AccessibilityService() {
         if (now - lastArrowSwipeTime < 300) return
         lastArrowSwipeTime = now
 
+        val prefs = getSharedPreferences("AirBridgePrefs", Context.MODE_PRIVATE)
+        val invertX = prefs.getBoolean("INVERT_X", false)
+        val invertY = prefs.getBoolean("INVERT_Y", false)
+
+        var finalDir = direction
+        if (invertX) {
+            if (direction == "LEFT") finalDir = "RIGHT"
+            else if (direction == "RIGHT") finalDir = "LEFT"
+        }
+        if (invertY) {
+            if (direction == "UP") finalDir = "DOWN"
+            else if (direction == "DOWN") finalDir = "UP"
+        }
+
         val startX = clampX(cursorX)
         val startY = clampY(cursorY)
         var endX = startX
         var endY = startY
 
-        // Increased to 50% for a stronger fling
         val swipeDist = min(screenWidth, screenHeight) * 0.5f
 
-        when (direction) {
+        when (finalDir) {
             "UP" -> endY = max(0f, startY - swipeDist)
             "DOWN" -> endY = min(screenHeight.toFloat(), startY + swipeDist)
             "LEFT" -> endX = max(0f, startX - swipeDist)
@@ -490,7 +511,6 @@ class AirBridgeInputService : AccessibilityService() {
         val stroke = GestureDescription.StrokeDescription(path, 0, 150)
         dispatchGesture(GestureDescription.Builder().addStroke(stroke).build(), null, null)
     }
-
     private fun openAppDrawerPhysicalSwipe() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val startX = screenWidth / 2f
