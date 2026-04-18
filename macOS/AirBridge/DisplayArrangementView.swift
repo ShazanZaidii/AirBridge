@@ -16,7 +16,7 @@ struct DisplayArrangementView: View {
     let phoneHeight: CGFloat = 140
     
     // State for positioning
-    @State private var position: CGPoint = CGPoint(x: 400, y: 55) // Default to right edge
+    @State private var position: CGPoint = CGPoint(x: -70, y: 55) // Default to right edge
     @State private var dragOffset: CGSize = .zero
     @State private var isDragging: Bool = false
     

@@ -1,11 +1,3 @@
-//
-//  ShareViewController.swift
-//  AirBridgeShare
-//
-//  Created by Shazan Zaidi on 10/04/26.
-//
-
-
 import Cocoa
 import UniformTypeIdentifiers
 
@@ -33,51 +25,60 @@ class ShareViewController: NSViewController {
             
             for attachment in attachments {
                 group.enter()
-                
-                // Grab whatever the first registered type is (e.g., "public.image", "public.data")
                 let type = attachment.registeredTypeIdentifiers.first ?? "public.item"
                 
-                // Force macOS to resolve it into a file URL
-                                attachment.loadFileRepresentation(forTypeIdentifier: type) { (url, error) in
-                                    defer { group.leave() }
-                                    
-                                    guard let secureURL = url else {
-                                        print("File representation failed: \(String(describing: error))")
-                                        return
-                                    }
-                                    
-                                    var originalName = secureURL.lastPathComponent
-                                    if let suggested = attachment.suggestedName, !suggested.isEmpty {
-                                        originalName = suggested
-                                        
-                                        // Safety check: If the suggested name somehow lacks an extension, append the correct one
-                                        if URL(fileURLWithPath: originalName).pathExtension.isEmpty && !secureURL.pathExtension.isEmpty {
-                                            originalName += ".\(secureURL.pathExtension)"
-                                        }
-                                    }
-                                    
-                                    // USE the originalName variable here!
-                                    let uniqueName = "\(UUID().uuidString.prefix(6))_\(originalName)"
-                                    let dest = sharedDir.appendingPathComponent(uniqueName)
-                                    
-                                    do {
-                                        try FileManager.default.copyItem(at: secureURL, to: dest)
-                                        lock.lock()
-                                        filesCopied += 1
-                                        lock.unlock()
-                                    } catch {
-                                        print("Copy Failed: \(error)")
-                                    }
-                                }
+                attachment.loadFileRepresentation(forTypeIdentifier: type) { (url, error) in
+                    defer { group.leave() }
+                    
+                    guard let secureURL = url else { return }
+                    
+                    var originalName = secureURL.lastPathComponent
+                    if let suggested = attachment.suggestedName, !suggested.isEmpty {
+                        originalName = suggested
+                        if URL(fileURLWithPath: originalName).pathExtension.isEmpty && !secureURL.pathExtension.isEmpty {
+                            originalName += ".\(secureURL.pathExtension)"
+                        }
+                    }
+                    
+                    let uniqueName = "\(UUID().uuidString.prefix(6))_\(originalName)"
+                    let dest = sharedDir.appendingPathComponent(uniqueName)
+                    
+                    do {
+                        try FileManager.default.copyItem(at: secureURL, to: dest)
+                        lock.lock()
+                        filesCopied += 1
+                        lock.unlock()
+                    } catch {
+                        print("Copy Failed: \(error)")
+                    }
+                }
             }
         }
         
         group.notify(queue: .main) {
-            if filesCopied > 0 {
-                let notificationName = CFNotificationName("com.shazan.airbridge.filesReady" as CFString)
-                CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(), notificationName, nil, nil, true)
-            }
-            self.extensionContext?.completeRequest(returningItems: nil, completionHandler: nil)
-        }
+                    if filesCopied > 0 {
+                        // 1. Post local Darwin notification
+                        let notificationName = CFNotificationName("com.shazan.airbridge.filesReady" as CFString)
+                        CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(), notificationName, nil, nil, true)
+                        
+                        // 2. Wake the main app and WAIT for completion
+                        if let url = URL(string: "airbridge://share") {
+                            let config = NSWorkspace.OpenConfiguration()
+                            NSWorkspace.shared.open(url, configuration: config) { (runningApp, error) in
+                                if let error = error {
+                                    print("AirBridge Workspace Open Error: \(error)")
+                                }
+                                // Close the share extension ONLY AFTER the app opens
+                                DispatchQueue.main.async {
+                                    self.extensionContext?.completeRequest(returningItems: nil, completionHandler: nil)
+                                }
+                            }
+                        } else {
+                            self.extensionContext?.completeRequest(returningItems: nil, completionHandler: nil)
+                        }
+                    } else {
+                        self.extensionContext?.completeRequest(returningItems: nil, completionHandler: nil)
+                    }
+                }
     }
 }

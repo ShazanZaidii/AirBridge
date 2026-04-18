@@ -2,6 +2,7 @@ import SwiftUI
 import CoreImage.CIFilterBuiltins
 import UserNotifications
 import AppKit
+import Network
 
 enum FilterType: String, Codable, CaseIterable {
     case startsWith = "Starts With"
@@ -16,7 +17,12 @@ struct ClipboardFilter: Codable, Identifiable, Hashable {
 }
 
 class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
+    static var shared: AppDelegate? // ADD THIS
+    var targetWindowController: NSWindowController?
+    
     func applicationDidFinishLaunching(_ notification: Notification) {
+        AppDelegate.shared = self // ADD THIS
+        
         let center = UNUserNotificationCenter.current()
         center.delegate = self
         
@@ -31,7 +37,52 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
                 print("Notification permission error: \(error)")
             }
         }
+        
+        // Listen for the URL Scheme from the Share Extension
+        NSAppleEventManager.shared().setEventHandler(
+            self,
+            andSelector: #selector(handleURLEvent(_:withReplyEvent:)),
+            forEventClass: AEEventClass(kInternetEventClass),
+            andEventID: AEEventID(kAEGetURL)
+        )
     }
+    
+    @objc func handleURLEvent(_ event: NSAppleEventDescriptor, withReplyEvent replyEvent: NSAppleEventDescriptor) {
+        if let urlString = event.paramDescriptor(forKeyword: AEKeyword(keyDirectObject))?.stringValue,
+           urlString.hasPrefix("airbridge://") {
+            
+            // Give the extension 0.5s to finish writing to the disk before scanning
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                NotificationCenter.default.post(name: Notification.Name("AirBridgeFilesReady"), object: nil)
+            }
+        }
+    }
+    
+    func showTargetSelection(server: SyncServer) {
+            if targetWindowController == nil {
+                let view = TargetSelectionView(server: server)
+                let host = NSHostingController(rootView: view)
+                let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 350, height: 300),
+                                      styleMask: [.titled, .closable],
+                                      backing: .buffered, defer: false)
+                window.center()
+                window.title = "Select Device to Send"
+                window.isReleasedWhenClosed = false
+                
+                // FORCE the window to float above all other apps
+                window.level = .floating
+                
+                // ADD THIS LINE to inject the SwiftUI view into the native window
+                window.contentViewController = host
+                
+                targetWindowController = NSWindowController(window: window)
+            }
+            
+            // Aggressively steal focus from the OS
+            NSApp.activate(ignoringOtherApps: true)
+            targetWindowController?.showWindow(nil)
+            targetWindowController?.window?.makeKeyAndOrderFront(nil)
+        }
     
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
         let userInfo = response.notification.request.content.userInfo
@@ -114,7 +165,7 @@ struct AirBridgeApp: App {
                 if server.isSendingBatch || !server.sendStatus.isEmpty {
                     VStack(spacing: 4) {
                         HStack {
-                            Text("Sending to Phone").font(.caption).bold()
+                            Text("Sending to Device").font(.caption).bold()
                             Spacer()
                         }
                         if server.isSendingBatch {
@@ -142,18 +193,22 @@ struct AirBridgeApp: App {
                     }
                 }
                 
-                Button("Send File to Phone...") {
-                    let panel = NSOpenPanel()
-                    panel.allowsMultipleSelection = true
-                    panel.canChooseDirectories = false
-                    panel.canChooseFiles = true
-                    NSApp.activate(ignoringOtherApps: true)
-                    
-                    if panel.runModal() == .OK {
-                        server.sendFiles(urls: panel.urls)
+                Divider()
+                
+                Menu("Connect to Host...") {
+                    if server.discoveredHosts.isEmpty {
+                        Text("Searching for devices...")
+                            .foregroundColor(.gray)
+                    } else {
+                        ForEach(server.discoveredHosts, id: \.endpoint) { host in
+                            if case let .service(name, _, _, _) = host.endpoint {
+                                Button(name) {
+                                    server.connectToOutbound(endpoint: host.endpoint, name: name)
+                                }
+                            }
+                        }
                     }
                 }
-                .disabled(server.activeConnectionsInfo.isEmpty)
                 
                 Button("Display Arrangement...") {
                     openWindow(id: "arrangement")
@@ -210,6 +265,69 @@ struct AirBridgeApp: App {
             }
         }
         return nil
+    }
+}
+
+struct TargetSelectionView: View {
+    @ObservedObject var server: SyncServer
+
+    var body: some View {
+        VStack(spacing: 16) {
+            Text("AirDrop to Device")
+                .font(.title3)
+                .fontWeight(.bold)
+            
+            if let urls = server.pendingTransferURLs {
+                Text("\(urls.count) file(s) ready to send")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+            }
+            
+            if server.activeConnectionsInfo.isEmpty {
+                Text("No devices connected.")
+                    .foregroundColor(.red)
+                    .padding()
+            } else {
+                List(server.activeConnectionsInfo, id: \.id) { conn in
+                    Button(action: {
+                        if let urls = server.pendingTransferURLs {
+                            server.sendFilesToTarget(urls: urls, to: conn.id)
+                            server.pendingTransferURLs = nil
+                        }
+                        NSApp.keyWindow?.close()
+                    }) {
+                        HStack {
+                            Image(systemName: "laptopcomputer.and.iphone")
+                            Text(conn.name)
+                                .font(.body)
+                            Spacer()
+                            Image(systemName: "paperplane.fill")
+                                .foregroundColor(.blue)
+                        }
+                        .padding(8)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                }
+                .frame(height: 150)
+                .background(Color(NSColor.controlBackgroundColor))
+                .cornerRadius(8)
+            }
+            
+            HStack {
+                Spacer()
+                Button("Cancel") {
+                    if let urls = server.pendingTransferURLs {
+                        for url in urls { try? FileManager.default.removeItem(at: url) }
+                    }
+                    server.pendingTransferURLs = nil
+                    NSApp.keyWindow?.close()
+                }
+                .keyboardShortcut(.cancelAction)
+            }
+        }
+        .padding()
+        .frame(width: 350)
     }
 }
 
