@@ -1,0 +1,19 @@
+<Solution>
+  <Configurations>
+    <Platform Name="Any CPU" />
+    <Platform Name="ARM" />
+    <Platform Name="ARM32" />
+    <Platform Name="ARM64" />
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Project Path="AirBridge.Package/AirBridge.Package.wapproj" Type="c7167f0d-bc9f-4e6e-afe1-012c56b48db5" Id="f46cdc00-16a4-4c54-9108-51c67ec10498">
+    <Platform Solution="*|ARM32" Project="AnyCPU" />
+    <Deploy />
+  </Project>
+  <Project Path="AirBridge/AirBridge.csproj">
+    <Platform Solution="*|ARM32" Project="ARM32" />
+    <Platform Solution="Debug|ARM64" Project="ARM64" />
+    <Platform Solution="Debug|x64" Project="x64" />
+  </Project>
+</Solution>
