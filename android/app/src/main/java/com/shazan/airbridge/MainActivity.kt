@@ -32,8 +32,10 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -224,6 +226,7 @@ fun AirBridgeApp() {
         when (currentScreen) {
             "CONNECTED" -> ConnectedScreen(
                 urls = connectedUrls,
+                onOpenSettings = { currentScreen = "SETTINGS" },
                 autoPairEnabled = autoPairEnabled,
                 onAutoPairChange = {
                     autoPairEnabled = it
@@ -247,6 +250,8 @@ fun AirBridgeApp() {
                     }
                 }
             )
+
+            "SETTINGS" -> SettingsScreen(onBack = { currentScreen = "CONNECTED" })
 
             "DISCOVERY" -> DiscoveryScreen(
                 onDevicePaired = { url ->
@@ -433,6 +438,7 @@ fun DiscoveryScreen(
 @Composable
 fun ConnectedScreen(
     urls: Set<String>,
+    onOpenSettings: () -> Unit,
     autoPairEnabled: Boolean,
     onAutoPairChange: (Boolean) -> Unit,
     onAddDevice: () -> Unit,
@@ -508,13 +514,17 @@ fun ConnectedScreen(
             .verticalScroll(rememberScrollState()),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text(
-            "Your Devices",
-            fontSize = 28.sp,
-            fontWeight = FontWeight.Bold,
-            color = Color.White,
-            modifier = Modifier.padding(bottom = 24.dp, top = 32.dp)
-        )
+        // Inside ConnectedScreen, replace the "Your Devices" Text with this Row:
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp, top = 32.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("Your Devices", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = Color.White)
+            IconButton(onClick = onOpenSettings) {
+                Icon(Icons.Default.Settings, contentDescription = "Settings", tint = Color.White)
+            }
+        }
 
         urls.forEach { url ->
             val uri = Uri.parse(url)
@@ -692,6 +702,52 @@ fun CameraScannerScreen(onCancel: () -> Unit, onUrlScanned: (String) -> Unit) {
                 colors = ButtonDefaults.buttonColors(containerColor = Color.Red.copy(alpha = 0.8f))
             ) {
                 Text("Cancel")
+            }
+        }
+    }
+}
+
+@Composable
+fun SettingsScreen(onBack: () -> Unit) {
+    val context = LocalContext.current
+    val prefs = context.getSharedPreferences("AirBridgePrefs", Context.MODE_PRIVATE)
+
+    var invertX by remember { mutableStateOf(prefs.getBoolean("INVERT_X", false)) }
+    var invertY by remember { mutableStateOf(prefs.getBoolean("INVERT_Y", false)) }
+
+    Column(
+        modifier = Modifier.fillMaxSize().background(Color(0xFF1E1E1E)).padding(24.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 32.dp, bottom = 24.dp)) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
+            }
+            Text("Control Settings", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Color.White)
+        }
+
+        Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFF2C2C2C)), modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(20.dp)) {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Column {
+                        Text("Invert Horizontal Arrows", color = Color.White, fontSize = 16.sp)
+                        Text("Swap Left/Right key actions", color = Color.Gray, fontSize = 12.sp)
+                    }
+                    Switch(checked = invertX, onCheckedChange = {
+                        invertX = it
+                        prefs.edit().putBoolean("INVERT_X", it).apply()
+                    })
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Column {
+                        Text("Invert Vertical Arrows", color = Color.White, fontSize = 16.sp)
+                        Text("Swap Up/Down key actions", color = Color.Gray, fontSize = 12.sp)
+                    }
+                    Switch(checked = invertY, onCheckedChange = {
+                        invertY = it
+                        prefs.edit().putBoolean("INVERT_Y", it).apply()
+                    })
+                }
             }
         }
     }
