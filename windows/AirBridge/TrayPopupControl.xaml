@@ -37,7 +37,7 @@
 
             <TextBlock x:Name="ScanPromptText" Text="Scan to add device" Foreground="#A0A0A5" FontSize="11" HorizontalAlignment="Center" Margin="0,8,0,16"/>
 
-            <Button Content="Connect to Host..." Height="30" Background="#3A3A3C" Foreground="White" BorderThickness="0" 
+            <Button Content="Connect to another Laptop..." Height="30" Background="#3A3A3C" Foreground="White" BorderThickness="0" 
                     Click="OpenHostDiscovery_Click" Margin="0,0,0,8" Cursor="Hand">
                 <Button.Resources>
                     <Style TargetType="Border">

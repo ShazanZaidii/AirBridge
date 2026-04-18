@@ -22,7 +22,32 @@ namespace AirBridge
         private const int WM_MOUSEWHEEL = 0x020A;
         private const int WM_KEYDOWN = 0x0100;
         private const int WM_KEYUP = 0x0101;
+        private const int WM_SYSKEYDOWN = 0x0104;
+        private const int WM_SYSKEYUP = 0x0105;
         private const uint LLMHF_INJECTED = 0x00000001;
+
+        // Virtual Key Codes
+        private const int VK_LWIN = 0x5B;
+        private const int VK_RWIN = 0x5C;
+        private const int VK_ESCAPE = 0x1B;
+        private const int VK_SPACE = 0x20;
+        private const int VK_DELETE = 0x2E;
+        private const int VK_LCONTROL = 0xA2;
+        private const int VK_RCONTROL = 0xA3;
+        private const int VK_LEFT = 0x25;
+        private const int VK_UP = 0x26;
+        private const int VK_RIGHT = 0x27;
+        private const int VK_DOWN = 0x28;
+        private const int VK_VOLUME_MUTE = 0xAD;
+        private const int VK_VOLUME_DOWN = 0xAE;
+        private const int VK_VOLUME_UP = 0xAF;
+        private const int VK_MEDIA_NEXT_TRACK = 0xB0;
+        private const int VK_MEDIA_PREV_TRACK = 0xB1;
+        private const int VK_MEDIA_PLAY_PAUSE = 0xB3;
+        private const int VK_TAB = 0x09;
+        private const int VK_MENU = 0x12;
+        private const int VK_LMENU = 0xA4;
+        private const int VK_RMENU = 0xA5;
 
         private IntPtr _mouseHookID = IntPtr.Zero;
         private IntPtr _keyboardHookID = IntPtr.Zero;
@@ -34,7 +59,14 @@ namespace AirBridge
         private NativeMethods.POINT _portalEntry;
         private readonly Channel<string> _inputQueue;
 
-        public static DeviceEdge PhoneEdge { get; set; } = DeviceEdge.Right;
+        // State Tracking Modifiers
+        private bool _isWinDown = false;
+        private bool _winActionHandled = false;
+        private bool _isAltDown = false;
+        private bool _isTabDown = false;
+        private DateTime _lastCtrlPress = DateTime.MinValue;
+
+        public static DeviceEdge PhoneEdge { get; set; } = DeviceEdge.Left;
         public static double PhoneOffset { get; set; } = 0.25;
         public static double PhoneSize { get; set; } = 0.50;
 
@@ -88,7 +120,6 @@ namespace AirBridge
             if (!_isCursorOnRemote) return;
             _isCursorOnRemote = false;
 
-            // 1. Calculate a safe landing spot slightly inside the Windows screen
             int safeX = _portalEntry.x, safeY = _portalEntry.y;
             switch (PhoneEdge)
             {
@@ -98,10 +129,7 @@ namespace AirBridge
                 case DeviceEdge.Bottom: safeY -= 30; break;
             }
 
-            // 2. Restore System Cursors
             NativeMethods.SystemParametersInfo(NativeMethods.SPI_SETCURSORS, 0, IntPtr.Zero, 0);
-
-            // 3. Move the physical cursor back
             NativeMethods.SetCursorPos(safeX, safeY);
             System.Media.SystemSounds.Hand.Play();
         }
@@ -171,7 +199,6 @@ namespace AirBridge
                     {
                         _portalEntry = hookStruct.pt;
 
-                        // FIX: Snap to dead center to prevent OS edge clamping
                         _frozenAnchor.x = physWidth / 2;
                         _frozenAnchor.y = physHeight / 2;
                         NativeMethods.SetCursorPos(_frozenAnchor.x, _frozenAnchor.y);
@@ -195,8 +222,6 @@ namespace AirBridge
 
                     if (msg == WM_MOUSEMOVE)
                     {
-                        // Because we return 1, the OS cursor never actually moves from the center. 
-                        // The dx/dy is mathematically perfect hardware raw delta.
                         int dx = hookStruct.pt.x - _frozenAnchor.x;
                         int dy = hookStruct.pt.y - _frozenAnchor.y;
 
@@ -205,16 +230,16 @@ namespace AirBridge
                             _inputQueue.Writer.TryWrite($"INP:M:{dx}:{dy}:0:0");
                         }
                     }
-                    else if (msg == WM_LBUTTONDOWN) _inputQueue.Writer.TryWrite("INP:CD");
-                    else if (msg == WM_LBUTTONUP) _inputQueue.Writer.TryWrite("INP:CU");
+                    else if (msg == WM_LBUTTONDOWN) _inputQueue.Writer.TryWrite("INP:DRAG");
+                    else if (msg == WM_LBUTTONUP) _inputQueue.Writer.TryWrite("INP:DRAG_RELEASE");
+                    else if (msg == WM_RBUTTONDOWN) _inputQueue.Writer.TryWrite("INP:HOLD");
                     else if (msg == WM_MOUSEWHEEL)
                     {
                         int delta = (short)((hookStruct.mouseData >> 16) & 0xffff);
-                        int scrollY = delta / 120; // Normalize scroll ticks
+                        int scrollY = delta / -120; // Invert for natural Android scroll handling
                         _inputQueue.Writer.TryWrite($"INP:M:0:0:{scrollY}:0");
                     }
 
-                    // ALWAYS block events while controlling phone
                     return (IntPtr)1;
                 }
             }
@@ -227,16 +252,83 @@ namespace AirBridge
             {
                 var hookStruct = (KBDLLHOOKSTRUCT)Marshal.PtrToStructure(lParam, typeof(KBDLLHOOKSTRUCT));
                 int msg = (int)wParam;
+                uint vk = hookStruct.vkCode;
 
-                // Fallback manual escape (Ctrl+Shift+Esc) just in case network drops
-                if (hookStruct.vkCode == 0x1B && Keyboard.IsKeyDown(Key.LeftCtrl) && Keyboard.IsKeyDown(Key.LeftShift))
+                if (vk == VK_ESCAPE && Keyboard.IsKeyDown(Key.LeftCtrl) && Keyboard.IsKeyDown(Key.LeftShift))
                 {
                     ForceReturnToWindows();
                     return (IntPtr)1;
                 }
 
-                if (msg == WM_KEYDOWN) _inputQueue.Writer.TryWrite($"INP:KD:{hookStruct.vkCode}");
-                else if (msg == WM_KEYUP) _inputQueue.Writer.TryWrite($"INP:KU:{hookStruct.vkCode}");
+                if (msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN)
+                {
+                    if (vk == VK_LWIN || vk == VK_RWIN)
+                    {
+                        _isWinDown = true;
+                        _winActionHandled = false;
+                    }
+                    else if (vk == VK_MENU || vk == VK_LMENU || vk == VK_RMENU)
+                    {
+                        _isAltDown = true;
+                    }
+                    else if (vk == VK_SPACE && _isWinDown)
+                    {
+                        _winActionHandled = true;
+                        _inputQueue.Writer.TryWrite("INP:SYS:DRAWER");
+                    }
+                    else if (vk == VK_TAB && _isAltDown)
+                    {
+                        if (!_isTabDown)
+                        {
+                            _isTabDown = true;
+                            _inputQueue.Writer.TryWrite("INP:SYS:LAST_APP");
+                        }
+                    }
+                    else if (vk == VK_ESCAPE) _inputQueue.Writer.TryWrite("INP:SYS:BACK");
+                    else if (vk == VK_DELETE) _inputQueue.Writer.TryWrite("INP:SYS:RECENTS");
+                    else if (vk == VK_LCONTROL || vk == VK_RCONTROL)
+                    {
+                        var now = DateTime.Now;
+                        if ((now - _lastCtrlPress).TotalMilliseconds < 400)
+                            _inputQueue.Writer.TryWrite("INP:SYS:QUICK_SETTINGS");
+                        else
+                            _inputQueue.Writer.TryWrite("INP:SYS:NOTIF");
+
+                        _lastCtrlPress = now;
+                    }
+                    else if (vk == VK_UP) _inputQueue.Writer.TryWrite("INP:SWIPE:DOWN");
+                    else if (vk == VK_DOWN) _inputQueue.Writer.TryWrite("INP:SWIPE:UP");
+                    else if (vk == VK_LEFT) _inputQueue.Writer.TryWrite("INP:SWIPE:RIGHT");
+                    else if (vk == VK_RIGHT) _inputQueue.Writer.TryWrite("INP:SWIPE:LEFT");
+                    else if (vk == VK_VOLUME_UP) _inputQueue.Writer.TryWrite("INP:VOL:UP");
+                    else if (vk == VK_VOLUME_DOWN) _inputQueue.Writer.TryWrite("INP:VOL:DOWN");
+                    else if (vk == VK_VOLUME_MUTE) _inputQueue.Writer.TryWrite("INP:VOL:MUTE");
+                    else if (vk == VK_MEDIA_PLAY_PAUSE) _inputQueue.Writer.TryWrite("INP:MEDIA:PLAY_PAUSE");
+                    else if (vk == VK_MEDIA_NEXT_TRACK) _inputQueue.Writer.TryWrite("INP:MEDIA:NEXT");
+                    else if (vk == VK_MEDIA_PREV_TRACK) _inputQueue.Writer.TryWrite("INP:MEDIA:PREV");
+                    else
+                    {
+                        if (vk == VK_TAB) _isTabDown = true;
+                        _inputQueue.Writer.TryWrite($"INP:KD:{vk}");
+                    }
+                }
+                else if (msg == WM_KEYUP || msg == WM_SYSKEYUP)
+                {
+                    if (vk == VK_LWIN || vk == VK_RWIN)
+                    {
+                        _isWinDown = false;
+                        if (!_winActionHandled) _inputQueue.Writer.TryWrite("INP:SYS:HOME");
+                    }
+                    else if (vk == VK_MENU || vk == VK_LMENU || vk == VK_RMENU)
+                    {
+                        _isAltDown = false;
+                    }
+                    else
+                    {
+                        if (vk == VK_TAB) _isTabDown = false;
+                        _inputQueue.Writer.TryWrite($"INP:KU:{vk}");
+                    }
+                }
 
                 return (IntPtr)1;
             }
