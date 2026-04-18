@@ -14,6 +14,9 @@ class ShareViewController: NSViewController {
         
         let docsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
         let sharedDir = docsURL.appendingPathComponent("AirBridgePending")
+        
+        // FIX: Nuke the old accumulated files so they don't pile up across shares
+        try? FileManager.default.removeItem(at: sharedDir)
         try? FileManager.default.createDirectory(at: sharedDir, withIntermediateDirectories: true, attributes: nil)
         
         let group = DispatchGroup()

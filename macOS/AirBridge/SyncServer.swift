@@ -23,7 +23,7 @@ class SyncServer: ObservableObject {
     @Published var discoveredHosts: [NWBrowser.Result] = []
     @Published var pendingTransferURLs: [URL]? = nil
     
-    private var connectionDict: [String: NWConnection] = [:]
+    private var connectionDict: [String: ActiveConnection] = [:]
     private let connectionsLock = NSLock()
 
     private var lastChangeCount: Int = 0
@@ -42,6 +42,7 @@ class SyncServer: ObservableObject {
     private var batchStartTime: Date?
     private var lastNotifTime: Date?
     
+    private var sentFileTracker = Set<String>()
     private var isReceivingFile = false
     private var currentFileHandle: FileHandle?
     private var currentFileName: String = ""
@@ -128,11 +129,13 @@ class SyncServer: ObservableObject {
             }
         }
         
+        
+        let activeConn = ActiveConnection(id: clientId, name: "Device (\(clientId.prefix(8)))", connection: connection)
         connectionsLock.lock()
         if let existing = connectionDict[clientId] {
-            existing.cancel()
+            existing.connection.cancel()
         }
-        connectionDict[clientId] = connection
+        connectionDict[clientId] = activeConn
         connectionsLock.unlock()
         
         connection.start(queue: .global(qos: .userInitiated))
@@ -294,9 +297,9 @@ class SyncServer: ObservableObject {
 
     private func removeConnection(id: String, connection: NWConnection) {
         connectionsLock.lock()
-        if let current = connectionDict[id], current === connection {
+        if let current = connectionDict[id], current.connection === connection {
             connectionDict.removeValue(forKey: id)
-            current.cancel()
+            current.connection.cancel()
         } else {
             connection.cancel()
         }
@@ -315,7 +318,7 @@ class SyncServer: ObservableObject {
         connectionsLock.lock()
         if let conn = connectionDict[id] {
             connectionDict.removeValue(forKey: id)
-            conn.cancel()
+            conn.connection.cancel()
         }
         connectionsLock.unlock()
         updateConnectionUI()
@@ -329,7 +332,7 @@ class SyncServer: ObservableObject {
         
         connectionsLock.lock()
         for (_, conn) in connectionDict {
-            conn.cancel()
+            conn.connection.cancel()
         }
         connectionDict.removeAll()
         connectionsLock.unlock()
@@ -337,13 +340,11 @@ class SyncServer: ObservableObject {
 
     private func updateConnectionUI() {
         connectionsLock.lock()
-        let currentConns = connectionDict
+        let currentConns = Array(connectionDict.values)
         connectionsLock.unlock()
         
         DispatchQueue.main.async {
-            self.activeConnectionsInfo = currentConns.map {
-                ActiveConnection(id: $0.key, name: "Device (\($0.key.prefix(8)))", connection: $0.value)
-            }
+            self.activeConnectionsInfo = currentConns
             self.connectedClients = currentConns.count
         }
     }
@@ -397,7 +398,7 @@ class SyncServer: ObservableObject {
         connectionsLock.unlock()
         
         for connection in activeConnections {
-            connection.send(content: data, contentContext: context, isComplete: true, completion: .contentProcessed({ _ in }))
+            connection.connection.send(content: data, contentContext: context, isComplete: true, completion: .contentProcessed({ _ in }))
         }
     }
     
@@ -430,7 +431,7 @@ class SyncServer: ObservableObject {
             
             self?.connectionsLock.lock()
             let current = self?.connectionDict[id]
-            let isActive = (current === connection)
+            let isActive = (current?.connection === connection)
             self?.connectionsLock.unlock()
             
             if isActive {
@@ -449,7 +450,7 @@ class SyncServer: ObservableObject {
         connectionsLock.unlock()
         
         for connection in activeConnections {
-            connection.send(content: data, contentContext: context, isComplete: true, completion: .contentProcessed({ _ in }))
+            connection.connection.send(content: data, contentContext: context, isComplete: true, completion: .contentProcessed({ _ in }))
         }
     }
     
@@ -467,9 +468,8 @@ class SyncServer: ObservableObject {
             case .ready:
                 let newId = UUID().uuidString
                 let activeConn = ActiveConnection(id: newId, name: name, connection: connection)
-                
                 self.connectionsLock.lock()
-                self.connectionDict[newId] = connection
+                self.connectionDict[newId] = activeConn
                 self.connectionsLock.unlock()
 
                 DispatchQueue.main.async {
@@ -493,7 +493,7 @@ class SyncServer: ObservableObject {
         let metadata = NWProtocolWebSocket.Metadata(opcode: .text)
         let context = NWConnection.ContentContext(identifier: "textContext", metadata: [metadata])
         if let connection = connectionDict[targetId], let data = command.data(using: .utf8) {
-            connection.send(content: data, contentContext: context, isComplete: true, completion: .contentProcessed({ _ in }))
+            connection.connection.send(content: data, contentContext: context, isComplete: true, completion: .contentProcessed({ _ in }))
         }
     }
 
@@ -501,11 +501,14 @@ class SyncServer: ObservableObject {
         let metadata = NWProtocolWebSocket.Metadata(opcode: .binary)
         let context = NWConnection.ContentContext(identifier: "binaryContext", metadata: [metadata])
         if let connection = connectionDict[targetId] {
-            connection.send(content: data, contentContext: context, isComplete: true, completion: .contentProcessed({ _ in }))
+            connection.connection.send(content: data, contentContext: context, isComplete: true, completion: .contentProcessed({ _ in }))
         }
     }
 
     func sendFilesToTarget(urls: [URL], to targetId: String) {
+        for url in urls {
+                self.sentFileTracker.insert(url.lastPathComponent)
+            }
         DispatchQueue.global(qos: .userInitiated).async {
             let totalFiles = urls.count
             var totalBytes = 0
@@ -561,9 +564,8 @@ class SyncServer: ObservableObject {
                                    let isDirectory = resourceValues.isDirectory, !isDirectory {
                                     
                                     let name = deepURL.lastPathComponent
-                                    if !seenFileNames.contains(name) {
+                                    if !self.sentFileTracker.contains(name) {
                                         validFilesToSend.append(deepURL)
-                                        seenFileNames.insert(name)
                                     }
                                 }
                             }
@@ -588,6 +590,9 @@ class SyncServer: ObservableObject {
 
     func sendFiles(urls: [URL], fromSharedDir: Bool = false) {
         guard connectedClients > 0 else { return }
+        for url in urls {
+                self.sentFileTracker.insert(url.lastPathComponent)
+            }
         
         DispatchQueue.global(qos: .userInitiated).async {
             let totalFiles = urls.count
@@ -656,7 +661,7 @@ class SyncServer: ObservableObject {
         let activeConnections = Array(connectionDict.values)
         connectionsLock.unlock()
         for connection in activeConnections {
-            connection.send(content: data, contentContext: context, isComplete: true, completion: .contentProcessed({ _ in }))
+            connection.connection.send(content: data, contentContext: context, isComplete: true, completion: .contentProcessed({ _ in }))
         }
     }
 }
