@@ -3,6 +3,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Net.NetworkInformation;
 
 namespace AirBridge
 {
@@ -101,15 +102,25 @@ namespace AirBridge
             _ = IpcManager.StartServerAsync();
 
             FileTransfer = new FileTransferManager();
+
+            //Testing:
+            // These fire instantly the millisecond your Wi-Fi or Hotspot drops
+            NetworkChange.NetworkAvailabilityChanged += (s, ev) => Application.Current.Dispatcher.Invoke(() => Interceptor?.ForceReturnToWindows());
+            NetworkChange.NetworkAddressChanged += (s, ev) => Application.Current.Dispatcher.Invoke(() => Interceptor?.ForceReturnToWindows());
+
+
             Client = new SyncClient();
             Client.OnCommandReceived += HandleIncomingCommand;
             Client.OnBinaryReceived += FileTransfer.HandleBinaryChunk;
+            Client.OnDisconnected += () => Application.Current.Dispatcher.Invoke(() => Interceptor?.ForceReturnToWindows());
             await Client.DiscoverAndConnectAsync();
 
             // 4. Initialize Backend First
             Server = new SyncServer();
             Server.OnCommandReceived += HandleIncomingCommand;
             Server.OnBinaryReceived += FileTransfer.HandleBinaryChunk;
+            
+            Server.OnClientDisconnected += () => Application.Current.Dispatcher.Invoke(() => Interceptor?.ForceReturnToWindows());
             await Server.StartAsync(8080);
 
             Interceptor = new InputInterceptor();
@@ -165,7 +176,7 @@ namespace AirBridge
                     if (key.GetValue("") as string != "Send via AirBridge")
                     {
                         key.SetValue("", "Send via AirBridge");
-                        key.SetValue("Icon", $"\"{exePath}\",0");
+                        key.SetValue("Icon", System.Environment.ProcessPath);
 
                         // Tell Windows to allow unlimited file selections so it doesn't hide the menu
                         key.SetValue("MultiSelectModel", "Player");
