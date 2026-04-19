@@ -170,45 +170,41 @@ namespace AirBridge
                 string exePath = Environment.ProcessPath;
                 bool registryUpdated = false;
 
+                // Construct the absolute path to the MSIX App Execution Alias
+                string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+                string aliasPath = System.IO.Path.Combine(localAppData, "Microsoft", "WindowsApps", "AirBridgeRun.exe");
+
                 // Register for Files
                 using (var key = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(@"Software\Classes\*\shell\AirBridge"))
                 {
-                    if (key.GetValue("") as string != "Send via AirBridge")
+                    key.SetValue("", "Send via AirBridge");
+                    key.SetValue("Icon", $"\"{exePath}\"");
+                    key.SetValue("MultiSelectModel", "Player");
+
+                    using (var commandKey = key.CreateSubKey("command"))
                     {
-                        key.SetValue("", "Send via AirBridge");
-                        key.SetValue("Icon", System.Environment.ProcessPath);
-
-                        // Tell Windows to allow unlimited file selections so it doesn't hide the menu
-                        key.SetValue("MultiSelectModel", "Player");
-
-                        using (var commandKey = key.CreateSubKey("command"))
-                        {
-                            commandKey.SetValue("", $"\"{exePath}\" \"%1\"");
-                        }
-                        registryUpdated = true;
+                        // Write the absolute path to the Alias
+                        commandKey.SetValue("", $"\"{aliasPath}\" \"%1\"");
                     }
+                    registryUpdated = true;
                 }
 
                 // Register for Folders
                 using (var key = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(@"Software\Classes\Directory\shell\AirBridge"))
                 {
-                    if (key.GetValue("") as string != "Send via AirBridge")
+                    key.SetValue("", "Send via AirBridge");
+                    key.SetValue("Icon", $"\"{exePath}\",0");
+                    key.SetValue("MultiSelectModel", "Player");
+
+                    using (var commandKey = key.CreateSubKey("command"))
                     {
-                        key.SetValue("", "Send via AirBridge");
-                        key.SetValue("Icon", $"\"{exePath}\",0");
-
-                        // Tell Windows to allow unlimited folder selections
-                        key.SetValue("MultiSelectModel", "Player");
-
-                        using (var commandKey = key.CreateSubKey("command"))
-                        {
-                            commandKey.SetValue("", $"\"{exePath}\" \"%1\"");
-                        }
-                        registryUpdated = true;
+                        // Write the absolute path to the Alias
+                        commandKey.SetValue("", $"\"{aliasPath}\" \"%1\"");
                     }
+                    registryUpdated = true;
                 }
 
-                // SendTo Shortcut creation
+                // SendTo Shortcut creation (Keep using exePath for shortcuts)
                 string sendToPath = Environment.GetFolderPath(Environment.SpecialFolder.SendTo);
                 string shortcutPath = System.IO.Path.Combine(sendToPath, "AirBridge.lnk");
 
@@ -223,7 +219,6 @@ namespace AirBridge
                     System.Diagnostics.Process.Start(processInfo);
                 }
 
-                // Force Explorer to reload the context menu cache instantly if we made changes
                 if (registryUpdated)
                 {
                     NativeMethods.SHChangeNotify(0x08000000, 0x0000, IntPtr.Zero, IntPtr.Zero);
