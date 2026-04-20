@@ -174,8 +174,23 @@ class SyncServer: ObservableObject {
             }
             
             let parts = text.components(separatedBy: ":")
-            
-            if parts[0] == "BATCH_START" && parts.count >= 3 {
+            if parts[0] == "DEVICE_NAME" && parts.count >= 2 {
+                        let actualName = parts.dropFirst().joined(separator: ":")
+                        DispatchQueue.main.async {
+                            self.connectionsLock.lock()
+                            // Find who sent this by matching the exact connection object
+                            if let key = self.connectionDict.first(where: { $0.value.connection === connection })?.key {
+                                let existing = self.connectionDict[key]!
+                                self.connectionDict[key] = ActiveConnection(id: existing.id, name: actualName, connection: existing.connection)
+                            }
+                            self.connectionsLock.unlock()
+                            self.updateConnectionUI()
+                        }
+                        return
+                    }
+                    // ----------------------------------
+                    
+                if parts[0] == "BATCH_START" && parts.count >= 3 {
                 DispatchQueue.main.async {
                     self.isReceivingBatch = true
                     self.totalIncomingFiles = Int(parts[1]) ?? 0
@@ -236,6 +251,10 @@ class SyncServer: ObservableObject {
                 }
                 return
             }
+            
+            if text == "BATCH_COMPLETE" {
+                            return
+                        }
             
             DispatchQueue.main.async {
                 let pb = NSPasteboard.general
