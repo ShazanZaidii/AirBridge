@@ -435,15 +435,14 @@ class AirBridgeService : Service() {
                     data = Uri.parse(url)
                 }
 
-                // Determine slot (0 for Mac, 1 for Windows)
-                val slot = index % 2
-                val categoryFile = "com.shazan.airbridge.category.FILE_SHARE_TARGET_$slot"
-                val categoryText = "com.shazan.airbridge.category.TEXT_SHARE_TARGET_$slot"
+                // Unified categories matching the new shortcuts.xml
+                val categoryFile = "com.shazan.airbridge.category.FILE_SHARE_TARGET"
+                val categoryText = "com.shazan.airbridge.category.TEXT_SHARE_TARGET"
 
-                // NEW: Define the specific ghost component
-                val ghostComponent = android.content.ComponentName(
+                // Point directly to the main ShareActivity
+                val mainComponent = android.content.ComponentName(
                     this@AirBridgeService,
-                    "com.shazan.airbridge.ShareActivitySlot$slot"
+                    ShareActivity::class.java
                 )
 
                 val person = androidx.core.app.Person.Builder()
@@ -459,7 +458,7 @@ class AirBridgeService : Service() {
                     .setCategories(setOf(categoryFile, categoryText))
                     .setIntent(shareIntent)
                     .setPerson(person)
-                    .setActivity(ghostComponent) // <--- THE BULLETPROOF BYPASS
+                    .setActivity(mainComponent) // Point directly to the single Activity
                     .setLongLived(true)
                     .setRank(index)
                     .build()
