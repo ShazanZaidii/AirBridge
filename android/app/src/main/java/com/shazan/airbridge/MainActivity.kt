@@ -164,7 +164,7 @@ fun AirBridgeApp() {
                 Spacer(modifier = Modifier.height(16.dp))
                 Text(
                     "AirBridge requires the 'Display over other apps' permission to sync " +
-                            "your Clipboard with Mac (and to control your mobile from mac later if you want)",
+                            "your Clipboard with PC (and to control your mobile from PC later if you want)",
                     color = Color.LightGray,
                     textAlign = androidx.compose.ui.text.style.TextAlign.Center
                 )
@@ -368,7 +368,7 @@ fun DiscoveryScreen(
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(
-            "Looking for Macs...",
+            "Looking for Devices...",
             fontSize = 28.sp,
             fontWeight = FontWeight.Bold,
             color = Color.White,
@@ -389,14 +389,14 @@ fun DiscoveryScreen(
             LazyColumn(modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()) {
-                items(discoveredDevices) { mac ->
+                items(discoveredDevices) { Device ->
                     Card(
                         shape = RoundedCornerShape(16.dp),
                         colors = CardDefaults.cardColors(containerColor = Color(0xFF2C2C2C)),
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(bottom = 12.dp)
-                            .clickable { onDevicePaired(mac.url) }
+                            .clickable { onDevicePaired(Device.url) }
                     ) {
                         Row(
                             modifier = Modifier
@@ -405,7 +405,7 @@ fun DiscoveryScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                mac.name,
+                                Device.name,
                                 fontSize = 20.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = Color.White
@@ -603,7 +603,7 @@ fun ConnectedScreen(
             Icon(Icons.Default.Add, contentDescription = null, tint = Color.White)
             Spacer(modifier = Modifier.width(8.dp))
             Text(
-                "Add another Mac",
+                "Add another Device",
                 color = Color.White,
                 fontSize = 16.sp,
                 fontWeight = FontWeight.Bold
@@ -691,7 +691,7 @@ fun CameraScannerScreen(onCancel: () -> Unit, onUrlScanned: (String) -> Unit) {
         ) {
             Text("AirBridge", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = Color.White)
             Text(
-                "Scan the QR code on your Mac",
+                "Scan the QR code on your PC",
                 color = Color.White,
                 modifier = Modifier.padding(top = 8.dp)
             )
