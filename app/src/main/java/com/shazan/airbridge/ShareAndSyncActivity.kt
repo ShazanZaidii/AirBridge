@@ -58,10 +58,36 @@ class ShareActivity : Activity() {
         super.onCreate(savedInstanceState)
         val action = intent?.action
 
-        // Grab the explicit target URL if shared via the specific Direct Share target
         val prefs = getSharedPreferences("AirBridgePrefs", Context.MODE_PRIVATE)
         val urls = prefs.getStringSet("WS_URLS", emptySet()) ?: emptySet()
-        val targetUrl = intent?.getStringExtra("TARGET_URL") ?: urls.firstOrNull()
+
+        var targetUrl = intent?.getStringExtra("TARGET_URL")
+
+        // Android Direct Share passes the Shortcut ID instead of custom extras
+        if (targetUrl == null) {
+            val shortcutId = intent?.getStringExtra(Intent.EXTRA_SHORTCUT_ID)
+            targetUrl = urls.firstOrNull { url ->
+                val safeEncoded = android.util.Base64.encodeToString(
+                    url.toByteArray(),
+                    android.util.Base64.NO_WRAP or android.util.Base64.URL_SAFE
+                ).replace("=", "")
+                "device_$safeEncoded" == shortcutId
+            }
+        }
+
+        // Fallback to first available ONLY if the generic app icon was tapped
+        if (targetUrl == null || !urls.contains(targetUrl)) {
+            targetUrl = urls.firstOrNull()
+        }
+
+        // Tell Android you just used this target so it maintains its top-row rank
+        targetUrl?.let { url ->
+            val safeEncoded = android.util.Base64.encodeToString(
+                url.toByteArray(),
+                android.util.Base64.NO_WRAP or android.util.Base64.URL_SAFE
+            ).replace("=", "")
+            androidx.core.content.pm.ShortcutManagerCompat.reportShortcutUsed(this, "device_$safeEncoded")
+        }
 
         if (action == Intent.ACTION_SEND || action == Intent.ACTION_SEND_MULTIPLE) {
 
@@ -87,8 +113,17 @@ class ShareActivity : Activity() {
 
             val text = intent.getStringExtra(Intent.EXTRA_TEXT)
 
+            // Extract the actual device name from the URL
+            val deviceName = targetUrl?.let {
+                Uri.parse(it).getQueryParameter("name")
+            } ?: "Device"
+
             if (uris.isNotEmpty()) {
-                val msg = if (targetUrl != null) "Sending ${uris.size} file(s) to Mac..." else "Sending to first Mac. Use Direct Share to pick specific Mac."
+                val msg = if (targetUrl != null) {
+                    "Sending ${uris.size} file(s) to $deviceName..."
+                } else {
+                    "Sending to $deviceName"
+                }
                 Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
 
                 val serviceIntent = Intent(this, AirBridgeService::class.java).apply {

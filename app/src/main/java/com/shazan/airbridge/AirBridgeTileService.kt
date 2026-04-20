@@ -39,8 +39,8 @@ class AirBridgeTileService : TileService() {
 
         if (urls.size == 1) {
             val uri = Uri.parse(urls.first())
-            val macName = uri.getQueryParameter("name") ?: "Mac"
-            qsTile?.label = "Send to $macName"
+            val DeviceName = uri.getQueryParameter("name") ?: "Mac"
+            qsTile?.label = "$DeviceName"
             qsTile?.state = Tile.STATE_ACTIVE
         } else if (urls.size > 1) {
             qsTile?.label = "Sync ${urls.size} Macs"

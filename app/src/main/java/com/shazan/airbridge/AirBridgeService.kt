@@ -62,7 +62,7 @@ class AirBridgeService : Service() {
     private lateinit var clipboardManager: ClipboardManager
 
     private var lastClipboardText: String = ""
-    private var isUpdatingFromMac = false
+    private var isUpdatingFromDevice = false
     private var hasShownAccessibilityToast = false
 
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -84,6 +84,8 @@ class AirBridgeService : Service() {
     private var incomingReceivedBytes = 0L
     private var incomingStartTime = 0L
     private var incomingLastUpdate = 0L
+
+    private val OUTGOING_NOTIF_ID = 2003
 
     companion object {
         @SuppressLint("StaticFieldLeak")
@@ -152,9 +154,9 @@ class AirBridgeService : Service() {
         if (textToSend != null) {
             if (activeSockets.isNotEmpty()) {
                 activeSockets.values.forEach { it.send(textToSend) }
-                showToast("Copied to Mac(s)!")
+                showToast("Copied to Device(s)!")
             } else {
-                showToast("No Macs connected")
+                showToast("No Devices connected")
             }
         }
 
@@ -199,23 +201,38 @@ class AirBridgeService : Service() {
     }
 
     private fun updateTransferNotification(progress: Int, title: String, text: String) {
-        val notification = NotificationCompat.Builder(this, "AirBridgeChannel")
+        val notificationManager = getSystemService(NotificationManager::class.java)
+
+        // Best practice: use the specific transfer channel instead of the background service channel
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel("transfer_channel", "File Transfers", NotificationManager.IMPORTANCE_LOW)
+            notificationManager.createNotificationChannel(channel)
+        }
+
+        val notification = NotificationCompat.Builder(this, "transfer_channel")
             .setContentTitle(title)
             .setContentText(text)
-            .setSmallIcon(android.R.drawable.ic_menu_share)
+            .setSmallIcon(android.R.drawable.stat_sys_upload) // Differentiate from sync icon
             .setProgress(100, progress, false)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .build()
-        getSystemService(NotificationManager::class.java).notify(1, notification)
+
+        notificationManager.notify(OUTGOING_NOTIF_ID, notification)
     }
 
     private fun streamBatchToMac(uris: List<Uri>, targetUrl: String?) {
         transferQueue.execute {
-            var targetSocket =
-                if (targetUrl != null) activeSockets[targetUrl] else activeSockets.values.firstOrNull()
+            var targetSocket: WebSocket? = null
+            if (targetUrl != null) {
+                val baseTarget = targetUrl.substringBefore("?")
+                targetSocket = activeSockets.entries.firstOrNull { it.key.startsWith(baseTarget) }?.value
+            }
             if (targetSocket == null) {
-                showToast("Mac disconnected. Aborting.")
+                targetSocket = activeSockets.values.firstOrNull()
+            }
+            if (targetSocket == null) {
+                showToast("Device disconnected. Aborting.")
                 return@execute
             }
 
@@ -250,13 +267,22 @@ class AirBridgeService : Service() {
 
                 while (!success && retryCount < 3) {
                     try {
-                        targetSocket =
-                            if (targetUrl != null) activeSockets[targetUrl] else activeSockets.values.firstOrNull()
+                        if (targetUrl != null) {
+                            val baseTarget = targetUrl.substringBefore("?")
+                            targetSocket = activeSockets.entries.firstOrNull { it.key.startsWith(baseTarget) }?.value
+                        } else {
+                            targetSocket = activeSockets.values.firstOrNull()
+                        }
+
                         var waitCount = 0
                         while (targetSocket == null && waitCount < 40) {
                             Thread.sleep(50)
-                            targetSocket =
-                                if (targetUrl != null) activeSockets[targetUrl] else activeSockets.values.firstOrNull()
+                            if (targetUrl != null) {
+                                val baseTarget = targetUrl.substringBefore("?")
+                                targetSocket = activeSockets.entries.firstOrNull { it.key.startsWith(baseTarget) }?.value
+                            } else {
+                                targetSocket = activeSockets.values.firstOrNull()
+                            }
                             waitCount++
                         }
                         if (targetSocket == null) return@execute
@@ -300,7 +326,7 @@ class AirBridgeService : Service() {
                                     )
                                     updateTransferNotification(
                                         progressPct,
-                                        "Sending $totalFiles files to Mac",
+                                        "Sending $totalFiles files to Device",
                                         "${formatSpeed(speed)} • ${formatEta(eta)}"
                                     )
 
@@ -326,7 +352,8 @@ class AirBridgeService : Service() {
             }
             showToast("Sent $totalFiles files!")
 
-            getSystemService(NotificationManager::class.java).notify(1, createNotification())
+            getSystemService(NotificationManager::class.java).cancel(OUTGOING_NOTIF_ID)
+
             mainHandler.postDelayed({ broadcastTransferProgress(-1, -1, 0, "", "") }, 2000)
         }
     }
@@ -359,22 +386,61 @@ class AirBridgeService : Service() {
     @RequiresApi(Build.VERSION_CODES.Q)
     private fun updateDirectShareShortcuts(urls: Set<String>) {
         try {
-            val shortcuts = urls.mapIndexed { index, url ->
+            if (urls.isEmpty()) {
+                androidx.core.content.pm.ShortcutManagerCompat.removeAllDynamicShortcuts(this)
+                return
+            }
+
+            val activeShortcuts = mutableListOf<androidx.core.content.pm.ShortcutInfoCompat>()
+
+            urls.sorted().forEachIndexed { index, url ->
                 val uri = Uri.parse(url)
-                val rawName = uri.getQueryParameter("name") ?: "Mac $index"
+                val rawName = uri.getQueryParameter("name") ?: "Device $index"
                 val shortName = getShortMacName(rawName)
+
+                // Safe Base64 ID
+                val safeEncoded = android.util.Base64.encodeToString(
+                    url.toByteArray(),
+                    android.util.Base64.NO_WRAP or android.util.Base64.URL_SAFE
+                ).replace("=", "")
+                val safeId = "device_$safeEncoded"
+
+                val iconRes = when {
+                    rawName.contains("Mac", ignoreCase = true) -> R.drawable.ic_mac
+                    rawName.contains("Windows", ignoreCase = true) || rawName.contains("PC", ignoreCase = true) -> R.drawable.ic_windows
+                    else -> R.drawable.ic_phone
+                }
+
+                val drawable = androidx.core.content.ContextCompat.getDrawable(this, iconRes)!!
+                val bitmap = android.graphics.Bitmap.createBitmap(150, 150, android.graphics.Bitmap.Config.ARGB_8888)
+                val canvas = android.graphics.Canvas(bitmap)
+                val bgPaint = android.graphics.Paint().apply {
+                    color = android.graphics.Color.parseColor("#2C2C2C")
+                    isAntiAlias = true
+                }
+                canvas.drawCircle(75f, 75f, 75f, bgPaint)
+
+                val pad = 35
+                drawable.setBounds(pad, pad, 150 - pad, 150 - pad)
+                drawable.draw(canvas)
+
+                val paddedIcon = androidx.core.graphics.drawable.IconCompat.createWithBitmap(bitmap)
 
                 val shareIntent = Intent(this, ShareActivity::class.java).apply {
                     action = Intent.ACTION_SEND
                     putExtra("TARGET_URL", url)
                 }
 
-                val person = Person.Builder().setName(shortName).build()
+                val person = androidx.core.app.Person.Builder()
+                    .setName(shortName)
+                    .setKey(safeId)
+                    .setIcon(paddedIcon)
+                    .build()
 
-                ShortcutInfoCompat.Builder(this, "mac_target_$index")
+                val shortcut = androidx.core.content.pm.ShortcutInfoCompat.Builder(this, safeId)
                     .setShortLabel(shortName)
-                    .setLongLabel("Send to $rawName")
-                    .setIcon(IconCompat.createWithResource(this, android.R.drawable.ic_menu_share))
+                    .setLongLabel(rawName)
+                    .setIcon(paddedIcon)
                     .setCategories(
                         setOf(
                             "com.shazan.airbridge.category.TEXT_SHARE_TARGET",
@@ -384,12 +450,34 @@ class AirBridgeService : Service() {
                     .setIntent(shareIntent)
                     .setPerson(person)
                     .setLongLived(true)
+                    .setRank(index)
                     .build()
+
+                activeShortcuts.add(shortcut)
             }
 
-            ShortcutManagerCompat.setDynamicShortcuts(this, shortcuts)
+            // 1. ATOMIC UPDATE: We must add them as a single group, not one-by-one.
+            androidx.core.content.pm.ShortcutManagerCompat.addDynamicShortcuts(this, activeShortcuts)
+
+            // 2. THE DIRTY HACK: Spam the usage algorithm 10 times per device.
+            // This tricks Android into thinking you share to AirBridge 10x more often than WhatsApp.
+            activeShortcuts.forEach { shortcut ->
+                for (i in 1..10) {
+                    androidx.core.content.pm.ShortcutManagerCompat.reportShortcutUsed(this, shortcut.id)
+                }
+            }
+
+            // Clean up stale IDs
+            val activeIds = activeShortcuts.map { it.id }
+            val allShortcuts = androidx.core.content.pm.ShortcutManagerCompat.getDynamicShortcuts(this)
+            val staleIds = allShortcuts.map { it.id }.filterNot { activeIds.contains(it) }
+
+            if (staleIds.isNotEmpty()) {
+                androidx.core.content.pm.ShortcutManagerCompat.removeDynamicShortcuts(this, staleIds)
+            }
+
         } catch (e: Exception) {
-            Log.e("AirBridge", "Failed to update share shortcuts", e)
+            android.util.Log.e("AirBridge", "Failed to update share shortcuts", e)
         }
     }
 
@@ -407,6 +495,7 @@ class AirBridgeService : Service() {
                 activeSockets[url] = webSocket
                 broadcastConnectionState()
                 Log.d("AirBridge", "Connected to $url")
+                webSocket.send("DEVICE_NAME:${android.os.Build.MODEL}")
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
@@ -423,38 +512,46 @@ class AirBridgeService : Service() {
                 }
 
                 if (text.startsWith("START_FILE:")) {
+                    // 1. IMPLICIT END-OF-FILE: If we are already receiving a file, the END_FILE was dropped!
+                    if (isReceivingFile) {
+                        try { incomingFileOutputStream?.close() } catch (e: Exception) {}
+                        incomingFileOutputStream = null
+
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && incomingFileUri != null) {
+                            try {
+                                val contentValues = android.content.ContentValues().apply {
+                                    put(android.provider.MediaStore.MediaColumns.IS_PENDING, 0)
+                                }
+                                contentResolver.update(incomingFileUri!!, contentValues, null, null)
+                            } catch (e: Exception) { Log.e("AirBridge", "MediaStore update failed", e) }
+                            incomingFileUri = null
+                        }
+                        incomingFilesReceived++
+                    }
+
                     val myDate = Time.now
                     val customFormat = myDate.format("hh-mm a, EEEE, dd MMM yy")
                     isReceivingFile = true
                     val rawFileName = text.substringAfter("START_FILE:")
                     var cleanedName = rawFileName.replace(Regex("^[A-Fa-f0-9]{6}_"), "")
                     val ext = cleanedName.substringAfterLast(".", "dat")
-                    cleanedName = "AirBridge ${customFormat}_${System.currentTimeMillis()}.$ext"
+
+                    // 2. COLLISION PROOFING: Add the file counter to guarantee absolute uniqueness
+                    val uniqueID = System.currentTimeMillis()
+                    cleanedName = "AirBridge ${customFormat}_${uniqueID}_${incomingFilesReceived + 1}.$ext"
 
                     incomingFileName = cleanedName
 
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                         val resolver = contentResolver
                         val contentValues = android.content.ContentValues().apply {
-                            put(
-                                android.provider.MediaStore.MediaColumns.DISPLAY_NAME,
-                                incomingFileName
-                            )
-                            // Updated path to match the Mac side
-                            put(
-                                android.provider.MediaStore.MediaColumns.RELATIVE_PATH,
-                                android.os.Environment.DIRECTORY_DOWNLOADS + "/AirBridge Transfers"
-                            )
+                            put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, incomingFileName)
+                            put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, android.os.Environment.DIRECTORY_DOWNLOADS + "/AirBridge Transfers")
                             put(android.provider.MediaStore.MediaColumns.IS_PENDING, 1)
                         }
-                        incomingFileUri = resolver.insert(
-                            android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI,
-                            contentValues
-                        )
-                        incomingFileOutputStream =
-                            incomingFileUri?.let { resolver.openOutputStream(it) }
+                        incomingFileUri = resolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
+                        incomingFileOutputStream = incomingFileUri?.let { resolver.openOutputStream(it) }
                     } else {
-                        // Updated path for pre-Android 10 devices
                         val dir = java.io.File(
                             android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS),
                             "AirBridge Transfers"
@@ -463,28 +560,36 @@ class AirBridgeService : Service() {
                         val file = java.io.File(dir, incomingFileName)
                         incomingFileOutputStream = java.io.FileOutputStream(file)
                     }
-                    updateIncomingTransferUI(false)
+                    // ✅ DELIBERATELY REMOVED updateIncomingTransferUI(false) to prevent notification spam
                     return
                 }
 
                 if (text.startsWith("END_FILE:")) {
+                    // If we already auto-closed it via byte count or next file start, don't double count
+                    if (!isReceivingFile) return
+
                     isReceivingFile = false
-                    try {
-                        incomingFileOutputStream?.close()
-                    } catch (e: Exception) {
-                    }
+                    try { incomingFileOutputStream?.close() } catch (e: Exception) {}
                     incomingFileOutputStream = null
 
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && incomingFileUri != null) {
-                        val contentValues = android.content.ContentValues().apply {
-                            put(android.provider.MediaStore.MediaColumns.IS_PENDING, 0)
-                        }
-                        contentResolver.update(incomingFileUri!!, contentValues, null, null)
+                        try {
+                            val contentValues = android.content.ContentValues().apply {
+                                put(android.provider.MediaStore.MediaColumns.IS_PENDING, 0)
+                            }
+                            contentResolver.update(incomingFileUri!!, contentValues, null, null)
+                        } catch (e: Exception) { Log.e("AirBridge", "MediaStore update failed", e) }
                         incomingFileUri = null
                     }
 
                     incomingFilesReceived++
-                    updateIncomingTransferUI(incomingFilesReceived >= incomingTotalFiles)
+
+                    // ✅ ONLY update the notification if the entire batch is 100% finished
+                    if (incomingFilesReceived >= incomingTotalFiles) {
+                        mainHandler.postDelayed({
+                            updateIncomingTransferUI(true)
+                        }, 200) // Tiny delay guarantees Android OS accepts the notification
+                    }
                     return
                 }
 
@@ -507,12 +612,12 @@ class AirBridgeService : Service() {
                 }
 
                 if (text != lastClipboardText) {
-                    isUpdatingFromMac = true
+                    isUpdatingFromDevice = true
                     mainHandler.post {
                         val clip = ClipData.newPlainText("AirBridge", text)
                         clipboardManager.setPrimaryClip(clip)
                         lastClipboardText = text
-                        isUpdatingFromMac = false
+                        isUpdatingFromDevice = false
                     }
                 }
             }
@@ -524,10 +629,35 @@ class AirBridgeService : Service() {
                         incomingReceivedBytes += bytes.size
 
                         val now = System.currentTimeMillis()
+                        // Keep the 500ms progress update for a smooth UI
                         if (now - incomingLastUpdate > 500) {
                             incomingLastUpdate = now
                             updateIncomingTransferUI(false)
                         }
+
+                        // 3. AUTO-COMPLETE BY BYTE COUNT: If this is the last chunk, forcefully close the batch
+                        if (incomingTotalBytes > 0L && incomingReceivedBytes >= incomingTotalBytes) {
+                            isReceivingFile = false
+                            try { incomingFileOutputStream?.close() } catch (e: Exception) {}
+                            incomingFileOutputStream = null
+
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && incomingFileUri != null) {
+                                try {
+                                    val contentValues = android.content.ContentValues().apply {
+                                        put(android.provider.MediaStore.MediaColumns.IS_PENDING, 0)
+                                    }
+                                    contentResolver.update(incomingFileUri!!, contentValues, null, null)
+                                } catch (e: Exception) { Log.e("AirBridge", "MediaStore final update failed", e) }
+                                incomingFileUri = null
+                            }
+
+                            // Force the UI to 100% complete state
+                            incomingFilesReceived = incomingTotalFiles
+                            mainHandler.postDelayed({
+                                updateIncomingTransferUI(true)
+                            }, 200)
+                        }
+
                     } catch (e: Exception) {
                         Log.e("AirBridge", "Error writing binary chunk", e)
                     }
@@ -542,9 +672,7 @@ class AirBridgeService : Service() {
                 handleDisconnect(url, webSocket)
             }
 
-            // --- THE FIX: Pass the specific WebSocket instance into this function ---
             private fun handleDisconnect(url: String, dyingSocket: WebSocket) {
-
                 // IDENTITY CHECK: Only wipe the dictionary if the dying socket is the currently tracked one
                 if (activeSockets[url] === dyingSocket) {
                     activeSockets.remove(url)
@@ -555,8 +683,7 @@ class AirBridgeService : Service() {
                         isReceivingFile = false
                         try {
                             incomingFileOutputStream?.close()
-                        } catch (e: Exception) {
-                        }
+                        } catch (e: Exception) {}
                         incomingFileOutputStream = null
 
                         val notificationManager =
@@ -566,22 +693,18 @@ class AirBridgeService : Service() {
                         mainHandler.post {
                             Toast.makeText(
                                 this@AirBridgeService,
-                                "Transfer interrupted (Mac disconnected)",
+                                "Transfer interrupted (Device disconnected)",
                                 Toast.LENGTH_LONG
                             ).show()
                         }
                         sendBroadcast(Intent("AIRBRIDGE_TRANSFER_UPDATE").apply {
-                            putExtra(
-                                "isComplete",
-                                true
-                            )
+                            putExtra("isComplete", true)
                         })
                     }
 
                     scheduleReconnect(url)
                 }
             }
-
         })
     }
 
@@ -600,7 +723,7 @@ class AirBridgeService : Service() {
 
     private fun setupClipboardListener() {
         clipboardManager.addPrimaryClipChangedListener {
-            if (isUpdatingFromMac) return@addPrimaryClipChangedListener
+            if (isUpdatingFromDevice) return@addPrimaryClipChangedListener
 
             val clip = clipboardManager.primaryClip
             if (clip != null && clip.itemCount > 0) {
@@ -614,7 +737,7 @@ class AirBridgeService : Service() {
                     val uriScheme = item.uri.scheme
                     if (uriScheme == "content" || uriScheme == "file") {
                         if (activeSockets.isNotEmpty()) {
-                            showToast("Select a specific Mac using Direct Share")
+                            showToast("Select a specific Device using Direct Share")
                         }
                         return@addPrimaryClipChangedListener
                     }
@@ -633,25 +756,39 @@ class AirBridgeService : Service() {
         }
     }
 
+    private fun updateForegroundNotification() {
+        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        notificationManager.notify(1, createNotification())
+    }
+
     private fun broadcastConnectionState() {
         val intent = Intent("AIRBRIDGE_STATE_UPDATE").apply {
-            setPackage(packageName) // Bypasses RECEIVER_NOT_EXPORTED block
+            setPackage(packageName)
         }
         intent.putStringArrayListExtra("ACTIVE_URLS", ArrayList(getActiveUrls()))
         sendBroadcast(intent)
+
+        // Update the persistent notification state whenever connections change
+        updateForegroundNotification()
     }
 
     private fun createNotification(): Notification {
         val channelId = "AirBridgeChannel"
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel =
-                NotificationChannel(channelId, "Clipboard Sync", NotificationManager.IMPORTANCE_LOW)
+            val channel = NotificationChannel(channelId, "Clipboard Sync", NotificationManager.IMPORTANCE_LOW)
             getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
         }
 
+        val activeCount = activeSockets.size
+        val (title, text) = if (activeCount > 0) {
+            "AirBridge Active" to "Syncing clipboard with $activeCount Device(s)"
+        } else {
+            "AirBridge Disconnected" to "Not syncing with Devices"
+        }
+
         return NotificationCompat.Builder(this, channelId)
-            .setContentTitle("AirBridge Active")
-            .setContentText("Syncing clipboard with Macs")
+            .setContentTitle(title)
+            .setContentText(text)
             .setSmallIcon(android.R.drawable.ic_menu_share)
             .setOngoing(true)
             .build()
@@ -878,7 +1015,7 @@ class AirBridgeService : Service() {
             val builder = NotificationCompat.Builder(this, "transfer_channel")
                 .setSmallIcon(android.R.drawable.stat_sys_download_done)
                 .setContentTitle("Transfer Complete")
-                .setContentText("Received $incomingTotalFiles file(s) from Mac.")
+                .setContentText("Received $incomingTotalFiles file(s) from Device")
                 .setContentIntent(pendingIntent)
                 .setOngoing(false)
                 .setProgress(0, 0, false)
@@ -889,7 +1026,7 @@ class AirBridgeService : Service() {
             mainHandler.post {
                 Toast.makeText(
                     this,
-                    "Received $incomingTotalFiles files from Mac",
+                    "Received $incomingTotalFiles files from your Device",
                     Toast.LENGTH_LONG
                 ).show()
             }
@@ -911,7 +1048,7 @@ class AirBridgeService : Service() {
 
             val builder = NotificationCompat.Builder(this, "transfer_channel")
                 .setSmallIcon(android.R.drawable.stat_sys_download)
-                .setContentTitle("Receiving from Mac: $incomingFileName")
+                .setContentTitle("Receiving from your Device: $incomingFileName")
                 .setContentText("$incomingFilesReceived / $incomingTotalFiles files ($speedMb)")
                 .setProgress(100, progress, false)
                 .setOngoing(true)
