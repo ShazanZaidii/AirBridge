@@ -15,7 +15,6 @@ class ShareViewController: NSViewController {
         let docsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
         let sharedDir = docsURL.appendingPathComponent("AirBridgePending")
         
-        // FIX: Nuke the old accumulated files so they don't pile up across shares
         try? FileManager.default.removeItem(at: sharedDir)
         try? FileManager.default.createDirectory(at: sharedDir, withIntermediateDirectories: true, attributes: nil)
         
@@ -28,60 +27,82 @@ class ShareViewController: NSViewController {
             
             for attachment in attachments {
                 group.enter()
-                let type = attachment.registeredTypeIdentifiers.first ?? "public.item"
                 
-                attachment.loadFileRepresentation(forTypeIdentifier: type) { (url, error) in
-                    defer { group.leave() }
-                    
-                    guard let secureURL = url else { return }
-                    
-                    var originalName = secureURL.lastPathComponent
-                    if let suggested = attachment.suggestedName, !suggested.isEmpty {
-                        originalName = suggested
-                        if URL(fileURLWithPath: originalName).pathExtension.isEmpty && !secureURL.pathExtension.isEmpty {
-                            originalName += ".\(secureURL.pathExtension)"
+                let fileURLType = UTType.fileURL.identifier
+                
+                // 1. PRIMARY STRATEGY: Intercept the raw Finder URL before macOS sandboxes and renames it
+                if attachment.hasItemConformingToTypeIdentifier(fileURLType) {
+                    attachment.loadItem(forTypeIdentifier: fileURLType, options: nil) { (item, error) in
+                        defer { group.leave() }
+                        
+                        // macOS can return the URL directly, or as Data
+                        guard let originalURL = item as? URL ?? (item as? Data).flatMap({ URL(dataRepresentation: $0, relativeTo: nil) }) else { return }
+                        
+                        // We now have the TRUE original filename!
+                        let realName = originalURL.lastPathComponent
+                        let uniqueName = "\(UUID().uuidString.prefix(6))_\(realName)"
+                        let dest = sharedDir.appendingPathComponent(uniqueName)
+                        
+                        // Because this is a raw Finder URL outside our sandbox, we must use Security Scoping to read it
+                        let access = originalURL.startAccessingSecurityScopedResource()
+                        
+                        var coordinateError: NSError?
+                        NSFileCoordinator().coordinate(readingItemAt: originalURL, options: .withoutChanges, error: &coordinateError) { readURL in
+                            do {
+                                try FileManager.default.copyItem(at: readURL, to: dest)
+                                lock.lock()
+                                filesCopied += 1
+                                lock.unlock()
+                            } catch {
+                                print("AirBridge Copy Failed: \(error)")
+                            }
                         }
+                        
+                        if access { originalURL.stopAccessingSecurityScopedResource() }
                     }
-                    
-                    let uniqueName = "\(UUID().uuidString.prefix(6))_\(originalName)"
-                    let dest = sharedDir.appendingPathComponent(uniqueName)
-                    
-                    do {
-                        try FileManager.default.copyItem(at: secureURL, to: dest)
-                        lock.lock()
-                        filesCopied += 1
-                        lock.unlock()
-                    } catch {
-                        print("Copy Failed: \(error)")
+                }
+                // 2. FALLBACK STRATEGY: For "files" that don't exist on disk yet (e.g., sharing a web image or unsaved screenshot)
+                else {
+                    let type = attachment.registeredTypeIdentifiers.first ?? "public.item"
+                    attachment.loadFileRepresentation(forTypeIdentifier: type) { (url, error) in
+                        defer { group.leave() }
+                        guard let secureURL = url else { return }
+                        
+                        let originalName = secureURL.lastPathComponent
+                        let uniqueName = "\(UUID().uuidString.prefix(6))_\(originalName)"
+                        let dest = sharedDir.appendingPathComponent(uniqueName)
+                        
+                        do {
+                            try FileManager.default.copyItem(at: secureURL, to: dest)
+                            lock.lock()
+                            filesCopied += 1
+                            lock.unlock()
+                        } catch {
+                            print("AirBridge Fallback Copy Failed: \(error)")
+                        }
                     }
                 }
             }
         }
         
         group.notify(queue: .main) {
-                    if filesCopied > 0 {
-                        // 1. Post local Darwin notification
-                        let notificationName = CFNotificationName("com.shazan.airbridge.filesReady" as CFString)
-                        CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(), notificationName, nil, nil, true)
-                        
-                        // 2. Wake the main app and WAIT for completion
-                        if let url = URL(string: "airbridge://share") {
-                            let config = NSWorkspace.OpenConfiguration()
-                            NSWorkspace.shared.open(url, configuration: config) { (runningApp, error) in
-                                if let error = error {
-                                    print("AirBridge Workspace Open Error: \(error)")
-                                }
-                                // Close the share extension ONLY AFTER the app opens
-                                DispatchQueue.main.async {
-                                    self.extensionContext?.completeRequest(returningItems: nil, completionHandler: nil)
-                                }
-                            }
-                        } else {
+            if filesCopied > 0 {
+                let notificationName = CFNotificationName("com.shazan.airbridge.filesReady" as CFString)
+                CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(), notificationName, nil, nil, true)
+                
+                if let url = URL(string: "airbridge://share") {
+                    let config = NSWorkspace.OpenConfiguration()
+                    NSWorkspace.shared.open(url, configuration: config) { (runningApp, error) in
+                        DispatchQueue.main.async {
                             self.extensionContext?.completeRequest(returningItems: nil, completionHandler: nil)
                         }
-                    } else {
-                        self.extensionContext?.completeRequest(returningItems: nil, completionHandler: nil)
                     }
+                } else {
+                    self.extensionContext?.completeRequest(returningItems: nil, completionHandler: nil)
                 }
+            } else {
+                self.extensionContext?.completeRequest(returningItems: nil, completionHandler: nil)
+            }
+        }
     }
 }

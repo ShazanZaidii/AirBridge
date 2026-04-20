@@ -40,6 +40,13 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		3630CC9B2F96B191002543B5 /* Exceptions for "AirBridge" folder in "AirBridgeShare" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Assets.xcassets,
+			);
+			target = 36C982DC2F890C4C00A8E7CC /* AirBridgeShare */;
+		};
 		3670F8012F93FF030036F661 /* Exceptions for "AirBridge" folder in "AirBridge" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
@@ -69,6 +76,7 @@
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
 				3670F8012F93FF030036F661 /* Exceptions for "AirBridge" folder in "AirBridge" target */,
+				3630CC9B2F96B191002543B5 /* Exceptions for "AirBridge" folder in "AirBridgeShare" target */,
 			);
 			path = AirBridge;
 			sourceTree = "<group>";
@@ -244,6 +252,7 @@
 		36C982EC2F890C4D00A8E7CC /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				"ASSETCATALOG_COMPILER_APPICON_NAME[sdk=*]" = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
@@ -285,6 +294,7 @@
 		36C982ED2F890C4D00A8E7CC /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				"ASSETCATALOG_COMPILER_APPICON_NAME[sdk=*]" = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;

@@ -127,7 +127,7 @@ struct AirBridgeApp: App {
     }
 
     var body: some Scene {
-        MenuBarExtra("AirBridge", systemImage: "link.icloud") {
+        MenuBarExtra("AirBridge", image: "MenuBarIcon") {
             VStack(spacing: 16) {
                 Text("AirBridge Server").font(.headline)
                 
