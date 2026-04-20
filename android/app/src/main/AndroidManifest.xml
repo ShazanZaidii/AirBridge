@@ -73,6 +73,45 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".ShareActivity"
+            android:exported="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
+        </activity>
+
+        <activity-alias
+            android:name=".ShareActivitySlot0"
+            android:targetActivity=".ShareActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="*/*" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".ShareActivitySlot1"
+            android:targetActivity=".ShareActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="*/*" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+        </activity-alias>
+
         <service
             android:name=".AirBridgeService"
             android:exported="false"

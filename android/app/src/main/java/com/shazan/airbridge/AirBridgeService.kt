@@ -35,6 +35,7 @@ import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.Toast
 import androidx.annotation.RequiresApi
+import androidx.camera.core.impl.Identifier
 import androidx.core.app.NotificationCompat
 import androidx.core.app.Person
 import androidx.core.content.pm.ShortcutInfoCompat
@@ -426,10 +427,24 @@ class AirBridgeService : Service() {
 
                 val paddedIcon = androidx.core.graphics.drawable.IconCompat.createWithBitmap(bitmap)
 
+                // 1. ISOLATE THE INTENTS: Add unique data and identifier
                 val shareIntent = Intent(this, ShareActivity::class.java).apply {
                     action = Intent.ACTION_SEND
                     putExtra("TARGET_URL", url)
+                    identifier = safeId
+                    data = Uri.parse(url)
                 }
+
+                // Determine slot (0 for Mac, 1 for Windows)
+                val slot = index % 2
+                val categoryFile = "com.shazan.airbridge.category.FILE_SHARE_TARGET_$slot"
+                val categoryText = "com.shazan.airbridge.category.TEXT_SHARE_TARGET_$slot"
+
+                // NEW: Define the specific ghost component
+                val ghostComponent = android.content.ComponentName(
+                    this@AirBridgeService,
+                    "com.shazan.airbridge.ShareActivitySlot$slot"
+                )
 
                 val person = androidx.core.app.Person.Builder()
                     .setName(shortName)
@@ -441,14 +456,10 @@ class AirBridgeService : Service() {
                     .setShortLabel(shortName)
                     .setLongLabel(rawName)
                     .setIcon(paddedIcon)
-                    .setCategories(
-                        setOf(
-                            "com.shazan.airbridge.category.TEXT_SHARE_TARGET",
-                            "com.shazan.airbridge.category.FILE_SHARE_TARGET"
-                        )
-                    )
+                    .setCategories(setOf(categoryFile, categoryText))
                     .setIntent(shareIntent)
                     .setPerson(person)
+                    .setActivity(ghostComponent) // <--- THE BULLETPROOF BYPASS
                     .setLongLived(true)
                     .setRank(index)
                     .build()
@@ -456,11 +467,10 @@ class AirBridgeService : Service() {
                 activeShortcuts.add(shortcut)
             }
 
-            // 1. ATOMIC UPDATE: We must add them as a single group, not one-by-one.
+            // ATOMIC UPDATE
             androidx.core.content.pm.ShortcutManagerCompat.addDynamicShortcuts(this, activeShortcuts)
 
-            // 2. THE DIRTY HACK: Spam the usage algorithm 10 times per device.
-            // This tricks Android into thinking you share to AirBridge 10x more often than WhatsApp.
+            // USAGE SPAM TO INFLATE RANKING
             activeShortcuts.forEach { shortcut ->
                 for (i in 1..10) {
                     androidx.core.content.pm.ShortcutManagerCompat.reportShortcutUsed(this, shortcut.id)
