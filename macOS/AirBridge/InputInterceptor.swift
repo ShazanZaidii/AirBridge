@@ -32,13 +32,26 @@ class InputInterceptor {
     private var swipeMonitorLocal: Any?
     private var swipeMonitorGlobal: Any?
     
+    func loadArrangement() {
+            let savedEdge = UserDefaults.standard.string(forKey: "PhoneEdge") ?? "left"
+            self.phoneEdge = DeviceEdge(rawValue: savedEdge) ?? .left
+            
+            let lower = UserDefaults.standard.double(forKey: "PhoneEdgeLower")
+            let upper = UserDefaults.standard.double(forKey: "PhoneEdgeUpper")
+            if upper > lower {
+                self.phoneEdgeRange = CGFloat(lower)...CGFloat(upper)
+            }
+        }
+    
     func setup(server: SyncServer) {
         self.syncServer = server
     }
     
     func start() {
-        let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
-        guard AXIsProcessTrustedWithOptions(options) else { return }
+            loadArrangement() // ADD THIS LINE HERE
+            
+            let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
+            guard AXIsProcessTrustedWithOptions(options) else { return }
         
         swipeMonitorLocal = NSEvent.addLocalMonitorForEvents(matching: .swipe) { [weak self] event in
             self?.handleSwipe(event)

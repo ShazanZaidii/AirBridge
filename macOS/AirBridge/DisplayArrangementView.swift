@@ -9,14 +9,16 @@ import SwiftUI
 import CoreGraphics
 
 struct DisplayArrangementView: View {
-    // UI Representation dimensions
     let macWidth: CGFloat = 400
     let macHeight: CGFloat = 250
     let phoneWidth: CGFloat = 70
     let phoneHeight: CGFloat = 140
     
-    // State for positioning
-    @State private var position: CGPoint = CGPoint(x: -70, y: 55) // Default to right edge
+    // NEW: Persistent Storage for the UI Position
+    @AppStorage("PhonePosX") private var phonePosX: Double = -70.0
+    @AppStorage("PhonePosY") private var phonePosY: Double = 55.0
+    
+    @State private var position: CGPoint = CGPoint(x: -70, y: 55)
     @State private var dragOffset: CGSize = .zero
     @State private var isDragging: Bool = false
     
@@ -51,33 +53,40 @@ struct DisplayArrangementView: View {
                         y: 100 + position.y + dragOffset.height
                     )
                     .gesture(
-                        DragGesture()
-                            .onChanged { value in
-                                isDragging = true
-                                let rawX = position.x + value.translation.width
-                                let rawY = position.y + value.translation.height
-                                let snapped = calculateSnap(x: rawX, y: rawY)
-                                
-                                dragOffset = CGSize(width: snapped.x - position.x, height: snapped.y - position.y)
+                                            DragGesture()
+                                                .onChanged { value in
+                                                    isDragging = true
+                                                    let rawX = position.x + value.translation.width
+                                                    let rawY = position.y + value.translation.height
+                                                    let snapped = calculateSnap(x: rawX, y: rawY)
+                                                    
+                                                    dragOffset = CGSize(width: snapped.x - position.x, height: snapped.y - position.y)
+                                                }
+                                                .onEnded { _ in
+                                                    isDragging = false
+                                                    position.x += dragOffset.width
+                                                    position.y += dragOffset.height
+                                                    dragOffset = .zero
+                                                    
+                                                    // NEW: Save the visual position when drag ends
+                                                    phonePosX = Double(position.x)
+                                                    phonePosY = Double(position.y)
+                                                    
+                                                    applySettingsToInterceptor()
+                                                }
+                                        )
+                                        .animation(.interactiveSpring(), value: dragOffset)
+                                }
+                                .clipShape(RoundedRectangle(cornerRadius: 16))
+                                .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.gray.opacity(0.2), lineWidth: 1))
                             }
-                            .onEnded { _ in
-                                isDragging = false
-                                position.x += dragOffset.width
-                                position.y += dragOffset.height
-                                dragOffset = .zero
+                            .padding(30)
+                            .onAppear {
+                                // NEW: Load visual position on UI open
+                                position = CGPoint(x: phonePosX, y: phonePosY)
                                 applySettingsToInterceptor()
                             }
-                    )
-                    .animation(.interactiveSpring(), value: dragOffset)
-            }
-            .clipShape(RoundedRectangle(cornerRadius: 16))
-            .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.gray.opacity(0.2), lineWidth: 1))
-        }
-        .padding(30)
-        .onAppear {
-            applySettingsToInterceptor()
-        }
-    }
+                        }
     
     // MARK: - Snapping Logic
     private func calculateSnap(x: CGFloat, y: CGFloat) -> CGPoint {
@@ -112,38 +121,41 @@ struct DisplayArrangementView: View {
     
     // MARK: - Apply Math to Interceptor
     private func applySettingsToInterceptor() {
-        let screenBounds = CGDisplayBounds(CGMainDisplayID())
-        let scaleX = screenBounds.width / macWidth
-        let scaleY = screenBounds.height / macHeight
-        
-        let edge: DeviceEdge
-        var range: ClosedRange<CGFloat>
-        
-        // Issue 1 Fix: Added 0.5 tolerances to prevent floating-point fallthrough
-        if position.x >= macWidth - 0.5 {
-            edge = .right
-            let startY = position.y * scaleY
-            let endY = (position.y + phoneHeight) * scaleY
-            range = startY...endY
-        } else if position.x <= -phoneWidth + 0.5 {
-            edge = .left
-            let startY = position.y * scaleY
-            let endY = (position.y + phoneHeight) * scaleY
-            range = startY...endY
-        } else if position.y >= macHeight - 0.5 {
-            edge = .bottom
-            let startX = position.x * scaleX
-            let endX = (position.x + phoneWidth) * scaleX
-            range = startX...endX
-        } else {
-            edge = .top
-            let startX = position.x * scaleX
-            let endX = (position.x + phoneWidth) * scaleX
-            range = startX...endX
+            let screenBounds = CGDisplayBounds(CGMainDisplayID())
+            let scaleX = screenBounds.width / macWidth
+            let scaleY = screenBounds.height / macHeight
+            
+            let edge: DeviceEdge
+            var range: ClosedRange<CGFloat>
+            
+            if position.x >= macWidth - 0.5 {
+                edge = .right
+                let startY = position.y * scaleY
+                let endY = (position.y + phoneHeight) * scaleY
+                range = startY...endY
+            } else if position.x <= -phoneWidth + 0.5 {
+                edge = .left
+                let startY = position.y * scaleY
+                let endY = (position.y + phoneHeight) * scaleY
+                range = startY...endY
+            } else if position.y >= macHeight - 0.5 {
+                edge = .bottom
+                let startX = position.x * scaleX
+                let endX = (position.x + phoneWidth) * scaleX
+                range = startX...endX
+            } else {
+                edge = .top
+                let startX = position.x * scaleX
+                let endX = (position.x + phoneWidth) * scaleX
+                range = startX...endX
+            }
+            
+            InputInterceptor.shared.phoneEdge = edge
+            InputInterceptor.shared.phoneEdgeRange = range
+            
+            // NEW: Save the actual bounds math for the Interceptor to read on app launch
+            UserDefaults.standard.set(edge.rawValue, forKey: "PhoneEdge")
+            UserDefaults.standard.set(Double(range.lowerBound), forKey: "PhoneEdgeLower")
+            UserDefaults.standard.set(Double(range.upperBound), forKey: "PhoneEdgeUpper")
         }
-        
-        // Push configuration to the interceptor
-        InputInterceptor.shared.phoneEdge = edge
-        InputInterceptor.shared.phoneEdgeRange = range
-    }
 }

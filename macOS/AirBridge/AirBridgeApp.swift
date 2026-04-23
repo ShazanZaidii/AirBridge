@@ -232,10 +232,10 @@ struct AirBridgeApp: App {
             }
             .padding()
             .frame(width: 250)
-            .onAppear {
-                InputInterceptor.shared.setup(server: server)
-                InputInterceptor.shared.start()
-            }
+//            .onAppear {
+//                InputInterceptor.shared.setup(server: server)
+//                InputInterceptor.shared.start()
+//            }
         }
         .menuBarExtraStyle(.window)
         

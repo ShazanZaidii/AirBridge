@@ -59,6 +59,9 @@ class SyncServer: ObservableObject {
         startBrowser()
         startClipboardMonitor()
         
+        InputInterceptor.shared.setup(server: self)
+        InputInterceptor.shared.start()
+        
         CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(), nil, darwinNotificationCallback, "com.shazan.airbridge.filesReady" as CFString, nil, .deliverImmediately)
         
         NotificationCenter.default.addObserver(forName: Notification.Name("AirBridgeFilesReady"), object: nil, queue: .main) { [weak self] _ in
