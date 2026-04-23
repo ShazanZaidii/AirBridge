@@ -60,6 +60,9 @@ dependencies {
     // Google ML Kit for lightning-fast local QR scanning
     implementation("com.google.mlkit:barcode-scanning:17.2.0")
 
+    // Nearby share api for P2P between 2 android:
+    implementation("com.google.android.gms:play-services-nearby:19.0.0")
+
     implementation("com.example:driftui:3.6.1")
 
     testImplementation(libs.junit)
