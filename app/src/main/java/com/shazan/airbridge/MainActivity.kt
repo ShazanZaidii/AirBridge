@@ -254,11 +254,11 @@ fun AirBridgeApp() {
             "SETTINGS" -> SettingsScreen(onBack = { currentScreen = "CONNECTED" })
 
             "DISCOVERY" -> DiscoveryScreen(
+                connectedUrls = connectedUrls, // NEW PARAMETER
                 onDevicePaired = { url ->
                     val newUri = Uri.parse(url)
                     val newHostIp = newUri.host
 
-                    // Filter out any older connections from this exact same IP
                     val filteredUrls = connectedUrls.filterNot { existingUrl ->
                         Uri.parse(existingUrl).host == newHostIp
                     }.toSet()
@@ -308,6 +308,7 @@ data class DiscoveredMac(val name: String, val url: String)
 
 @Composable
 fun DiscoveryScreen(
+    connectedUrls: Set<String>, // ADD THIS
     onDevicePaired: (String) -> Unit,
     onCancel: () -> Unit,
     onOpenScanner: () -> Unit,
@@ -328,9 +329,11 @@ fun DiscoveryScreen(
                         val port = serviceInfo.port
                         val name = serviceInfo.serviceName
 
+                        // NEW LOGIC: Skip if IP is already in our connected list
+                        if (connectedUrls.any { Uri.parse(it).host == hostIp }) return
+
                         val cleanUrl = "ws://$hostIp:$port?name=${Uri.encode(name)}"
 
-                        // Deduplicate by IP Address instead of Name
                         discoveredDevices = discoveredDevices.filterNot {
                             Uri.parse(it.url).host == hostIp
                         } + DiscoveredMac(name, cleanUrl)

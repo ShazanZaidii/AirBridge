@@ -213,7 +213,7 @@ class AirBridgeService : Service() {
         val notification = NotificationCompat.Builder(this, "transfer_channel")
             .setContentTitle(title)
             .setContentText(text)
-            .setSmallIcon(android.R.drawable.stat_sys_upload) // Differentiate from sync icon
+            .setSmallIcon(R.drawable.ic_stat_name) // Differentiate from sync icon
             .setProgress(100, progress, false)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
@@ -538,18 +538,11 @@ class AirBridgeService : Service() {
                         incomingFilesReceived++
                     }
 
-                    val myDate = Time.now
-                    val customFormat = myDate.format("hh-mm a, EEEE, dd MMM yy")
                     isReceivingFile = true
                     val rawFileName = text.substringAfter("START_FILE:")
-                    var cleanedName = rawFileName.replace(Regex("^[A-Fa-f0-9]{6}_"), "")
-                    val ext = cleanedName.substringAfterLast(".", "dat")
 
-                    // 2. COLLISION PROOFING: Add the file counter to guarantee absolute uniqueness
-                    val uniqueID = System.currentTimeMillis()
-                    cleanedName = "AirBridge ${customFormat}_${uniqueID}_${incomingFilesReceived + 1}.$ext"
-
-                    incomingFileName = cleanedName
+                    // Strip the 6-character Mac prefix if it exists. Safely ignores Windows files.
+                    incomingFileName = rawFileName.replace(Regex("^[A-Fa-f0-9]{6}_"), "")
 
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                         val resolver = contentResolver
@@ -558,6 +551,7 @@ class AirBridgeService : Service() {
                             put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, android.os.Environment.DIRECTORY_DOWNLOADS + "/AirBridge Transfers")
                             put(android.provider.MediaStore.MediaColumns.IS_PENDING, 1)
                         }
+                        // MediaStore automatically handles collisions by appending (1), (2), etc.
                         incomingFileUri = resolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
                         incomingFileOutputStream = incomingFileUri?.let { resolver.openOutputStream(it) }
                     } else {
@@ -566,10 +560,20 @@ class AirBridgeService : Service() {
                             "AirBridge Transfers"
                         )
                         dir.mkdirs()
-                        val file = java.io.File(dir, incomingFileName)
+                        var file = java.io.File(dir, incomingFileName)
+
+                        // Legacy collision proofing: Append counter if file already exists
+                        var counter = 1
+                        val nameWithoutExt = incomingFileName.substringBeforeLast(".")
+                        val ext = if (incomingFileName.contains(".")) ".${incomingFileName.substringAfterLast(".")}" else ""
+
+                        while (file.exists()) {
+                            file = java.io.File(dir, "${nameWithoutExt}_$counter$ext")
+                            counter++
+                        }
+                        incomingFileName = file.name
                         incomingFileOutputStream = java.io.FileOutputStream(file)
                     }
-                    // ✅ DELIBERATELY REMOVED updateIncomingTransferUI(false) to prevent notification spam
                     return
                 }
 
@@ -798,7 +802,7 @@ class AirBridgeService : Service() {
         return NotificationCompat.Builder(this, channelId)
             .setContentTitle(title)
             .setContentText(text)
-            .setSmallIcon(android.R.drawable.ic_menu_share)
+            .setSmallIcon(R.drawable.ic_stat_name)
             .setOngoing(true)
             .build()
     }
@@ -814,7 +818,7 @@ class AirBridgeService : Service() {
         }
 
         val button = ImageView(this).apply {
-            setImageResource(android.R.drawable.ic_menu_share)
+            setImageResource(R.drawable.ic_stat_name)
             imageTintList = ColorStateList.valueOf(Color.parseColor("#B0B0B0"))
             setPadding(32, 32, 32, 32)
             background = GradientDrawable().apply {
@@ -1022,7 +1026,7 @@ class AirBridgeService : Service() {
             )
 
             val builder = NotificationCompat.Builder(this, "transfer_channel")
-                .setSmallIcon(android.R.drawable.stat_sys_download_done)
+                .setSmallIcon(R.drawable.ic_stat_name)
                 .setContentTitle("Transfer Complete")
                 .setContentText("Received $incomingTotalFiles file(s) from Device")
                 .setContentIntent(pendingIntent)
@@ -1056,7 +1060,7 @@ class AirBridgeService : Service() {
             val etaStr = if (etaSecs > 60) "${etaSecs / 60}m ${etaSecs % 60}s" else "${etaSecs}s"
 
             val builder = NotificationCompat.Builder(this, "transfer_channel")
-                .setSmallIcon(android.R.drawable.stat_sys_download)
+                .setSmallIcon(R.drawable.ic_stat_name)
                 .setContentTitle("Receiving from your Device: $incomingFileName")
                 .setContentText("$incomingFilesReceived / $incomingTotalFiles files ($speedMb)")
                 .setProgress(100, progress, false)

@@ -72,8 +72,8 @@ class ShareActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        val prefs = getSharedPreferences("AirBridgePrefs", Context.MODE_PRIVATE)
-        val urls = prefs.getStringSet("WS_URLS", emptySet()) ?: emptySet()
+        // REPLACE THE PREFS READ WITH THIS LINE:
+        val urls = AirBridgeService.getActiveUrls()
 
         var targetUrl = intent?.getStringExtra("TARGET_URL")
 
