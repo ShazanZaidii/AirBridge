@@ -47,6 +47,8 @@ import okio.ByteString.Companion.toByteString
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import kotlin.math.abs
+import com.google.android.gms.nearby.Nearby
+import com.google.android.gms.nearby.connection.*
 
 class AirBridgeService : Service() {
 
@@ -88,6 +90,97 @@ class AirBridgeService : Service() {
 
     private val OUTGOING_NOTIF_ID = 2003
 
+    // For P2P:
+    private val STRATEGY = Strategy.P2P_CLUSTER
+    private val SERVICE_ID = "com.shazan.airbridge.p2p"
+    private var p2pConnectedEndpoints = ConcurrentHashMap<String, String>() // Maps ID -> Name
+    private var pendingEndpoints = ConcurrentHashMap<String, String>() // Temp storage during handshake
+
+    private val payloadCallback = object : PayloadCallback() {
+        override fun onPayloadReceived(endpointId: String, payload: Payload) {
+            when (payload.type) {
+                Payload.Type.BYTES -> {
+                    val text = String(payload.asBytes()!!)
+                    if (text.startsWith("CLIP:")) {
+                        val clipText = text.removePrefix("CLIP:")
+                        if (clipText != lastClipboardText) {
+                            isUpdatingFromDevice = true
+                            mainHandler.post {
+                                val clip = ClipData.newPlainText("AirBridge", clipText)
+                                clipboardManager.setPrimaryClip(clip)
+                                lastClipboardText = clipText
+                                isUpdatingFromDevice = false
+                            }
+                        }
+                    }
+                }
+                Payload.Type.FILE -> {
+                    val payloadFile = payload.asFile()?.asJavaFile()
+                    if (payloadFile != null && payloadFile.exists()) {
+                        transferQueue.execute {
+                            // Nearby doesn't transmit file names natively, so we assign a timestamped name
+                            val fileName = "AirBridge_P2P_${System.currentTimeMillis()}"
+                            val ext = ".dat" // Fallback extension
+
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                                val contentValues = android.content.ContentValues().apply {
+                                    put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, "$fileName$ext")
+                                    put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, android.os.Environment.DIRECTORY_DOWNLOADS + "/AirBridge Transfers")
+                                    put(android.provider.MediaStore.MediaColumns.IS_PENDING, 1)
+                                }
+                                val uri = contentResolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
+                                uri?.let { destUri ->
+                                    contentResolver.openOutputStream(destUri)?.use { out ->
+                                        payloadFile.inputStream().use { input -> input.copyTo(out) }
+                                    }
+                                    contentValues.clear()
+                                    contentValues.put(android.provider.MediaStore.MediaColumns.IS_PENDING, 0)
+                                    contentResolver.update(destUri, contentValues, null, null)
+                                }
+                            } else {
+                                val dir = java.io.File(android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS), "AirBridge Transfers")
+                                dir.mkdirs()
+                                payloadFile.copyTo(java.io.File(dir, "$fileName$ext"), overwrite = true)
+                            }
+
+                            payloadFile.delete() // Cleanup temporary cache
+                            mainHandler.post { Toast.makeText(applicationContext, "P2P File Saved to Downloads", Toast.LENGTH_SHORT).show() }
+                        }
+                    }
+                }
+            }
+        }
+
+        override fun onPayloadTransferUpdate(endpointId: String, update: PayloadTransferUpdate) {
+            if (update.status == PayloadTransferUpdate.Status.SUCCESS) {
+                mainHandler.post { Toast.makeText(applicationContext, "P2P Transfer Complete", Toast.LENGTH_SHORT).show() }
+            }
+        }
+    }
+
+    private val connectionLifecycleCallback = object : ConnectionLifecycleCallback() {
+        override fun onConnectionInitiated(endpointId: String, info: ConnectionInfo) {
+            pendingEndpoints[endpointId] = info.endpointName
+            Nearby.getConnectionsClient(applicationContext).acceptConnection(endpointId, payloadCallback)
+        }
+
+        override fun onConnectionResult(endpointId: String, result: ConnectionResolution) {
+            if (result.status.isSuccess) {
+                val name = pendingEndpoints[endpointId] ?: "Android Device"
+                p2pConnectedEndpoints[endpointId] = name
+                pendingEndpoints.remove(endpointId)
+                broadcastConnectionState() // Notify UI of the new mesh node
+                showToast("Connected to $name via P2P")
+            }
+        }
+
+        override fun onDisconnected(endpointId: String) {
+            p2pConnectedEndpoints.remove(endpointId)
+            pendingEndpoints.remove(endpointId)
+            broadcastConnectionState()
+        }
+    }
+
     companion object {
         @SuppressLint("StaticFieldLeak")
         var instance: AirBridgeService? = null
@@ -128,6 +221,14 @@ class AirBridgeService : Service() {
         val prefs = getSharedPreferences("AirBridgePrefs", Context.MODE_PRIVATE)
         val autoConnect = prefs.getBoolean("AUTO_CONNECT", true)
 
+        val disconnectP2p = intent?.getStringExtra("DISCONNECT_P2P")
+        if (disconnectP2p != null) {
+            Nearby.getConnectionsClient(this).disconnectFromEndpoint(disconnectP2p)
+            p2pConnectedEndpoints.remove(disconnectP2p)
+            broadcastConnectionState()
+            return START_STICKY
+        }
+
         val urls = intent?.getStringArrayListExtra("WS_URLS")
         if (urls != null) {
             savedUrls = urls.toSet()
@@ -164,30 +265,84 @@ class AirBridgeService : Service() {
         val action = intent?.action
         val targetUrl = intent?.getStringExtra("TARGET_URL")
 
-        if (action == Intent.ACTION_SEND) {
-            val fileUri = intent.data
-            if (fileUri != null && activeSockets.isNotEmpty()) {
-                streamBatchToMac(listOf(fileUri), targetUrl)
+        when (action) {
+            "START_P2P_RECEIVE" -> {
+                startP2PAdvertising()
+                return START_STICKY
             }
-        } else if (action == Intent.ACTION_SEND_MULTIPLE) {
-            val fileUris = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                intent.getParcelableArrayListExtra("FILE_URIS", Uri::class.java)
-            } else {
-                @Suppress("DEPRECATION")
-                intent.getParcelableArrayListExtra<Uri>("FILE_URIS")
+            "STOP_P2P_RECEIVE" -> {
+                Nearby.getConnectionsClient(this).stopAdvertising()
+                return START_STICKY
             }
-
-            if (fileUris != null && activeSockets.isNotEmpty()) {
-                streamBatchToMac(fileUris, targetUrl)
+            "CONNECT_P2P_ENDPOINT" -> {
+                val endpointId = intent.getStringExtra("ENDPOINT_ID")
+                if (endpointId != null) {
+                    Nearby.getConnectionsClient(this)
+                        .requestConnection(android.os.Build.MODEL, endpointId, connectionLifecycleCallback)
+                }
+                return START_STICKY
             }
         }
 
+        if (action == Intent.ACTION_SEND || action == Intent.ACTION_SEND_MULTIPLE) {
+            val fileUris = mutableListOf<Uri>()
+
+            if (action == Intent.ACTION_SEND) {
+                val uri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
+                } else {
+                    @Suppress("DEPRECATION")
+                    intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
+                }
+                uri?.let { fileUris.add(it) }
+            } else {
+                val list = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    intent.getParcelableArrayListExtra("FILE_URIS", Uri::class.java)
+                } else {
+                    @Suppress("DEPRECATION")
+                    intent.getParcelableArrayListExtra<Uri>("FILE_URIS")
+                }
+                list?.let { fileUris.addAll(it) }
+            }
+
+            if (fileUris.isNotEmpty()) {
+                // Route 1: Blast to WebSockets (Mac/Windows)
+                if (activeSockets.isNotEmpty()) {
+                    streamBatchToMac(fileUris, targetUrl)
+                }
+
+                // Route 2: Blast to Nearby Connections (Android)
+                if (p2pConnectedEndpoints.isNotEmpty()) {
+                    fileUris.forEach { uri ->
+                        try {
+                            val pfd = contentResolver.openFileDescriptor(uri, "r")
+                            if (pfd != null) {
+                                val payload = Payload.fromFile(pfd)
+                                Nearby.getConnectionsClient(this@AirBridgeService)
+                                    .sendPayload(p2pConnectedEndpoints.keys.toList(), payload)
+                            }
+                        } catch (e: Exception) { Log.e("AirBridge", "P2P File send failed", e) }
+                    }
+                }
+            }
+        }
         return START_STICKY
     }
 
     fun broadcastToMac(text: String) {
         activeSockets.values.forEach { it.send(text) }
     }
+
+    // Add these methods inside AirBridgeService
+
+    private fun startP2PAdvertising() {
+        val options = AdvertisingOptions.Builder().setStrategy(STRATEGY).build()
+        Nearby.getConnectionsClient(this)
+            .startAdvertising(android.os.Build.MODEL, SERVICE_ID, connectionLifecycleCallback, options)
+            .addOnSuccessListener { Log.d("AirBridge", "P2P Advertising started") }
+            .addOnFailureListener { e -> Log.e("AirBridge", "P2P Advertising failed", e) }
+    }
+
 
     private fun formatEta(etaSeconds: Long): String {
         if (etaSeconds < 60) return "${etaSeconds}s remaining"
@@ -759,10 +914,21 @@ class AirBridgeService : Service() {
                 val newText =
                     item.coerceToText(this)?.toString() ?: return@addPrimaryClipChangedListener
 
+                // Inside setupClipboardListener(), replace the existing broadcast logic with this:
                 if (newText != lastClipboardText) {
                     lastClipboardText = newText
+
+                    // 1. Send via WebSocket to Mac/Windows
                     activeSockets.values.forEach { socket ->
                         socket.send(newText)
+                    }
+
+                    // 2. Send via P2P to connected Androids
+                    // 2. Send via P2P to connected Androids
+                    if (p2pConnectedEndpoints.isNotEmpty()) {
+                        val bytesPayload = Payload.fromBytes("CLIP:$newText".toByteArray())
+                        Nearby.getConnectionsClient(this@AirBridgeService)
+                            .sendPayload(p2pConnectedEndpoints.keys.toList(), bytesPayload) // Added .keys
                     }
                 }
             }
@@ -779,9 +945,12 @@ class AirBridgeService : Service() {
             setPackage(packageName)
         }
         intent.putStringArrayListExtra("ACTIVE_URLS", ArrayList(getActiveUrls()))
-        sendBroadcast(intent)
 
-        // Update the persistent notification state whenever connections change
+        // Pack P2P endpoints as "ID|Name" strings
+        val p2pList = p2pConnectedEndpoints.map { "${it.key}|${it.value}" }
+        intent.putStringArrayListExtra("P2P_ENDPOINTS", ArrayList(p2pList))
+
+        sendBroadcast(intent)
         updateForegroundNotification()
     }
 
@@ -1081,6 +1250,7 @@ class AirBridgeService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+        Nearby.getConnectionsClient(this).stopAllEndpoints()
         mainHandler.removeCallbacksAndMessages(null)
         activeSockets.values.forEach { it.close(1000, "Service destroyed") }
         activeSockets.clear()
