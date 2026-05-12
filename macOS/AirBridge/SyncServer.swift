@@ -132,7 +132,6 @@ class SyncServer: ObservableObject {
             }
         }
         
-        
         let activeConn = ActiveConnection(id: clientId, name: "Device (\(clientId.prefix(8)))", connection: connection)
         connectionsLock.lock()
         if let existing = connectionDict[clientId] {
@@ -148,7 +147,6 @@ class SyncServer: ObservableObject {
     
     private func handleIncomingFile(data: Data) {
         let downloadsURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
-        
         let targetDir = downloadsURL.appendingPathComponent("AirBridge Transfers")
         try? FileManager.default.createDirectory(at: targetDir, withIntermediateDirectories: true, attributes: nil)
         
@@ -171,133 +169,173 @@ class SyncServer: ObservableObject {
     }
 
     private func handleIncomingData(_ data: Data, from connection: NWConnection) {
-        if let text = String(data: data, encoding: .utf8) {
-            if text.hasPrefix("INP:") {
-                return
-            }
-            
-            let parts = text.components(separatedBy: ":")
-            if parts[0] == "DEVICE_NAME" && parts.count >= 2 {
-                        let actualName = parts.dropFirst().joined(separator: ":")
-                        DispatchQueue.main.async {
-                            self.connectionsLock.lock()
-                            // Find who sent this by matching the exact connection object
-                            if let key = self.connectionDict.first(where: { $0.value.connection === connection })?.key {
-                                let existing = self.connectionDict[key]!
-                                self.connectionDict[key] = ActiveConnection(id: existing.id, name: actualName, connection: existing.connection)
-                            }
-                            self.connectionsLock.unlock()
-                            self.updateConnectionUI()
-                        }
-                        return
-                    }
-                    // ----------------------------------
+            if let text = String(data: data, encoding: .utf8) {
+                
+                if text.hasPrefix("MAC_INP:") {
+                    let parts = text.components(separatedBy: ":")
+                    guard parts.count >= 2 else { return }
                     
-                if parts[0] == "BATCH_START" && parts.count >= 3 {
-                DispatchQueue.main.async {
-                    self.isReceivingBatch = true
-                    self.totalIncomingFiles = Int(parts[1]) ?? 0
-                    self.totalBatchBytes = Int(parts[2]) ?? 0
-                    self.receivedFilesCount = 0
-                    self.receivedBatchBytes = 0
-                    self.batchProgress = 0.0
-                    self.batchStartTime = Date()
-                    self.batchReceivedURLs.removeAll()
-                    self.updateProgressNotification(total: self.totalIncomingFiles)
-                }
-                return
-            }
-            
-            if parts[0] == "START_FILE" && parts.count >= 2 {
-                self.currentFileName = parts.dropFirst().joined(separator: ":")
-                let downloadsURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
-                
-                let targetDir = downloadsURL.appendingPathComponent("AirBridge Transfers")
-                try? FileManager.default.createDirectory(at: targetDir, withIntermediateDirectories: true, attributes: nil)
-                
-                let fileURL = targetDir.appendingPathComponent(self.currentFileName)
-                self.currentFileURL = fileURL
-                
-                FileManager.default.createFile(atPath: fileURL.path, contents: nil, attributes: nil)
-                self.currentFileHandle = try? FileHandle(forWritingTo: fileURL)
-                self.isReceivingFile = true
-                
-                DispatchQueue.main.async {
-                    self.batchStatus = "Receiving: \(self.currentFileName)"
-                }
-                return
-            }
-            
-            if parts[0] == "END_FILE" {
-                self.currentFileHandle?.closeFile()
-                self.currentFileHandle = nil
-                self.isReceivingFile = false
-                
-                if let url = self.currentFileURL {
-                    self.batchReceivedURLs.append(url)
-                }
-                
-                DispatchQueue.main.async {
-                    self.receivedFilesCount += 1
-                    if self.receivedFilesCount >= self.totalIncomingFiles {
-                        self.isReceivingBatch = false
-                        
-                        let pb = NSPasteboard.general
-                        pb.clearContents()
-                        pb.writeObjects(self.batchReceivedURLs as [NSURL])
-                        self.lastChangeCount = pb.changeCount
-                        
-                        self.triggerTransferNotification(fileName: "Batch of \(self.receivedFilesCount) files", fileURL: self.currentFileURL ?? FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0])
-                        self.batchStatus = "Complete!"
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { self.batchStatus = "" }
-                    }
-                }
-                return
-            }
-            
-            if text == "BATCH_COMPLETE" {
-                            return
+                    switch parts[1] {
+                    case "M":
+                        if parts.count >= 4, let dx = Double(parts[2]), let dy = Double(parts[3]) {
+                            MacInputSimulator.moveMouse(dx: CGFloat(dx), dy: CGFloat(dy))
                         }
-            
-            DispatchQueue.main.async {
-                let pb = NSPasteboard.general
-                pb.clearContents()
-                pb.setString(text, forType: .string)
-                self.lastChangeCount = pb.changeCount
-            }
-            return
-        }
-        
-        if isReceivingFile {
-            if #available(macOS 10.15.4, *) {
-                let _ = try? currentFileHandle?.seekToEnd()
-            } else {
-                currentFileHandle?.seekToEndOfFile()
-            }
-            currentFileHandle?.write(data)
-            
-            DispatchQueue.main.async {
-                self.receivedBatchBytes += data.count
-                if self.totalBatchBytes > 0 {
-                    self.batchProgress = Double(self.receivedBatchBytes) / Double(self.totalBatchBytes)
+                    case "S":
+                        if parts.count >= 4, let dx = Double(parts[2]), let dy = Double(parts[3]) {
+                            MacInputSimulator.scroll(dx: CGFloat(dx), dy: CGFloat(dy))
+                        }
+                    case "TAP": MacInputSimulator.tap()
+                    case "DOUBLE_TAP": MacInputSimulator.doubleTap()
+                    case "CD": MacInputSimulator.leftClickDown()
+                    case "CU": MacInputSimulator.leftClickUp()
+                        
+                    case "TYPE":
+                        if parts.count >= 3 {
+                            let str = parts.dropFirst(2).joined(separator: ":").trimmingCharacters(in: .newlines)
+                            MacInputSimulator.typeString(str)
+                        }
+                    case "KD":
+                        if parts.count >= 3 {
+                            let str = parts[2].trimmingCharacters(in: .whitespacesAndNewlines)
+                            if let code = UInt16(str) {
+                                MacInputSimulator.pressKeyCode(code)
+                            }
+                        }
+
+                    case "KEYBOARD": MacInputSimulator.toggleAccessibilityKeyboard()
+                    case "MISSION_CONTROL": MacInputSimulator.missionControl()
+                    case "APP_EXPOSE": MacInputSimulator.appExpose()
+                    case "SPACE_LEFT": MacInputSimulator.spaceLeft()
+                    case "SPACE_RIGHT": MacInputSimulator.spaceRight()
+                        
+                    default: break
+                    }
+                    return
                 }
                 
-                if let startTime = self.batchStartTime {
-                    let elapsed = Date().timeIntervalSince(startTime)
-                    if elapsed > 0.5 {
-                        let speed = Double(self.receivedBatchBytes) / elapsed
-                        self.batchSpeed = String(format: "%.1f MB/s", speed / (1024 * 1024))
+                if text.hasPrefix("INP:") {
+                    return
+                }
+                
+                let parts = text.components(separatedBy: ":")
+                if parts[0] == "DEVICE_NAME" && parts.count >= 2 {
+                    let actualName = parts.dropFirst().joined(separator: ":")
+                    DispatchQueue.main.async {
+                        self.connectionsLock.lock()
+                        if let key = self.connectionDict.first(where: { $0.value.connection === connection })?.key {
+                            let existing = self.connectionDict[key]!
+                            self.connectionDict[key] = ActiveConnection(id: existing.id, name: actualName, connection: existing.connection)
+                        }
+                        self.connectionsLock.unlock()
+                        self.updateConnectionUI()
+                    }
+                    return
+                }
                         
-                        let remainingBytes = Double(self.totalBatchBytes - self.receivedBatchBytes)
-                        let etaSeconds = speed > 0 ? remainingBytes / speed : 0
-                        self.batchETA = self.formatETA(seconds: etaSeconds)
+                if parts[0] == "BATCH_START" && parts.count >= 3 {
+                    DispatchQueue.main.async {
+                        self.isReceivingBatch = true
+                        self.totalIncomingFiles = Int(parts[1]) ?? 0
+                        self.totalBatchBytes = Int(parts[2]) ?? 0
+                        self.receivedFilesCount = 0
+                        self.receivedBatchBytes = 0
+                        self.batchProgress = 0.0
+                        self.batchStartTime = Date()
+                        self.batchReceivedURLs.removeAll()
+                        self.updateProgressNotification(total: self.totalIncomingFiles)
+                    }
+                    return
+                }
+                
+                if parts[0] == "START_FILE" && parts.count >= 2 {
+                    self.currentFileName = parts.dropFirst().joined(separator: ":")
+                    let downloadsURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
+                    let targetDir = downloadsURL.appendingPathComponent("AirBridge Transfers")
+                    try? FileManager.default.createDirectory(at: targetDir, withIntermediateDirectories: true, attributes: nil)
+                    
+                    let fileURL = targetDir.appendingPathComponent(self.currentFileName)
+                    self.currentFileURL = fileURL
+                    
+                    FileManager.default.createFile(atPath: fileURL.path, contents: nil, attributes: nil)
+                    self.currentFileHandle = try? FileHandle(forWritingTo: fileURL)
+                    self.isReceivingFile = true
+                    
+                    DispatchQueue.main.async {
+                        self.batchStatus = "Receiving: \(self.currentFileName)"
+                    }
+                    return
+                }
+                
+                if parts[0] == "END_FILE" {
+                    self.currentFileHandle?.closeFile()
+                    self.currentFileHandle = nil
+                    self.isReceivingFile = false
+                    
+                    if let url = self.currentFileURL {
+                        self.batchReceivedURLs.append(url)
+                    }
+                    
+                    DispatchQueue.main.async {
+                        self.receivedFilesCount += 1
+                        if self.receivedFilesCount >= self.totalIncomingFiles {
+                            self.isReceivingBatch = false
+                            
+                            let pb = NSPasteboard.general
+                            pb.clearContents()
+                            pb.writeObjects(self.batchReceivedURLs as [NSURL])
+                            self.lastChangeCount = pb.changeCount
+                            
+                            self.triggerTransferNotification(fileName: "Batch of \(self.receivedFilesCount) files", fileURL: self.currentFileURL ?? FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0])
+                            self.batchStatus = "Complete!"
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { self.batchStatus = "" }
+                        }
+                    }
+                    return
+                }
+                
+                if text == "BATCH_COMPLETE" {
+                    return
+                }
+                
+                DispatchQueue.main.async {
+                    let pb = NSPasteboard.general
+                    pb.clearContents()
+                    pb.setString(text, forType: .string)
+                    self.lastChangeCount = pb.changeCount
+                }
+                return
+            }
+            
+            if isReceivingFile {
+                if #available(macOS 10.15.4, *) {
+                    let _ = try? currentFileHandle?.seekToEnd()
+                } else {
+                    currentFileHandle?.seekToEndOfFile()
+                }
+                currentFileHandle?.write(data)
+                
+                DispatchQueue.main.async {
+                    self.receivedBatchBytes += data.count
+                    if self.totalBatchBytes > 0 {
+                        self.batchProgress = Double(self.receivedBatchBytes) / Double(self.totalBatchBytes)
+                    }
+                    
+                    if let startTime = self.batchStartTime {
+                        let elapsed = Date().timeIntervalSince(startTime)
+                        if elapsed > 0.5 {
+                            let speed = Double(self.receivedBatchBytes) / elapsed
+                            self.batchSpeed = String(format: "%.1f MB/s", speed / (1024 * 1024))
+                            
+                            let remainingBytes = Double(self.totalBatchBytes - self.receivedBatchBytes)
+                            let etaSeconds = speed > 0 ? remainingBytes / speed : 0
+                            self.batchETA = self.formatETA(seconds: etaSeconds)
+                        }
                     }
                 }
+            } else {
+                handleIncomingFile(data: data)
             }
-        } else {
-            handleIncomingFile(data: data)
         }
-    }
     
     private func triggerTransferNotification(fileName: String, fileURL: URL) {
         let content = UNMutableNotificationContent()
@@ -599,10 +637,8 @@ class SyncServer: ObservableObject {
         DispatchQueue.main.async {
                     self.pendingTransferURLs = validFilesToSend.isEmpty ? nil : validFilesToSend
                     
-                    // FIX: Use the shared static instance instead of the failing cast
                     AppDelegate.shared?.showTargetSelection(server: self)
                     
-                    // Log an error in the menu bar if it opened empty
                     if validFilesToSend.isEmpty {
                         self.sendStatus = "Debug: Woke up, but no files found."
                         DispatchQueue.main.asyncAfter(deadline: .now() + 4) { self.sendStatus = "" }
