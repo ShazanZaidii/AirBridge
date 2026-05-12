@@ -365,11 +365,12 @@ fun DiscoveryScreen(
     showCancel: Boolean
 ) {
     val context = LocalContext.current
+    val prefs = context.getSharedPreferences("AirBridgePrefs", Context.MODE_PRIVATE)
+
     var discoveredDevices by remember { mutableStateOf(listOf<DiscoveredMac>()) }
     var discoveredAndroids by remember { mutableStateOf(listOf<DiscoveredAndroid>()) }
 
     DisposableEffect(Unit) {
-        // --- 1. Mac/Windows NSD Discovery ---
         val nsdManager = context.getSystemService(Context.NSD_SERVICE) as NsdManager
         val discoveryListener = object : NsdManager.DiscoveryListener {
             override fun onDiscoveryStarted(regType: String) {}
@@ -390,16 +391,13 @@ fun DiscoveryScreen(
                     }
                 })
             }
-
             override fun onServiceLost(service: NsdServiceInfo) {
                 discoveredDevices = discoveredDevices.filterNot { it.name == service.serviceName }
             }
-
             override fun onDiscoveryStopped(serviceType: String) {}
             override fun onStartDiscoveryFailed(serviceType: String, errorCode: Int) {
                 nsdManager.stopServiceDiscovery(this)
             }
-
             override fun onStopDiscoveryFailed(serviceType: String, errorCode: Int) {
                 nsdManager.stopServiceDiscovery(this)
             }
@@ -411,13 +409,10 @@ fun DiscoveryScreen(
             discoveryListener
         )
 
-        // --- 2. Android P2P Discovery ---
         val endpointDiscoveryCallback = object : EndpointDiscoveryCallback() {
             override fun onEndpointFound(endpointId: String, info: DiscoveredEndpointInfo) {
-                discoveredAndroids =
-                    discoveredAndroids + DiscoveredAndroid(info.endpointName, endpointId)
+                discoveredAndroids = discoveredAndroids + DiscoveredAndroid(info.endpointName, endpointId)
             }
-
             override fun onEndpointLost(endpointId: String) {
                 discoveredAndroids = discoveredAndroids.filterNot { it.endpointId == endpointId }
             }
@@ -430,9 +425,17 @@ fun DiscoveryScreen(
             options
         )
 
+        // --- NEW UX: Automatically make device visible while on this screen ---
+        context.startService(Intent(context, AirBridgeService::class.java).apply { action = "START_P2P_RECEIVE" })
+
         onDispose {
             nsdManager.stopServiceDiscovery(discoveryListener)
             Nearby.getConnectionsClient(context).stopDiscovery()
+
+            // Revert visibility back to the global preference state when leaving the screen
+            if (!prefs.getBoolean("P2P_VISIBLE", false)) {
+                context.startService(Intent(context, AirBridgeService::class.java).apply { action = "STOP_P2P_RECEIVE" })
+            }
         }
     }
 
@@ -462,10 +465,7 @@ fun DiscoveryScreen(
                 CircularProgressIndicator(color = Color(0xFF4285F4))
             }
         } else {
-            LazyColumn(modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth()) {
-                // Render Macs/PCs
+            LazyColumn(modifier = Modifier.weight(1f).fillMaxWidth()) {
                 items(discoveredDevices) { device ->
                     Card(
                         shape = RoundedCornerShape(16.dp),
@@ -475,20 +475,12 @@ fun DiscoveryScreen(
                             .padding(bottom = 12.dp)
                             .clickable { onDevicePaired(device.url) }
                     ) {
-                        Row(modifier = Modifier
-                            .padding(20.dp)
-                            .fillMaxWidth()) {
-                            Text(
-                                device.name,
-                                fontSize = 20.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White
-                            )
+                        Row(modifier = Modifier.padding(20.dp).fillMaxWidth()) {
+                            Text(device.name, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color.White)
                         }
                     }
                 }
 
-                // Render Androids
                 items(discoveredAndroids) { androidDevice ->
                     Card(
                         shape = RoundedCornerShape(16.dp),
@@ -497,28 +489,17 @@ fun DiscoveryScreen(
                             .fillMaxWidth()
                             .padding(bottom = 12.dp)
                             .clickable {
-                                // Send connection request to the service
                                 val intent = Intent(context, AirBridgeService::class.java).apply {
                                     action = "CONNECT_P2P_ENDPOINT"
                                     putExtra("ENDPOINT_ID", androidDevice.endpointId)
                                 }
                                 context.startService(intent)
-                                onCancel() // Pop back to connected screen
+                                onCancel()
                             }
                     ) {
-                        Row(
-                            modifier = Modifier
-                                .padding(20.dp)
-                                .fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
+                        Row(modifier = Modifier.padding(20.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                             Column {
-                                Text(
-                                    androidDevice.name,
-                                    fontSize = 20.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color.White
-                                )
+                                Text(androidDevice.name, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color.White)
                                 Text("Nearby Android", color = Color(0xFF34A853), fontSize = 13.sp)
                             }
                         }
@@ -536,9 +517,7 @@ fun DiscoveryScreen(
             Button(
                 onClick = onCancel,
                 colors = ButtonDefaults.buttonColors(containerColor = Color.DarkGray),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(56.dp)
+                modifier = Modifier.fillMaxWidth().height(56.dp)
             ) {
                 Text("Cancel", color = Color.White, fontSize = 16.sp)
             }
@@ -550,16 +529,19 @@ fun DiscoveryScreen(
 fun ConnectedScreen(
     urls: Set<String>,
     onOpenSettings: () -> Unit,
-    autoPairEnabled: Boolean, // Kept so MainActivity doesn't break
-    onAutoPairChange: (Boolean) -> Unit, // Kept so MainActivity doesn't break
+    autoPairEnabled: Boolean,
+    onAutoPairChange: (Boolean) -> Unit,
     onAddDevice: () -> Unit,
     onRemoveDevice: (String) -> Unit
 ) {
     val context = LocalContext.current
+    val prefs = context.getSharedPreferences("AirBridgePrefs", Context.MODE_PRIVATE)
 
     var activeMacs by remember { mutableStateOf(AirBridgeService.getActiveUrls()) }
     var p2pDevices by remember { mutableStateOf(mapOf<String, String>()) }
-    var isVisibleForP2P by remember { mutableStateOf(false) }
+
+    // NEW: Shared visibility state
+    var isVisibleForP2P by remember { mutableStateOf(prefs.getBoolean("P2P_VISIBLE", false)) }
 
     var transferCurrentFiles by remember { mutableStateOf(0) }
     var transferTotalFiles by remember { mutableStateOf(0) }
@@ -660,19 +642,12 @@ fun ConnectedScreen(
                     .padding(bottom = 16.dp)
             ) {
                 Row(
-                    modifier = Modifier
-                        .padding(20.dp)
-                        .fillMaxWidth(),
+                    modifier = Modifier.padding(20.dp).fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            rawName,
-                            fontSize = 20.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
-                        )
+                        Text(rawName, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color.White)
                         Text(
                             if (isLive) "🟢 Active" else "⚠️ Disconnected",
                             color = if (isLive) Color.Green else Color.Yellow,
@@ -682,11 +657,7 @@ fun ConnectedScreen(
                         )
                     }
                     IconButton(onClick = { onRemoveDevice(url) }) {
-                        Icon(
-                            Icons.Default.Delete,
-                            contentDescription = "Remove",
-                            tint = Color.Red.copy(alpha = 0.8f)
-                        )
+                        Icon(Icons.Default.Delete, contentDescription = "Remove", tint = Color.Red.copy(alpha = 0.8f))
                     }
                 }
             }
@@ -701,19 +672,12 @@ fun ConnectedScreen(
                     .padding(bottom = 16.dp)
             ) {
                 Row(
-                    modifier = Modifier
-                        .padding(20.dp)
-                        .fillMaxWidth(),
+                    modifier = Modifier.padding(20.dp).fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            name,
-                            fontSize = 20.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
-                        )
+                        Text(name, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color.White)
                         Text(
                             "🟢 P2P Active",
                             color = Color(0xFF34A853),
@@ -724,23 +688,15 @@ fun ConnectedScreen(
                     }
                     IconButton(onClick = {
                         context.startService(
-                            Intent(context, AirBridgeService::class.java).putExtra(
-                                "DISCONNECT_P2P",
-                                endpointId
-                            )
+                            Intent(context, AirBridgeService::class.java).putExtra("DISCONNECT_P2P", endpointId)
                         )
                     }) {
-                        Icon(
-                            Icons.Default.Delete,
-                            contentDescription = "Remove",
-                            tint = Color.Red.copy(alpha = 0.8f)
-                        )
+                        Icon(Icons.Default.Delete, contentDescription = "Remove", tint = Color.Red.copy(alpha = 0.8f))
                     }
                 }
             }
         }
 
-        // --- NEW UX: Device Visibility Toggle in the main layout flow ---
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -760,6 +716,7 @@ fun ConnectedScreen(
                 checked = isVisibleForP2P,
                 onCheckedChange = { checked ->
                     isVisibleForP2P = checked
+                    prefs.edit().putBoolean("P2P_VISIBLE", checked).apply()
                     val actionStr = if (checked) "START_P2P_RECEIVE" else "STOP_P2P_RECEIVE"
                     context.startService(Intent(context, AirBridgeService::class.java).apply { action = actionStr })
                 },
