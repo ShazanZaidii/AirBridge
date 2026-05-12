@@ -313,15 +313,17 @@ class AirBridgeService : Service() {
 
                 // Route 2: Blast to Nearby Connections (Android)
                 if (p2pConnectedEndpoints.isNotEmpty()) {
-                    fileUris.forEach { uri ->
-                        try {
-                            val pfd = contentResolver.openFileDescriptor(uri, "r")
-                            if (pfd != null) {
-                                val payload = Payload.fromFile(pfd)
-                                Nearby.getConnectionsClient(this@AirBridgeService)
-                                    .sendPayload(p2pConnectedEndpoints.keys.toList(), payload)
-                            }
-                        } catch (e: Exception) { Log.e("AirBridge", "P2P File send failed", e) }
+                    transferQueue.execute { // <-- Moved to background thread
+                        fileUris.forEach { uri ->
+                            try {
+                                val pfd = contentResolver.openFileDescriptor(uri, "r")
+                                if (pfd != null) {
+                                    val payload = Payload.fromFile(pfd)
+                                    Nearby.getConnectionsClient(this@AirBridgeService)
+                                        .sendPayload(p2pConnectedEndpoints.keys.toList(), payload)
+                                }
+                            } catch (e: Exception) { Log.e("AirBridge", "P2P File send failed", e) }
+                        }
                     }
                 }
             }
