@@ -21,6 +21,8 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.Vibrator
+import android.os.VibrationEffect
 import android.provider.OpenableColumns
 import android.provider.Settings
 import android.util.DisplayMetrics
@@ -33,15 +35,13 @@ import android.view.WindowManager
 import android.view.animation.DecelerateInterpolator
 import android.widget.FrameLayout
 import android.widget.ImageView
+import android.widget.LinearLayout
 import android.widget.Toast
 import androidx.annotation.RequiresApi
-import androidx.camera.core.impl.Identifier
 import androidx.core.app.NotificationCompat
-import androidx.core.app.Person
 import androidx.core.content.pm.ShortcutInfoCompat
 import androidx.core.content.pm.ShortcutManagerCompat
 import androidx.core.graphics.drawable.IconCompat
-import com.example.driftui.core.Time
 import okhttp3.*
 import okio.ByteString.Companion.toByteString
 import java.util.concurrent.ConcurrentHashMap
@@ -77,6 +77,20 @@ class AirBridgeService : Service() {
 
     private val bubbleSize = 130
     private var isHoveringClose = false
+
+    // --- NEW TILE STATE VARIABLES ---
+    private var isPositionLocked = true
+    private var menuView: View? = null
+
+    private val autoLockRunnable = Runnable {
+        isPositionLocked = true
+        showToast("Tile Position Locked")
+        mainHandler.post {
+            floatingView?.alpha = 0.3f
+            // Cast to FrameLayout to access getChildAt
+            ((floatingView as? FrameLayout)?.getChildAt(0) as? ImageView)?.imageTintList = ColorStateList.valueOf(Color.parseColor("#B0B0B0"))
+        }
+    }
 
     private var isReceivingFile = false
     private var incomingFileName = ""
@@ -118,9 +132,8 @@ class AirBridgeService : Service() {
                     val payloadFile = payload.asFile()?.asJavaFile()
                     if (payloadFile != null && payloadFile.exists()) {
                         transferQueue.execute {
-                            // Nearby doesn't transmit file names natively, so we assign a timestamped name
                             val fileName = "AirBridge_P2P_${System.currentTimeMillis()}"
-                            val ext = ".dat" // Fallback extension
+                            val ext = ".dat"
 
                             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                                 val contentValues = android.content.ContentValues().apply {
@@ -143,7 +156,7 @@ class AirBridgeService : Service() {
                                 payloadFile.copyTo(java.io.File(dir, "$fileName$ext"), overwrite = true)
                             }
 
-                            payloadFile.delete() // Cleanup temporary cache
+                            payloadFile.delete()
                             mainHandler.post { Toast.makeText(applicationContext, "P2P File Saved to Downloads", Toast.LENGTH_SHORT).show() }
                         }
                     }
@@ -169,7 +182,7 @@ class AirBridgeService : Service() {
                 val name = pendingEndpoints[endpointId] ?: "Android Device"
                 p2pConnectedEndpoints[endpointId] = name
                 pendingEndpoints.remove(endpointId)
-                broadcastConnectionState() // Notify UI of the new mesh node
+                broadcastConnectionState()
                 showToast("Connected to $name via P2P")
             }
         }
@@ -189,6 +202,10 @@ class AirBridgeService : Service() {
             return instance?.activeSockets?.keys?.map {
                 if (it.endsWith("/")) it.dropLast(1) else it
             }?.toSet() ?: emptySet()
+        }
+
+        fun broadcastCommand(command: String) {
+            instance?.activeSockets?.values?.forEach { it.send(command) }
         }
     }
 
@@ -234,7 +251,6 @@ class AirBridgeService : Service() {
             savedUrls = urls.toSet()
             updateDirectShareShortcuts(savedUrls)
 
-            // KILL ORPHANED SOCKETS
             val currentActiveUrls = activeSockets.keys.toList()
             for (url in currentActiveUrls) {
                 if (!savedUrls.contains(url)) {
@@ -306,14 +322,12 @@ class AirBridgeService : Service() {
             }
 
             if (fileUris.isNotEmpty()) {
-                // Route 1: Blast to WebSockets (Mac/Windows)
                 if (activeSockets.isNotEmpty()) {
                     streamBatchToMac(fileUris, targetUrl)
                 }
 
-                // Route 2: Blast to Nearby Connections (Android)
                 if (p2pConnectedEndpoints.isNotEmpty()) {
-                    transferQueue.execute { // <-- Moved to background thread
+                    transferQueue.execute {
                         fileUris.forEach { uri ->
                             try {
                                 val pfd = contentResolver.openFileDescriptor(uri, "r")
@@ -335,8 +349,6 @@ class AirBridgeService : Service() {
         activeSockets.values.forEach { it.send(text) }
     }
 
-    // Add these methods inside AirBridgeService
-
     private fun startP2PAdvertising() {
         val options = AdvertisingOptions.Builder().setStrategy(STRATEGY).build()
         Nearby.getConnectionsClient(this)
@@ -344,7 +356,6 @@ class AirBridgeService : Service() {
             .addOnSuccessListener { Log.d("AirBridge", "P2P Advertising started") }
             .addOnFailureListener { e -> Log.e("AirBridge", "P2P Advertising failed", e) }
     }
-
 
     private fun formatEta(etaSeconds: Long): String {
         if (etaSeconds < 60) return "${etaSeconds}s remaining"
@@ -361,7 +372,6 @@ class AirBridgeService : Service() {
     private fun updateTransferNotification(progress: Int, title: String, text: String) {
         val notificationManager = getSystemService(NotificationManager::class.java)
 
-        // Best practice: use the specific transfer channel instead of the background service channel
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel("transfer_channel", "File Transfers", NotificationManager.IMPORTANCE_LOW)
             notificationManager.createNotificationChannel(channel)
@@ -370,7 +380,7 @@ class AirBridgeService : Service() {
         val notification = NotificationCompat.Builder(this, "transfer_channel")
             .setContentTitle(title)
             .setContentText(text)
-            .setSmallIcon(R.drawable.ic_stat_name) // Differentiate from sync icon
+            .setSmallIcon(R.drawable.ic_stat_name)
             .setProgress(100, progress, false)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
@@ -545,18 +555,17 @@ class AirBridgeService : Service() {
     private fun updateDirectShareShortcuts(urls: Set<String>) {
         try {
             if (urls.isEmpty()) {
-                androidx.core.content.pm.ShortcutManagerCompat.removeAllDynamicShortcuts(this)
+                ShortcutManagerCompat.removeAllDynamicShortcuts(this)
                 return
             }
 
-            val activeShortcuts = mutableListOf<androidx.core.content.pm.ShortcutInfoCompat>()
+            val activeShortcuts = mutableListOf<ShortcutInfoCompat>()
 
             urls.sorted().forEachIndexed { index, url ->
                 val uri = Uri.parse(url)
                 val rawName = uri.getQueryParameter("name") ?: "Device $index"
                 val shortName = getShortMacName(rawName)
 
-                // Safe Base64 ID
                 val safeEncoded = android.util.Base64.encodeToString(
                     url.toByteArray(),
                     android.util.Base64.NO_WRAP or android.util.Base64.URL_SAFE
@@ -582,9 +591,8 @@ class AirBridgeService : Service() {
                 drawable.setBounds(pad, pad, 150 - pad, 150 - pad)
                 drawable.draw(canvas)
 
-                val paddedIcon = androidx.core.graphics.drawable.IconCompat.createWithBitmap(bitmap)
+                val paddedIcon = IconCompat.createWithBitmap(bitmap)
 
-                // 1. ISOLATE THE INTENTS: Add unique data and identifier
                 val shareIntent = Intent(this, ShareActivity::class.java).apply {
                     action = Intent.ACTION_SEND
                     putExtra("TARGET_URL", url)
@@ -592,11 +600,9 @@ class AirBridgeService : Service() {
                     data = Uri.parse(url)
                 }
 
-                // Unified categories matching the new shortcuts.xml
                 val categoryFile = "com.shazan.airbridge.category.FILE_SHARE_TARGET"
                 val categoryText = "com.shazan.airbridge.category.TEXT_SHARE_TARGET"
 
-                // Point directly to the main ShareActivity
                 val mainComponent = android.content.ComponentName(
                     this@AirBridgeService,
                     ShareActivity::class.java
@@ -608,14 +614,14 @@ class AirBridgeService : Service() {
                     .setIcon(paddedIcon)
                     .build()
 
-                val shortcut = androidx.core.content.pm.ShortcutInfoCompat.Builder(this, safeId)
+                val shortcut = ShortcutInfoCompat.Builder(this, safeId)
                     .setShortLabel(shortName)
                     .setLongLabel(rawName)
                     .setIcon(paddedIcon)
                     .setCategories(setOf(categoryFile, categoryText))
                     .setIntent(shareIntent)
                     .setPerson(person)
-                    .setActivity(mainComponent) // Point directly to the single Activity
+                    .setActivity(mainComponent)
                     .setLongLived(true)
                     .setRank(index)
                     .build()
@@ -623,27 +629,24 @@ class AirBridgeService : Service() {
                 activeShortcuts.add(shortcut)
             }
 
-            // ATOMIC UPDATE
-            androidx.core.content.pm.ShortcutManagerCompat.addDynamicShortcuts(this, activeShortcuts)
+            ShortcutManagerCompat.addDynamicShortcuts(this, activeShortcuts)
 
-            // USAGE SPAM TO INFLATE RANKING
             activeShortcuts.forEach { shortcut ->
                 for (i in 1..10) {
-                    androidx.core.content.pm.ShortcutManagerCompat.reportShortcutUsed(this, shortcut.id)
+                    ShortcutManagerCompat.reportShortcutUsed(this, shortcut.id)
                 }
             }
 
-            // Clean up stale IDs
             val activeIds = activeShortcuts.map { it.id }
-            val allShortcuts = androidx.core.content.pm.ShortcutManagerCompat.getDynamicShortcuts(this)
+            val allShortcuts = ShortcutManagerCompat.getDynamicShortcuts(this)
             val staleIds = allShortcuts.map { it.id }.filterNot { activeIds.contains(it) }
 
             if (staleIds.isNotEmpty()) {
-                androidx.core.content.pm.ShortcutManagerCompat.removeDynamicShortcuts(this, staleIds)
+                ShortcutManagerCompat.removeDynamicShortcuts(this, staleIds)
             }
 
         } catch (e: Exception) {
-            android.util.Log.e("AirBridge", "Failed to update share shortcuts", e)
+            Log.e("AirBridge", "Failed to update share shortcuts", e)
         }
     }
 
@@ -678,7 +681,6 @@ class AirBridgeService : Service() {
                 }
 
                 if (text.startsWith("START_FILE:")) {
-                    // 1. IMPLICIT END-OF-FILE: If we are already receiving a file, the END_FILE was dropped!
                     if (isReceivingFile) {
                         try { incomingFileOutputStream?.close() } catch (e: Exception) {}
                         incomingFileOutputStream = null
@@ -698,7 +700,6 @@ class AirBridgeService : Service() {
                     isReceivingFile = true
                     val rawFileName = text.substringAfter("START_FILE:")
 
-                    // Strip the 6-character Mac prefix if it exists. Safely ignores Windows files.
                     incomingFileName = rawFileName.replace(Regex("^[A-Fa-f0-9]{6}_"), "")
 
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -708,7 +709,6 @@ class AirBridgeService : Service() {
                             put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, android.os.Environment.DIRECTORY_DOWNLOADS + "/AirBridge Transfers")
                             put(android.provider.MediaStore.MediaColumns.IS_PENDING, 1)
                         }
-                        // MediaStore automatically handles collisions by appending (1), (2), etc.
                         incomingFileUri = resolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
                         incomingFileOutputStream = incomingFileUri?.let { resolver.openOutputStream(it) }
                     } else {
@@ -719,7 +719,6 @@ class AirBridgeService : Service() {
                         dir.mkdirs()
                         var file = java.io.File(dir, incomingFileName)
 
-                        // Legacy collision proofing: Append counter if file already exists
                         var counter = 1
                         val nameWithoutExt = incomingFileName.substringBeforeLast(".")
                         val ext = if (incomingFileName.contains(".")) ".${incomingFileName.substringAfterLast(".")}" else ""
@@ -735,7 +734,6 @@ class AirBridgeService : Service() {
                 }
 
                 if (text.startsWith("END_FILE:")) {
-                    // If we already auto-closed it via byte count or next file start, don't double count
                     if (!isReceivingFile) return
 
                     isReceivingFile = false
@@ -754,11 +752,10 @@ class AirBridgeService : Service() {
 
                     incomingFilesReceived++
 
-                    // ✅ ONLY update the notification if the entire batch is 100% finished
                     if (incomingFilesReceived >= incomingTotalFiles) {
                         mainHandler.postDelayed({
                             updateIncomingTransferUI(true)
-                        }, 200) // Tiny delay guarantees Android OS accepts the notification
+                        }, 200)
                     }
                     return
                 }
@@ -799,13 +796,11 @@ class AirBridgeService : Service() {
                         incomingReceivedBytes += bytes.size
 
                         val now = System.currentTimeMillis()
-                        // Keep the 500ms progress update for a smooth UI
                         if (now - incomingLastUpdate > 500) {
                             incomingLastUpdate = now
                             updateIncomingTransferUI(false)
                         }
 
-                        // 3. AUTO-COMPLETE BY BYTE COUNT: If this is the last chunk, forcefully close the batch
                         if (incomingTotalBytes > 0L && incomingReceivedBytes >= incomingTotalBytes) {
                             isReceivingFile = false
                             try { incomingFileOutputStream?.close() } catch (e: Exception) {}
@@ -821,7 +816,6 @@ class AirBridgeService : Service() {
                                 incomingFileUri = null
                             }
 
-                            // Force the UI to 100% complete state
                             incomingFilesReceived = incomingTotalFiles
                             mainHandler.postDelayed({
                                 updateIncomingTransferUI(true)
@@ -843,12 +837,10 @@ class AirBridgeService : Service() {
             }
 
             private fun handleDisconnect(url: String, dyingSocket: WebSocket) {
-                // IDENTITY CHECK: Only wipe the dictionary if the dying socket is the currently tracked one
                 if (activeSockets[url] === dyingSocket) {
                     activeSockets.remove(url)
                     broadcastConnectionState()
 
-                    // Clear the stuck UI if the socket drops during a transfer
                     if (isReceivingFile) {
                         isReceivingFile = false
                         try {
@@ -858,7 +850,7 @@ class AirBridgeService : Service() {
 
                         val notificationManager =
                             getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-                        notificationManager.cancel(2002) // Force dismiss the progress bar
+                        notificationManager.cancel(2002)
 
                         mainHandler.post {
                             Toast.makeText(
@@ -916,21 +908,17 @@ class AirBridgeService : Service() {
                 val newText =
                     item.coerceToText(this)?.toString() ?: return@addPrimaryClipChangedListener
 
-                // Inside setupClipboardListener(), replace the existing broadcast logic with this:
                 if (newText != lastClipboardText) {
                     lastClipboardText = newText
 
-                    // 1. Send via WebSocket to Mac/Windows
                     activeSockets.values.forEach { socket ->
                         socket.send(newText)
                     }
 
-                    // 2. Send via P2P to connected Androids
-                    // 2. Send via P2P to connected Androids
                     if (p2pConnectedEndpoints.isNotEmpty()) {
                         val bytesPayload = Payload.fromBytes("CLIP:$newText".toByteArray())
                         Nearby.getConnectionsClient(this@AirBridgeService)
-                            .sendPayload(p2pConnectedEndpoints.keys.toList(), bytesPayload) // Added .keys
+                            .sendPayload(p2pConnectedEndpoints.keys.toList(), bytesPayload)
                     }
                 }
             }
@@ -948,7 +936,6 @@ class AirBridgeService : Service() {
         }
         intent.putStringArrayListExtra("ACTIVE_URLS", ArrayList(getActiveUrls()))
 
-        // Pack P2P endpoints as "ID|Name" strings
         val p2pList = p2pConnectedEndpoints.map { "${it.key}|${it.value}" }
         intent.putStringArrayListExtra("P2P_ENDPOINTS", ArrayList(p2pList))
 
@@ -1027,6 +1014,7 @@ class AirBridgeService : Service() {
         var initialTouchX = 0f
         var initialTouchY = 0f
         var isClick = false
+        var longPressRunnable: Runnable? = null
 
         floatingView?.setOnTouchListener { view, event ->
             val metrics = DisplayMetrics()
@@ -1043,11 +1031,17 @@ class AirBridgeService : Service() {
                     initialTouchY = event.rawY
                     isClick = true
 
-                    view.alpha = 1.0f
+                    view.alpha = if (isPositionLocked) 1.0f else 0.8f
                     view.elevation = 15f
                     view.animate().scaleX(1.05f).scaleY(1.05f).setDuration(100).start()
 
-                    showCloseZone()
+                    longPressRunnable = Runnable {
+                        isClick = false
+                        showMoonMenu()
+                    }
+                    mainHandler.postDelayed(longPressRunnable!!, 400)
+
+                    if (!isPositionLocked) showCloseZone()
                     true
                 }
 
@@ -1055,55 +1049,54 @@ class AirBridgeService : Service() {
                     val dx = (event.rawX - initialTouchX).toInt()
                     val dy = (event.rawY - initialTouchY).toInt()
 
-                    if (abs(dx) > 10 || abs(dy) > 10) isClick = false
+                    if (abs(dx) > 10 || abs(dy) > 10) {
+                        isClick = false
+                        longPressRunnable?.let { mainHandler.removeCallbacks(it) }
+                    }
 
-                    layoutParams.x = initialX + dx
-                    layoutParams.y = initialY + dy
-                    windowManager?.updateViewLayout(floatingView, layoutParams)
+                    if (!isPositionLocked) {
+                        layoutParams.x = initialX + dx
+                        layoutParams.y = initialY + dy
+                        windowManager?.updateViewLayout(floatingView, layoutParams)
 
-                    val isNearBottom = event.rawY > (realScreenHeight - 400)
-                    val isNearCenter = abs(event.rawX - (realScreenWidth / 2)) < 250
+                        val isNearBottom = event.rawY > (realScreenHeight - 400)
+                        val isNearCenter = abs(event.rawX - (realScreenWidth / 2)) < 250
 
-                    if (isNearBottom && isNearCenter) {
-                        isHoveringClose = true
-                        closeZoneView?.alpha = 1.0f
-                        (closeZoneView?.background as? GradientDrawable)?.setColor(
-                            Color.parseColor(
-                                "#E53935"
-                            )
-                        )
-                    } else {
-                        isHoveringClose = false
-                        closeZoneView?.alpha = 0.5f
-                        (closeZoneView?.background as? GradientDrawable)?.setColor(
-                            Color.parseColor(
-                                "#80000000"
-                            )
-                        )
+                        if (isNearBottom && isNearCenter) {
+                            isHoveringClose = true
+                            closeZoneView?.alpha = 1.0f
+                            (closeZoneView?.background as? GradientDrawable)?.setColor(Color.parseColor("#E53935"))
+                        } else {
+                            isHoveringClose = false
+                            closeZoneView?.alpha = 0.5f
+                            (closeZoneView?.background as? GradientDrawable)?.setColor(Color.parseColor("#80000000"))
+                        }
                     }
                     true
                 }
 
                 MotionEvent.ACTION_UP -> {
+                    longPressRunnable?.let { mainHandler.removeCallbacks(it) }
+
                     view.animate().scaleX(1.0f).scaleY(1.0f).setDuration(100).start()
                     view.elevation = 0f
                     hideCloseZone()
 
-                    if (isHoveringClose) {
+                    if (isHoveringClose && !isPositionLocked) {
                         stopSelf()
                         return@setOnTouchListener true
                     }
 
                     if (isClick) {
+                        hideMoonMenu()
                         view.alpha = 0.3f
                         val intent = Intent(this, SyncActivity::class.java).apply {
                             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                         }
                         startActivity(intent)
-                    } else {
+                    } else if (!isPositionLocked) {
                         val isLeftHalf = (layoutParams.x + (bubbleSize / 2)) < (realScreenWidth / 2)
-                        val targetX =
-                            if (isLeftHalf) -(bubbleSize / 2) else realScreenWidth - (bubbleSize / 2)
+                        val targetX = if (isLeftHalf) -(bubbleSize / 2) else realScreenWidth - (bubbleSize / 2)
 
                         val animator = ValueAnimator.ofInt(layoutParams.x, targetX)
                         animator.duration = 250
@@ -1112,18 +1105,116 @@ class AirBridgeService : Service() {
                             layoutParams.x = animation.animatedValue as Int
                             windowManager?.updateViewLayout(floatingView, layoutParams)
                         }
-
-                        animator.doOnEnd { view.alpha = 0.3f }
                         animator.start()
+                    } else {
+                        view.alpha = 0.3f
                     }
                     true
                 }
-
                 else -> false
             }
         }
-
         windowManager?.addView(floatingView, layoutParams)
+    }
+
+    private fun showMoonMenu() {
+        if (menuView != null) return
+
+        val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as android.os.Vibrator
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            vibrator.vibrate(android.os.VibrationEffect.createOneShot(30, android.os.VibrationEffect.DEFAULT_AMPLITUDE))
+        } else {
+            @Suppress("DEPRECATION")
+            vibrator.vibrate(30)
+        }
+
+        // Helper to convert dp to pixels
+        val dp = { value: Int -> (value * resources.displayMetrics.density).toInt() }
+
+        val container = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            background = GradientDrawable().apply {
+                setColor(Color.parseColor("#1A1A1A"))
+                cornerRadius = 60f
+                setStroke(2, Color.parseColor("#333333"))
+            }
+            setPadding(dp(12), dp(16), dp(12), dp(16))
+            elevation = 20f
+        }
+
+        val trackpadBtn = ImageView(this).apply {
+            setImageResource(R.drawable.ic_mac)
+            imageTintList = ColorStateList.valueOf(Color.WHITE)
+            layoutParams = android.widget.LinearLayout.LayoutParams(dp(56), dp(56)).apply {
+                setMargins(0, 0, 0, dp(16))
+            }
+            setPadding(dp(14), dp(14), dp(14), dp(14))
+            setOnClickListener {
+                hideMoonMenu()
+                val intent = Intent(this@AirBridgeService, TrackpadActivity::class.java).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                }
+                startActivity(intent)
+            }
+        }
+
+        val unlockBtn = ImageView(this).apply {
+            setImageResource(android.R.drawable.ic_menu_mylocation)
+            imageTintList = ColorStateList.valueOf(Color.parseColor("#FFD700"))
+            layoutParams = android.widget.LinearLayout.LayoutParams(dp(56), dp(56))
+            setPadding(dp(14), dp(14), dp(14), dp(14))
+            setOnClickListener {
+                hideMoonMenu()
+                isPositionLocked = false
+                showToast("Position Unlocked (60s)")
+
+                mainHandler.post {
+                    floatingView?.alpha = 0.8f
+                    ((floatingView as? FrameLayout)?.getChildAt(0) as? ImageView)?.imageTintList = ColorStateList.valueOf(Color.parseColor("#4285F4"))
+                }
+
+                mainHandler.removeCallbacks(autoLockRunnable)
+                mainHandler.postDelayed(autoLockRunnable, 60000)
+            }
+        }
+
+        container.addView(trackpadBtn)
+        container.addView(unlockBtn)
+
+        val metrics = DisplayMetrics()
+        @Suppress("DEPRECATION")
+        windowManager?.defaultDisplay?.getRealMetrics(metrics)
+        val isLeftHalf = (layoutParams.x + (bubbleSize / 2)) < (metrics.widthPixels / 2)
+
+        val menuParams = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT,
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.TOP or Gravity.START
+            x = if (isLeftHalf) layoutParams.x + bubbleSize + 20 else layoutParams.x - 160
+            y = layoutParams.y - 40
+        }
+
+        container.setOnTouchListener { _, event ->
+            if (event.action == MotionEvent.ACTION_OUTSIDE) {
+                hideMoonMenu()
+                true
+            } else false
+        }
+
+        menuView = container
+        windowManager?.addView(menuView, menuParams)
+
+        mainHandler.postDelayed({ hideMoonMenu() }, 4000)
+    }
+
+    private fun hideMoonMenu() {
+        menuView?.let {
+            windowManager?.removeView(it)
+            menuView = null
+        }
     }
 
     private fun showCloseZone() {
@@ -1163,14 +1254,6 @@ class AirBridgeService : Service() {
             windowManager?.removeView(it)
             closeZoneView = null
         }
-    }
-
-    private fun ValueAnimator.doOnEnd(action: () -> Unit) {
-        this.addListener(object : android.animation.AnimatorListenerAdapter() {
-            override fun onAnimationEnd(animation: android.animation.Animator) {
-                action()
-            }
-        })
     }
 
     private fun updateIncomingTransferUI(isComplete: Boolean) {
@@ -1253,6 +1336,8 @@ class AirBridgeService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         Nearby.getConnectionsClient(this).stopAllEndpoints()
+        mainHandler.removeCallbacks(autoLockRunnable)
+        hideMoonMenu()
         mainHandler.removeCallbacksAndMessages(null)
         activeSockets.values.forEach { it.close(1000, "Service destroyed") }
         activeSockets.clear()
