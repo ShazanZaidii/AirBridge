@@ -7,10 +7,9 @@
 
 import Cocoa
 import CoreGraphics
+import Carbon
 
 class MacInputSimulator {
-    static var scrollYAcc: CGFloat = 0
-    static var scrollXAcc: CGFloat = 0
     
     // Sticky Modifiers: Touchscreens can't "hold" keys, so we toggle them
     static var activeModifiers: CGEventFlags = []
@@ -39,20 +38,26 @@ class MacInputSimulator {
     }
 
     static func scroll(dx: CGFloat, dy: CGFloat) {
-        let scrollMultiplier: CGFloat = 0.5
-        scrollXAcc += dx * scrollMultiplier
-        scrollYAcc += dy * scrollMultiplier
-        
-        let intX = Int32(scrollXAcc)
-        let intY = Int32(scrollYAcc)
-        
-        if intX != 0 || intY != 0 {
-            let event = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 2, wheel1: intY, wheel2: intX, wheel3: 0)
-            event?.post(tap: .cghidEventTap)
-            scrollXAcc -= CGFloat(intX)
-            scrollYAcc -= CGFloat(intY)
+            // Adjust this scale to perfectly match your Android screen length to the Mac's scroll distance
+            let scale: Double = 1.5
+            
+            let scrollY = Double(dy) * scale
+            let scrollX = Double(dx) * scale
+            
+            let intY = Int32(scrollY)
+            let intX = Int32(scrollX)
+            
+            guard let event = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 2, wheel1: intY, wheel2: intX, wheel3: 0) else { return }
+            
+            // Flag this as a high-precision trackpad continuous scroll
+            event.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
+            
+            // Inject the exact fractional pixel values
+            event.setDoubleValueField(.scrollWheelEventPointDeltaAxis1, value: scrollY)
+            event.setDoubleValueField(.scrollWheelEventPointDeltaAxis2, value: scrollX)
+            
+            event.post(tap: .cghidEventTap)
         }
-    }
 
     static func tap() {
         leftClickDown()
@@ -153,21 +158,42 @@ class MacInputSimulator {
             return
         }
         
-        // 4. Normal Keystroke Engine (CRITICAL: .hidSystemState bypasses sandboxing!)
-        let src = CGEventSource(stateID: .hidSystemState)
-        guard let eventDown = CGEvent(keyboardEventSource: src, virtualKey: CGKeyCode(keyCode), keyDown: true),
-              let eventUp = CGEvent(keyboardEventSource: src, virtualKey: CGKeyCode(keyCode), keyDown: false) else { return }
-        
-        if !activeModifiers.isEmpty {
-            eventDown.flags = activeModifiers
-            eventUp.flags = activeModifiers
-        }
-        
-        eventDown.post(tap: .cghidEventTap)
-        usleep(20_000)
-        eventUp.post(tap: .cghidEventTap)
-        
-        activeModifiers = []
+        // 4. Normal Keystroke Engine
+                let src = CGEventSource(stateID: .hidSystemState)
+                guard let eventDown = CGEvent(keyboardEventSource: src, virtualKey: CGKeyCode(keyCode), keyDown: true),
+                      let eventUp = CGEvent(keyboardEventSource: src, virtualKey: CGKeyCode(keyCode), keyDown: false) else { return }
+                
+                if !activeModifiers.isEmpty {
+                    eventDown.flags = activeModifiers
+                    eventUp.flags = activeModifiers
+                }
+                
+                // macOS enables Secure Input for Spotlight, Passwords, and Terminal.
+                // CGEvents are physically blocked here, so we route through Accessibility.
+                if IsSecureEventInputEnabled() {
+                    var modifierString = ""
+                    if activeModifiers.contains(.maskCommand) { modifierString += "command down, " }
+                    if activeModifiers.contains(.maskAlternate) { modifierString += "option down, " }
+                    if activeModifiers.contains(.maskControl) { modifierString += "control down, " }
+                    if activeModifiers.contains(.maskShift) { modifierString += "shift down, " }
+                    
+                    if !modifierString.isEmpty {
+                        modifierString = " using {" + String(modifierString.dropLast(2)) + "}"
+                    }
+                    
+                    let script = "tell application \"System Events\" to key code \(keyCode)\(modifierString)"
+                    let task = Process()
+                    task.launchPath = "/usr/bin/osascript"
+                    task.arguments = ["-e", script]
+                    task.launch()
+                } else {
+                    // Fast path for normal typing and global hotkeys (like Cmd+Space)
+                    eventDown.post(tap: .cghidEventTap)
+                    usleep(20_000)
+                    eventUp.post(tap: .cghidEventTap)
+                }
+                
+                activeModifiers = []
     }
 
     static func typeString(_ string: String) {
