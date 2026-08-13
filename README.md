@@ -14,5 +14,6 @@ I had already built the Windows version but it is currently sitting in a differe
 
 Also yes, the Linux support is coming soon. But i cant promise about the iOS support as the app needs several "Trust me bro" permissions.. haha, such as - Accessibility to control device remotely, Clipboard access to actually share clipboard data, Draw over other apps and all. But yeah i will give it a shot.
 
+The android and macOS release can be found in the releases tab.
 
 And if you are asking for a tutorial, please try to discover the app yourself. 😤 (I will attach once i have the windows and linux release with me..) 
