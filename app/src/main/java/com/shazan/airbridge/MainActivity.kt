@@ -15,8 +15,13 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
@@ -69,8 +74,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -99,13 +107,22 @@ fun isVpnActive(context: Context): Boolean {
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        enableEdgeToEdge()
+
         setContent {
-            MaterialTheme {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background
-                ) {
-                    AirBridgeApp()
+            // The nuclear fix to ignore system font scaling
+            val currentDensity = LocalDensity.current
+            val fontScaleOverride = Density(density = currentDensity.density, fontScale = 1f)
+
+            CompositionLocalProvider(LocalDensity provides fontScaleOverride) {
+                MaterialTheme {
+                    Surface(
+                        modifier = Modifier.fillMaxSize(),
+                        color = MaterialTheme.colorScheme.background
+                    ) {
+                        AirBridgeApp()
+                    }
                 }
             }
         }
@@ -115,6 +132,7 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun AirBridgeApp() {
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     val prefs = context.getSharedPreferences("AirBridgePrefs", Context.MODE_PRIVATE)
 
     var hasCameraPermission by remember {
@@ -147,7 +165,17 @@ fun AirBridgeApp() {
             hasOverlayPermission = Settings.canDrawOverlays(context)
         }
 
-    // In MainActivity.kt
+    // Auto-detect overlay permission when returning to the app
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                hasOverlayPermission = Settings.canDrawOverlays(context)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
     LaunchedEffect(Unit) {
         val perms = mutableListOf(
             Manifest.permission.CAMERA,
@@ -202,7 +230,7 @@ fun AirBridgeApp() {
         ) {
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.padding(32.dp)
+                modifier = Modifier.padding(32.dp).verticalScroll(rememberScrollState())
             ) {
                 Text(
                     "Overlay Permission Required",
@@ -364,6 +392,11 @@ fun DiscoveryScreen(
     onOpenScanner: () -> Unit,
     showCancel: Boolean
 ) {
+    // Handle Android hardware back button
+    if (showCancel) {
+        BackHandler { onCancel() }
+    }
+
     val context = LocalContext.current
     val prefs = context.getSharedPreferences("AirBridgePrefs", Context.MODE_PRIVATE)
 
@@ -749,11 +782,17 @@ fun ConnectedScreen(
 
 @Composable
 fun CameraScannerScreen(onCancel: () -> Unit, onUrlScanned: (String) -> Unit) {
+    // Handle Android hardware back button
+    BackHandler { onCancel() }
+
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val cameraProviderFuture = remember { ProcessCameraProvider.getInstance(context) }
 
-    Box(modifier = Modifier.fillMaxSize()) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+    ) {
         AndroidView(
             factory = { ctx ->
                 val previewView = PreviewView(ctx)
@@ -821,6 +860,7 @@ fun CameraScannerScreen(onCancel: () -> Unit, onUrlScanned: (String) -> Unit) {
 
 @Composable
 fun SettingsScreen(onBack: () -> Unit) {
+    BackHandler { onBack() }
     val context = LocalContext.current
     val prefs = context.getSharedPreferences("AirBridgePrefs", Context.MODE_PRIVATE)
 
@@ -842,6 +882,7 @@ fun SettingsScreen(onBack: () -> Unit) {
             .fillMaxSize()
             .background(Color(0xFF1E1E1E))
             .padding(24.dp)
+            .verticalScroll(rememberScrollState())
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
