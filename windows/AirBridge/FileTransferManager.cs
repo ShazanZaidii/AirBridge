@@ -20,6 +20,11 @@ namespace AirBridge
 
         private int _totalFilesExpected = 0;
         private int _filesReceived = 0;
+
+        // --- NEW: Track bytes to auto-complete the batch if network drops text frames ---
+        private long _totalBytesExpected = 0;
+        private long _bytesReceived = 0;
+
         private StringCollection _receivedFilePaths;
 
         public FileTransferManager()
@@ -44,15 +49,26 @@ namespace AirBridge
                     if (parts.Length >= 3)
                     {
                         _totalFilesExpected = int.Parse(parts[1]);
+                        _totalBytesExpected = long.Parse(parts[2]); // Grab total expected bytes
+                        _bytesReceived = 0;
                         _filesReceived = 0;
                         _receivedFilePaths = new StringCollection();
-                        Debug.WriteLine($"Starting batch download: {_totalFilesExpected} files");
+                        Debug.WriteLine($"Starting batch download: {_totalFilesExpected} files, {_totalBytesExpected} bytes");
                     }
                     break;
 
                 case "START_FILE":
                     if (parts.Length >= 2)
                     {
+                        // 1. IMPLICIT END-OF-FILE: If already receiving, the previous END_FILE was dropped!
+                        if (_isReceivingFile)
+                        {
+                            _isReceivingFile = false;
+                            _currentFileStream?.Dispose();
+                            _currentFileStream = null;
+                            _filesReceived++;
+                        }
+
                         string fileName = string.Join(":", parts, 1, parts.Length - 1);
                         fileName = Regex.Replace(fileName, "^[A-Fa-f0-9]{6}_", "");
                         fileName = Path.GetFileName(fileName);
@@ -112,6 +128,8 @@ namespace AirBridge
                 });
                 _totalFilesExpected = 0;
                 _filesReceived = 0;
+                _totalBytesExpected = 0;
+                _bytesReceived = 0;
             }
         }
 
@@ -120,6 +138,18 @@ namespace AirBridge
             if (_isReceivingFile && _currentFileStream != null)
             {
                 _currentFileStream.Write(data, 0, data.Length);
+                _bytesReceived += data.Length;
+
+                // 2. AUTO-COMPLETE BY BYTE COUNT: Force close the batch when all bytes arrive
+                if (_bytesReceived >= _totalBytesExpected && _totalBytesExpected > 0)
+                {
+                    _isReceivingFile = false;
+                    _currentFileStream?.Dispose();
+                    _currentFileStream = null;
+
+                    _filesReceived = _totalFilesExpected; // Force math to 100%
+                    CheckBatchCompletion(force: true);
+                }
             }
         }
 
@@ -153,7 +183,6 @@ namespace AirBridge
                     {
                         byte[] buffer = new byte[64 * 1024];
                         int bytesRead;
-                        int chunkCounter = 0;
 
                         while ((bytesRead = await fs.ReadAsync(buffer, 0, buffer.Length)) > 0)
                         {
@@ -166,8 +195,6 @@ namespace AirBridge
 
                             if (target == TransferTarget.Mac && App.Client != null)
                                 await App.Client.SendBinaryAsync(exactChunk);
-
-                            if (++chunkCounter % 16 == 0) await Task.Yield();
                         }
                     }
                     await SendTextAsync($"END_FILE:{fileName}", target);
