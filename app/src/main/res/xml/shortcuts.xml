@@ -1,22 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Direct Share: dynamic per-peer shortcuts (DirectShare.kt) carry this category. -->
 <shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
-
-    <share-target android:targetClass="com.shazan.airbridge.ShareActivitySlot0">
+    <share-target android:targetClass="com.shazan.airbridge.ShareActivity">
         <data android:mimeType="*/*" />
-        <category android:name="com.shazan.airbridge.category.FILE_SHARE_TARGET_0" />
+        <category android:name="com.shazan.airbridge.category.SHARE_TARGET" />
     </share-target>
-    <share-target android:targetClass="com.shazan.airbridge.ShareActivitySlot0">
-        <data android:mimeType="text/plain" />
-        <category android:name="com.shazan.airbridge.category.TEXT_SHARE_TARGET_0" />
-    </share-target>
-
-    <share-target android:targetClass="com.shazan.airbridge.ShareActivitySlot1">
-        <data android:mimeType="*/*" />
-        <category android:name="com.shazan.airbridge.category.FILE_SHARE_TARGET_1" />
-    </share-target>
-    <share-target android:targetClass="com.shazan.airbridge.ShareActivitySlot1">
-        <data android:mimeType="text/plain" />
-        <category android:name="com.shazan.airbridge.category.TEXT_SHARE_TARGET_1" />
-    </share-target>
-
 </shortcuts>

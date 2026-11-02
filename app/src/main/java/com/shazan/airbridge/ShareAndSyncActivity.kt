@@ -1,29 +1,51 @@
 package com.shazan.airbridge
 
 import android.app.Activity
-import android.content.Context
+import android.content.ClipData
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
-import android.content.ClipboardManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.*
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.pm.ShortcutManagerCompat
+import com.shazan.airbridge.net.ClipboardSync
+import com.shazan.airbridge.net.Hub
+import com.shazan.airbridge.net.PeerInfo
 
+/**
+ * Invisible activity that reads the clipboard while focused and pushes it. This is the only
+ * legal way to read the clipboard from the background on Android 10+ (tile, bubble, `copy`).
+ */
 class SyncActivity : Activity() {
+    private var done = false
 
-    private var hasAttemptedRead = false
-
+    @Suppress("DEPRECATION")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         overridePendingTransition(0, 0)
@@ -31,117 +53,66 @@ class SyncActivity : Activity() {
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
-        if (hasFocus && !hasAttemptedRead) {
-            hasAttemptedRead = true
-            readClipboardAndFinish()
-        }
+        if (!hasFocus || done) return
+        done = true
+        val reason = intent.getStringExtra(ClipboardSync.EXTRA_REASON) ?: "manual"
+        val text = ClipboardSync.readText()
+        if (text != null) ClipboardSync.pushText(text, reason)
+        else if (reason != "copy") Toast.makeText(this, "Clipboard has no text", Toast.LENGTH_SHORT).show()
+        finishQuietly()
     }
 
-    private fun readClipboardAndFinish() {
-        try {
-            val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-            val clip = clipboard.primaryClip
-
-            if (clip != null && clip.itemCount > 0) {
-                val text = clip.getItemAt(0).coerceToText(this)?.toString()
-
-                if (!text.isNullOrEmpty()) {
-                    val serviceIntent = Intent(this, AirBridgeService::class.java).apply {
-                        putExtra("SEND_TEXT", text)
-                    }
-                    startService(serviceIntent)
-                } else {
-                    Toast.makeText(this, "No text in clipboard", Toast.LENGTH_SHORT).show()
-                }
-            } else {
-                Toast.makeText(this, "Clipboard is empty", Toast.LENGTH_SHORT).show()
-            }
-        } catch (e: Exception) {
-            Toast.makeText(this, "Error reading clipboard", Toast.LENGTH_SHORT).show()
-        } finally {
-            finish()
-            overridePendingTransition(0, 0)
-        }
+    @Suppress("DEPRECATION")
+    private fun finishQuietly() {
+        finish()
+        overridePendingTransition(0, 0)
     }
 }
 
-
+/** Share sheet target: send files (xfer) or text (clip) to one connected peer. */
 class ShareActivity : ComponentActivity() {
 
     @OptIn(ExperimentalMaterial3Api::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // REPLACE THE PREFS READ WITH THIS LINE:
-        val urls = AirBridgeService.getActiveUrls()
-
-        var targetUrl = intent?.getStringExtra("TARGET_URL")
-
-        // Android Direct Share passes the Shortcut ID instead of custom extras
-        if (targetUrl == null) {
-            val shortcutId = intent?.getStringExtra(Intent.EXTRA_SHORTCUT_ID)
-            targetUrl = urls.firstOrNull { url ->
-                val safeEncoded = android.util.Base64.encodeToString(
-                    url.toByteArray(),
-                    android.util.Base64.NO_WRAP or android.util.Base64.URL_SAFE
-                ).replace("=", "")
-                "device_$safeEncoded" == shortcutId
+        val connected = Hub.peers()
+        val direct = DirectShare.peerIdFromShortcut(intent?.getStringExtra(Intent.EXTRA_SHORTCUT_ID))
+        if (direct != null) {
+            val peer = connected.firstOrNull { it.id == direct }
+            if (peer != null) share(peer)
+            else {
+                toast("Device is not connected right now")
+                if (AirBridgeService.shouldRun(this)) AirBridgeService.start(this)
             }
+            finish(); return
+        }
+        when (connected.size) {
+            0 -> {
+                toast("No devices connected")
+                if (AirBridgeService.shouldRun(this)) AirBridgeService.start(this)
+                finish(); return
+            }
+            1 -> { share(connected[0]); finish(); return }
         }
 
-        if (targetUrl != null && urls.contains(targetUrl)) {
-            // A specific Direct Share target was tapped; execute immediately
-            executeShare(targetUrl)
-            finish()
-        } else {
-            // Generic App Icon was tapped; show the Compose BottomSheet
-            if (urls.isEmpty()) {
-                Toast.makeText(this, "No devices connected", Toast.LENGTH_SHORT).show()
-                finish()
-                return
-            }
-
-            setContent {
-                MaterialTheme {
-                    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-
-                    ModalBottomSheet(
-                        onDismissRequest = { finish() },
-                        sheetState = sheetState,
-                        containerColor = Color(0xFF1E1E1E)
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(bottom = 32.dp, start = 24.dp, end = 24.dp)
-                        ) {
-                            Text(
-                                "Send via AirBridge",
-                                fontSize = 24.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White,
-                                modifier = Modifier.padding(bottom = 16.dp)
-                            )
-
-                            urls.forEach { url ->
-                                val deviceName = Uri.parse(url).getQueryParameter("name") ?: "Device"
-                                Card(
-                                    shape = RoundedCornerShape(12.dp),
-                                    colors = CardDefaults.cardColors(containerColor = Color(0xFF2C2C2C)),
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(bottom = 8.dp)
-                                        .clickable {
-                                            executeShare(url)
-                                            finish()
-                                        }
-                                ) {
-                                    Text(
-                                        text = deviceName,
-                                        color = Color.White,
-                                        fontSize = 18.sp,
-                                        modifier = Modifier.padding(16.dp)
-                                    )
+        setContent {
+            MaterialTheme {
+                val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+                ModalBottomSheet(onDismissRequest = { finish() }, sheetState = sheetState, containerColor = Color(0xFF1E1E1E)) {
+                    Column(Modifier.fillMaxWidth().padding(bottom = 32.dp, start = 24.dp, end = 24.dp)) {
+                        Text("Send via AirBridge", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Color.White,
+                            modifier = Modifier.padding(bottom = 16.dp))
+                        connected.forEach { peer ->
+                            Card(
+                                shape = RoundedCornerShape(12.dp),
+                                colors = CardDefaults.cardColors(containerColor = Color(0xFF2C2C2C)),
+                                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp).clickable { share(peer); finish() },
+                            ) {
+                                Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Image(painterResource(DirectShare.platformIcon(peer.platform)), null, Modifier.size(28.dp))
+                                    Spacer(Modifier.width(12.dp))
+                                    Text(peer.name, color = Color.White, fontSize = 18.sp)
                                 }
                             }
                         }
@@ -151,61 +122,40 @@ class ShareActivity : ComponentActivity() {
         }
     }
 
-    private fun executeShare(targetUrl: String) {
-        val safeEncoded = android.util.Base64.encodeToString(
-            targetUrl.toByteArray(),
-            android.util.Base64.NO_WRAP or android.util.Base64.URL_SAFE
-        ).replace("=", "")
-        androidx.core.content.pm.ShortcutManagerCompat.reportShortcutUsed(this, "device_$safeEncoded")
-
-        val uris = mutableListOf<Uri>()
-        val action = intent?.action
-
-        if (action == Intent.ACTION_SEND_MULTIPLE) {
-            val list = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM, Uri::class.java)
-            } else {
-                @Suppress("DEPRECATION")
-                intent.getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM)
-            }
-            list?.let { uris.addAll(it) }
-        } else if (action == Intent.ACTION_SEND) {
-            val uri: Uri? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
-            } else {
-                @Suppress("DEPRECATION")
-                intent.getParcelableExtra(Intent.EXTRA_STREAM)
-            }
-            uri?.let { uris.add(it) }
-        }
-
+    private fun share(peer: PeerInfo) {
+        ShortcutManagerCompat.reportShortcutUsed(this, DirectShare.shortcutId(peer.id))
+        val uris = sharedUris()
         val text = intent.getStringExtra(Intent.EXTRA_TEXT)
-        val deviceName = Uri.parse(targetUrl).getQueryParameter("name") ?: "Device"
-
-        if (uris.isNotEmpty()) {
-            Toast.makeText(this, "Sending ${uris.size} file(s) to $deviceName...", Toast.LENGTH_SHORT).show()
-
-            val serviceIntent = Intent(this, AirBridgeService::class.java).apply {
-                this.action = Intent.ACTION_SEND_MULTIPLE
-                putParcelableArrayListExtra("FILE_URIS", ArrayList(uris))
-                putExtra("TARGET_URL", targetUrl)
-
-                val clipData = android.content.ClipData.newRawUri("SharedFiles", uris.first())
-                for (i in 1 until uris.size) {
-                    clipData.addItem(android.content.ClipData.Item(uris[i]))
-                }
-                this.clipData = clipData
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        when {
+            uris.isNotEmpty() -> {
+                if ("xfer" !in peer.caps) { toast("${peer.name} doesn't accept files"); return }
+                toast("Sending ${uris.size} file(s) to ${peer.name}…")
+                // Hand the URIs (and our read grant) to the long-lived service.
+                val clip = ClipData.newRawUri("files", uris[0]).apply { uris.drop(1).forEach { addItem(ClipData.Item(it)) } }
+                startService(
+                    Intent(this, AirBridgeService::class.java)
+                        .setAction(AirBridgeService.ACTION_SEND_FILES)
+                        .putExtra(AirBridgeService.EXTRA_PEER, peer.id)
+                        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        .also { it.clipData = clip }
+                )
             }
-            startService(serviceIntent)
-        } else if (!text.isNullOrBlank()) {
-            Toast.makeText(this, "Broadcasting text...", Toast.LENGTH_SHORT).show()
-            val serviceIntent = Intent(this, AirBridgeService::class.java).apply {
-                putExtra("SEND_TEXT", text)
-            }
-            startService(serviceIntent)
-        } else {
-            Toast.makeText(this, "Nothing to share", Toast.LENGTH_SHORT).show()
+            !text.isNullOrBlank() ->
+                if (ClipboardSync.sendTextTo(peer.id, text)) toast("Sent to ${peer.name}") else toast("${peer.name} is not connected")
+            else -> toast("Nothing to share")
         }
     }
+
+    @Suppress("DEPRECATION")
+    private fun sharedUris(): List<Uri> = when (intent?.action) {
+        Intent.ACTION_SEND_MULTIPLE ->
+            (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM, Uri::class.java)
+            else intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM)) ?: emptyList()
+        Intent.ACTION_SEND ->
+            listOfNotNull(if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
+            else intent.getParcelableExtra(Intent.EXTRA_STREAM))
+        else -> emptyList()
+    }
+
+    private fun toast(msg: String) = Toast.makeText(applicationContext, msg, Toast.LENGTH_SHORT).show()
 }
