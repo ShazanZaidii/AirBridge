@@ -5,7 +5,6 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
 import android.content.res.ColorStateList
-import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.drawable.GradientDrawable
 import android.os.Handler
@@ -22,6 +21,7 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.Toast
 import com.shazan.airbridge.net.ClipboardSync
+import com.shazan.airbridge.ui.theme.Palette
 import kotlin.math.abs
 
 /**
@@ -48,7 +48,7 @@ class FloatingBubble(private val ctx: Context) {
     private val autoLock = Runnable {
         locked = true
         toast("Bubble position locked")
-        tint("#B0B0B0"); bubble?.alpha = IDLE_ALPHA
+        tint(Palette.argb(Palette.ON_SURFACE_MUTED)); bubble?.alpha = IDLE_ALPHA
     }
 
     val isShown: Boolean get() = bubble != null
@@ -58,9 +58,9 @@ class FloatingBubble(private val ctx: Context) {
         if (bubble != null) return
         val icon = ImageView(ctx).apply {
             setImageResource(R.drawable.ic_stat_name)
-            imageTintList = ColorStateList.valueOf(Color.parseColor("#B0B0B0"))
+            imageTintList = ColorStateList.valueOf(Palette.argb(Palette.ON_SURFACE_MUTED))
             setPadding(32, 32, 32, 32)
-            background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Color.parseColor("#801A1A1A")) }
+            background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor((Palette.argb(Palette.SURFACE) and 0x00FFFFFF) or 0xCC000000.toInt()) }
         }
         val container = FrameLayout(ctx).apply { alpha = IDLE_ALPHA; addView(icon, FrameLayout.LayoutParams(SIZE, SIZE)) }
         val lp = WindowManager.LayoutParams(
@@ -96,7 +96,7 @@ class FloatingBubble(private val ctx: Context) {
                         safeUpdate(container, lp)
                         hoveringClose = e.rawY > screenH - 400 && abs(e.rawX - screenW / 2) < 250
                         closeZone?.alpha = if (hoveringClose) 1f else 0.5f
-                        (closeZone?.background as? GradientDrawable)?.setColor(Color.parseColor(if (hoveringClose) "#E53935" else "#80000000"))
+                        (closeZone?.background as? GradientDrawable)?.setColor(if (hoveringClose) Palette.argb(Palette.DANGER_FILL) else Palette.argb(Palette.SCRIM))
                     }
                     true
                 }
@@ -157,14 +157,14 @@ class FloatingBubble(private val ctx: Context) {
         val container = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
             background = GradientDrawable().apply {
-                setColor(Color.parseColor("#1A1A1A")); cornerRadius = 60f; setStroke(2, Color.parseColor("#333333"))
+                setColor(Palette.argb(Palette.SURFACE)); cornerRadius = 60f; setStroke(2, Palette.argb(Palette.OUTLINE_VARIANT))
             }
             setPadding(dp(12), dp(16), dp(12), dp(16))
             elevation = 20f
         }
         container.addView(ImageView(ctx).apply {
             setImageResource(R.drawable.ic_mac)
-            imageTintList = ColorStateList.valueOf(Color.WHITE)
+            imageTintList = ColorStateList.valueOf(Palette.argb(Palette.ON_SURFACE))
             layoutParams = LinearLayout.LayoutParams(dp(56), dp(56)).apply { setMargins(0, 0, 0, dp(16)) }
             setPadding(dp(14), dp(14), dp(14), dp(14))
             contentDescription = "Trackpad"
@@ -175,7 +175,7 @@ class FloatingBubble(private val ctx: Context) {
         })
         container.addView(ImageView(ctx).apply {
             setImageResource(android.R.drawable.ic_menu_mylocation)
-            imageTintList = ColorStateList.valueOf(Color.parseColor("#FFD700"))
+            imageTintList = ColorStateList.valueOf(Palette.argb(Palette.WARNING))
             layoutParams = LinearLayout.LayoutParams(dp(56), dp(56))
             setPadding(dp(14), dp(14), dp(14), dp(14))
             contentDescription = "Move bubble"
@@ -183,7 +183,7 @@ class FloatingBubble(private val ctx: Context) {
                 hideMenu()
                 locked = false
                 toast("Position unlocked (60s)")
-                bubble?.alpha = 0.8f; tint("#4285F4")
+                bubble?.alpha = 0.8f; tint(Palette.argb(Palette.ACCENT))
                 main.removeCallbacks(autoLock)
                 main.postDelayed(autoLock, 60_000)
             }
@@ -209,10 +209,10 @@ class FloatingBubble(private val ctx: Context) {
         if (closeZone != null) return
         val container = FrameLayout(ctx).apply {
             alpha = 0.5f
-            background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Color.parseColor("#80000000")) }
+            background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Palette.argb(Palette.SCRIM)) }
             addView(ImageView(ctx).apply {
                 setImageResource(android.R.drawable.ic_menu_close_clear_cancel)
-                imageTintList = ColorStateList.valueOf(Color.WHITE)
+                imageTintList = ColorStateList.valueOf(Palette.argb(Palette.ON_SURFACE))
                 layoutParams = FrameLayout.LayoutParams(80, 80, Gravity.CENTER)
             })
         }
@@ -223,8 +223,8 @@ class FloatingBubble(private val ctx: Context) {
 
     private fun hideCloseZone() { closeZone?.let { safeRemove(it) }; closeZone = null }
 
-    private fun tint(hex: String) {
-        (bubble?.getChildAt(0) as? ImageView)?.imageTintList = ColorStateList.valueOf(Color.parseColor(hex))
+    private fun tint(color: Int) {
+        (bubble?.getChildAt(0) as? ImageView)?.imageTintList = ColorStateList.valueOf(color)
     }
 
     private fun vibrate() {

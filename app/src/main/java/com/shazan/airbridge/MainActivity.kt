@@ -23,9 +23,8 @@ import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -34,40 +33,41 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.Devices
+import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.ErrorOutline
+import androidx.compose.material.icons.outlined.Layers
+import androidx.compose.material.icons.outlined.MoreVert
+import androidx.compose.material.icons.outlined.NearMe
+import androidx.compose.material.icons.outlined.QrCodeScanner
+import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.Wifi
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -80,16 +80,13 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.Density
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.DefaultLifecycleObserver
@@ -105,12 +102,32 @@ import com.shazan.airbridge.net.Identity
 import com.shazan.airbridge.net.NearbyTransport
 import com.shazan.airbridge.net.NetEvent
 import com.shazan.airbridge.net.PairLink
+import com.shazan.airbridge.net.PairMode
+import com.shazan.airbridge.net.PairProgress
+import com.shazan.airbridge.net.PairStage
 import com.shazan.airbridge.net.PairStore
 import com.shazan.airbridge.net.PairedPeer
 import com.shazan.airbridge.net.PeerStatus
 import com.shazan.airbridge.net.TransferUi
 import com.shazan.airbridge.net.WsClient
 import com.shazan.airbridge.net.formatSpeed
+import com.shazan.airbridge.ui.theme.AbCard
+import com.shazan.airbridge.ui.theme.AbScaffold
+import com.shazan.airbridge.ui.theme.AbTheme
+import com.shazan.airbridge.ui.theme.AirBridgeTheme
+import com.shazan.airbridge.ui.theme.ChipTone
+import com.shazan.airbridge.ui.theme.Dimens
+import com.shazan.airbridge.ui.theme.EmptyState
+import com.shazan.airbridge.ui.theme.InfoRow
+import com.shazan.airbridge.ui.theme.PlatformAvatar
+import com.shazan.airbridge.ui.theme.PrimaryButton
+import com.shazan.airbridge.ui.theme.RowDivider
+import com.shazan.airbridge.ui.theme.SecondaryButton
+import com.shazan.airbridge.ui.theme.SectionHeader
+import com.shazan.airbridge.ui.theme.StatusChip
+import com.shazan.airbridge.ui.theme.SwitchRow
+import com.shazan.airbridge.ui.theme.platformLabel
+import com.shazan.airbridge.ui.theme.platformNoun
 import kotlinx.coroutines.launch
 import java.util.concurrent.Executors
 
@@ -119,11 +136,6 @@ fun isVpnActive(context: Context): Boolean {
     val caps = cm.getNetworkCapabilities(cm.activeNetwork ?: return false) ?: return false
     return caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
 }
-
-private val Bg = Color(0xFF1E1E1E)
-private val CardBg = Color(0xFF2C2C2C)
-private val Accent = Color(0xFF4285F4)
-private val Good = Color(0xFF34A853)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -135,11 +147,8 @@ class MainActivity : ComponentActivity() {
             override fun onStop(owner: LifecycleOwner) = Discovery.release()
         })
         setContent {
-            val density = LocalDensity.current
-            CompositionLocalProvider(LocalDensity provides Density(density.density, fontScale = 1f)) {
-                MaterialTheme(colorScheme = darkColorScheme(primary = Accent, background = Bg, surface = Bg)) {
-                    Surface(Modifier.fillMaxSize(), color = Bg) { AirBridgeRoot() }
-                }
+            AirBridgeTheme {
+                Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) { AirBridgeRoot() }
             }
         }
     }
@@ -155,22 +164,25 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private enum class Screen { CONNECTED, DISCOVERY, SCANNER, SETTINGS }
+private enum class Screen { DEVICES, ADD, SCANNER, SETTINGS }
 
-private data class PairingUi(val name: String, val error: String? = null)
+/** A finished pairing attempt that failed, shown until dismissed. */
+private data class PairError(val message: String)
 
 private fun granted(ctx: Context, perm: String) =
     ContextCompat.checkSelfPermission(ctx, perm) == PackageManager.PERMISSION_GRANTED
 
 private fun toast(ctx: Context, msg: String) = Toast.makeText(ctx, msg, Toast.LENGTH_SHORT).show()
 
-private fun pairFailText(reason: String) = when (reason) {
-    "bad_code" -> "Wrong code. Check the code shown on the computer."
-    "locked" -> "Too many attempts. Wait a minute and try again."
-    "not_pairing" -> "That device isn't accepting pairing right now."
-    "bad_proof" -> "The device's reply didn't verify. Try again."
-    "" -> "Couldn't connect."
-    else -> "Couldn't connect ($reason)."
+private fun pairFailText(reason: String, name: String): String = when (reason) {
+    "rejected" -> "Pairing was declined on $name."
+    "timeout" -> "Pairing timed out. Try again and confirm on both devices within a minute."
+    "locked" -> "Too many attempts. Wait a minute, then try again."
+    "not_pairing" -> "$name isn't accepting new devices right now. Open AirBridge on it and allow pairing."
+    "bad_proof" -> "The two devices didn't agree on the code, so pairing was stopped. If you scanned a QR code, show a fresh one and scan again."
+    "different device at that address" -> "A different device answered at that address. Try again from the list."
+    "", "handshake timeout" -> "Couldn't reach $name. Make sure both devices are on the same Wi-Fi."
+    else -> "Couldn't pair with $name ($reason)."
 }
 
 /** Re-composes when the activity resumes (permission/settings state read inside). */
@@ -191,11 +203,12 @@ private fun AirBridgeRoot() {
     val ctx = LocalContext.current
     val paired by PairStore.peers.collectAsState()
     val pending by NearbyTransport.pending.collectAsState()
+    val progress by Hub.pairing.collectAsState()
     val resumeTick = rememberResumeTick()
 
-    var screen by rememberSaveable { mutableStateOf(if (PairStore.isEmpty()) Screen.DISCOVERY else Screen.CONNECTED) }
+    var screen by rememberSaveable { mutableStateOf(if (PairStore.isEmpty()) Screen.ADD else Screen.DEVICES) }
     var showVpnWarning by remember { mutableStateOf(isVpnActive(ctx)) }
-    var pairing by remember { mutableStateOf<PairingUi?>(null) }
+    var pairError by remember { mutableStateOf<PairError?>(null) }
     val hasOverlay = remember(resumeTick) { Settings.canDrawOverlays(ctx) }
 
     val notifLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
@@ -214,12 +227,11 @@ private fun AirBridgeRoot() {
             when (e) {
                 is NetEvent.PairResult -> {
                     if (e.ok) {
-                        pairing = null
-                        screen = Screen.CONNECTED
+                        pairError = null
+                        screen = Screen.DEVICES
                         toast(ctx, "Paired with ${e.peerName}")
                     } else {
-                        if (pairing != null) pairing = pairing?.copy(error = pairFailText(e.reason))
-                        else toast(ctx, "Pairing failed: ${pairFailText(e.reason)}")
+                        if (e.reason != "cancelled") pairError = PairError(pairFailText(e.reason, e.peerName.ifBlank { "the device" }))
                         AirBridgeService.stopIfIdle(ctx)
                     }
                 }
@@ -231,36 +243,33 @@ private fun AirBridgeRoot() {
         }
     }
     LaunchedEffect(paired.isEmpty()) {
-        if (paired.isEmpty() && screen == Screen.CONNECTED) screen = Screen.DISCOVERY
+        if (paired.isEmpty() && screen == Screen.DEVICES) screen = Screen.ADD
     }
 
-    fun startPair(name: String, host: String, port: Int, id: String?, secret: ByteArray) {
+    fun startPair(name: String, plat: String, host: String, port: Int, id: String?, mode: PairMode) {
         AirBridgeService.start(ctx)
-        pairing = PairingUi(name)
-        WsClient.pair(host, port, id, com.shazan.airbridge.net.PairMode.Qr(secret), name, "")
+        pairError = null
+        WsClient.pair(host, port, id, mode, name, plat)
     }
 
     if (showVpnWarning) {
         AlertDialog(
             onDismissRequest = { showVpnWarning = false },
-            title = { Text("VPN Detected") },
-            text = { Text("You have a VPN active. AirBridge uses local network connections and may not work correctly unless your VPN allows local network access (split tunneling).") },
-            confirmButton = { TextButton(onClick = { showVpnWarning = false }) { Text("I Understand") } },
+            icon = { Icon(Icons.Outlined.ErrorOutline, contentDescription = null) },
+            title = { Text("VPN is on") },
+            text = { Text("AirBridge talks to your computer over the local network. If your VPN blocks local traffic, allow local network access (split tunnelling) or turn it off.") },
+            confirmButton = { TextButton(onClick = { showVpnWarning = false }) { Text("OK") } },
         )
     }
 
-    pairing?.let { p ->
+    progress?.let { p -> PairingDialog(p, onConfirm = { Hub.confirmPairing(true) }, onCancel = { Hub.cancelPairing() }) }
+    if (progress == null) pairError?.let { err ->
         AlertDialog(
-            onDismissRequest = { if (p.error != null) pairing = null },
-            title = { Text(if (p.error == null) "Pairing with ${p.name}…" else "Pairing failed") },
-            text = {
-                if (p.error == null) Row(verticalAlignment = Alignment.CenterVertically) {
-                    CircularProgressIndicator(Modifier.size(24.dp), color = Accent)
-                    Spacer(Modifier.width(16.dp))
-                    Text("Confirming the code with ${p.name}")
-                } else Text(p.error)
-            },
-            confirmButton = { if (p.error != null) TextButton(onClick = { pairing = null }) { Text("OK") } },
+            onDismissRequest = { pairError = null },
+            icon = { Icon(Icons.Outlined.ErrorOutline, contentDescription = null, tint = AbTheme.status.danger) },
+            title = { Text("Couldn't pair") },
+            text = { Text(err.message) },
+            confirmButton = { TextButton(onClick = { pairError = null }) { Text("OK") } },
         )
     }
 
@@ -270,8 +279,9 @@ private fun AirBridgeRoot() {
             title = { Text("Pair with ${p.name}?") },
             text = {
                 Column {
-                    Text("Make sure both phones show the same code:")
-                    Text(p.digits, fontSize = 34.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 12.dp))
+                    Text("Make sure both phones show the same code.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(Modifier.height(Dimens.md))
+                    DigitsText(p.digits)
                 }
             },
             confirmButton = {
@@ -290,40 +300,40 @@ private fun AirBridgeRoot() {
     }
 
     when (screen) {
-        Screen.CONNECTED -> ConnectedScreen(
+        Screen.DEVICES -> DevicesScreen(
             paired = paired,
             onOpenSettings = { screen = Screen.SETTINGS },
-            onAddDevice = { screen = Screen.DISCOVERY },
+            onAddDevice = { screen = Screen.ADD },
             onForget = { peer ->
                 Hub.forget(peer.id)
                 if (PairStore.isEmpty()) {
                     AirBridgeService.stopIfIdle(ctx)
-                    screen = Screen.DISCOVERY
+                    screen = Screen.ADD
                 }
             },
         )
 
-        Screen.SETTINGS -> SettingsScreen(onBack = { screen = Screen.CONNECTED })
+        Screen.SETTINGS -> SettingsScreen(onBack = { screen = if (paired.isEmpty()) Screen.ADD else Screen.DEVICES })
 
-        Screen.DISCOVERY -> DiscoveryScreen(
+        Screen.ADD -> AddDeviceScreen(
             pairedIds = paired.map { it.id }.toSet(),
-            onPairWithCode = { host, code -> startPair(host.name, host.host, host.port, host.id, code.toByteArray(Charsets.UTF_8)) },
-            onCancel = { if (paired.isNotEmpty()) screen = Screen.CONNECTED },
+            onPickHost = { h -> startPair(h.name, h.plat, h.host, h.port, h.id, PairMode.Confirm(auto = false)) },
+            onBack = if (paired.isNotEmpty()) ({ screen = Screen.DEVICES }) else null,
             onOpenScanner = { screen = Screen.SCANNER },
-            showCancel = paired.isNotEmpty(),
+            onOpenSettings = { screen = Screen.SETTINGS },
         )
 
         Screen.SCANNER -> CameraScannerScreen(
-            onCancel = { screen = Screen.DISCOVERY },
+            onCancel = { screen = Screen.ADD },
             onScanned = { raw ->
                 val link = PairLink.parse(raw)
                 val addr = link?.let { Discovery.lookup(it.id) ?: it.addr?.let { a -> a to it.port } }
                 when {
-                    link == null -> { toast(ctx, "Not an AirBridge v2 pairing code"); false }
-                    addr == null || addr.second !in 1..65535 -> { toast(ctx, "${link.name} not found on this network"); false }
+                    link == null -> { toast(ctx, "That isn't an AirBridge pairing code"); false }
+                    addr == null || addr.second !in 1..65535 -> { toast(ctx, "${link.name} isn't on this network"); false }
                     else -> {
-                        screen = Screen.DISCOVERY
-                        startPair(link.name, addr.first, addr.second, link.id, link.secret)
+                        screen = Screen.ADD
+                        startPair(link.name, link.plat, addr.first, addr.second, link.id, PairMode.Qr(link.secret))
                         true
                     }
                 }
@@ -332,69 +342,100 @@ private fun AirBridgeRoot() {
     }
 }
 
+/** "483920" → "483 920", read digit by digit by screen readers. */
+@Composable
+private fun DigitsText(digits: String, modifier: Modifier = Modifier) {
+    val shown = if (digits.length == 6) digits.substring(0, 3) + " " + digits.substring(3) else digits
+    Text(
+        shown,
+        style = MaterialTheme.typography.displayMedium,
+        color = MaterialTheme.colorScheme.onSurface,
+        textAlign = TextAlign.Center,
+        modifier = modifier.fillMaxWidth().semantics { contentDescription = "Code " + digits.toCharArray().joinToString(" ") },
+    )
+}
+
+/** The LAN pairing sheet: connecting → compare digits → waiting for the computer → result (§3.3). */
+@Composable
+private fun PairingDialog(p: PairProgress, onConfirm: () -> Unit, onCancel: () -> Unit) {
+    val noun = platformNoun(p.plat)
+    AlertDialog(
+        onDismissRequest = {}, // explicit Cancel only, so a stray tap never aborts a pairing
+        title = {
+            Text(
+                when (p.stage) {
+                    PairStage.CONNECTING -> "Connecting to ${p.peerName}"
+                    PairStage.CONFIRM -> "Pair with ${p.peerName}?"
+                    PairStage.WAITING_PEER -> "Confirm on your $noun"
+                }
+            )
+        },
+        text = {
+            Column(Modifier.fillMaxWidth()) {
+                when (p.stage) {
+                    PairStage.CONNECTING -> Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(Modifier.size(Dimens.iconMd), strokeWidth = 3.dp)
+                        Spacer(Modifier.width(Dimens.md))
+                        Text(if (p.mode == "qr") "Checking the QR code…" else "Setting up a secure connection…",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    PairStage.CONFIRM -> {
+                        Text("Make sure your $noun shows the same code.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Spacer(Modifier.height(Dimens.lg))
+                        DigitsText(p.digits ?: "")
+                        Spacer(Modifier.height(Dimens.lg))
+                        Text("If the codes are different, tap Cancel.", style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    PairStage.WAITING_PEER -> {
+                        DigitsText(p.digits ?: "")
+                        Spacer(Modifier.height(Dimens.lg))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            CircularProgressIndicator(Modifier.size(Dimens.iconSm), strokeWidth = 2.dp)
+                            Spacer(Modifier.width(Dimens.md))
+                            Text("Accept the request on ${p.peerName} to finish.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { if (p.stage == PairStage.CONFIRM) TextButton(onClick = onConfirm) { Text("Confirm") } },
+        dismissButton = { TextButton(onClick = onCancel) { Text("Cancel") } },
+    )
+}
+
 @Composable
 private fun OverlayPermissionScreen() {
     val ctx = LocalContext.current
-    Box(Modifier.fillMaxSize().background(Bg), contentAlignment = Alignment.Center) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp).verticalScroll(rememberScrollState())) {
-            Text("Overlay Permission Required", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(16.dp))
-            Text(
-                "AirBridge requires the 'Display over other apps' permission to sync your clipboard " +
-                    "(floating bubble) and to receive control from your computer.",
-                color = Color.LightGray, textAlign = TextAlign.Center,
+    Column(
+        Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().verticalScroll(rememberScrollState()).padding(Dimens.lg),
+        verticalArrangement = Arrangement.spacedBy(Dimens.md),
+    ) {
+        Spacer(Modifier.height(Dimens.xl))
+        Icon(Icons.Outlined.Layers, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(40.dp))
+        Text("One permission first", style = MaterialTheme.typography.headlineSmall)
+        Text(
+            "AirBridge needs \"Display over other apps\" for the clipboard bubble and to show a cursor when your computer controls this phone.",
+            style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        AbCard {
+            InfoRow(
+                title = "1. Allow restricted settings",
+                subtitle = "Only needed if the switch in step 2 is greyed out. In App info, open the menu at the top right and choose \"Allow restricted settings\".",
             )
-            Spacer(Modifier.height(32.dp))
-            Text("Step 1: Allow Restricted Settings", color = Color.White, fontWeight = FontWeight.Bold)
-            Text(
-                "Tap below to open App Info. Tap the 3 dots (⋮) in the top right, and select 'Allow restricted settings'.",
-                color = Color.Gray, fontSize = 14.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 4.dp, bottom = 12.dp),
-            )
-            Button(
-                onClick = { ctx.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${ctx.packageName}"))) },
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF333333)),
-            ) { Text("Open App Info", color = Color.White) }
-            Spacer(Modifier.height(24.dp))
-            Text("Step 2: Grant Permission", color = Color.White, fontWeight = FontWeight.Bold)
-            Text(
-                "Once Step 1 is complete, tap below to turn on the toggle.",
-                color = Color.Gray, fontSize = 14.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 4.dp, bottom = 12.dp),
-            )
-            Button(
-                onClick = { ctx.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${ctx.packageName}"))) },
-                colors = ButtonDefaults.buttonColors(containerColor = Accent),
-            ) { Text("Enable Overlay", color = Color.White) }
+            Box(Modifier.padding(start = Dimens.md, end = Dimens.md, bottom = Dimens.md)) {
+                SecondaryButton("Open App info", onClick = {
+                    ctx.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${ctx.packageName}")))
+                })
+            }
+            RowDivider()
+            InfoRow(title = "2. Turn on \"Display over other apps\"", subtitle = "Then come back here.")
+            Box(Modifier.padding(start = Dimens.md, end = Dimens.md, bottom = Dimens.md)) {
+                PrimaryButton("Grant permission", onClick = {
+                    ctx.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${ctx.packageName}")))
+                })
+            }
         }
-    }
-}
-
-@Composable
-private fun PlatformIcon(plat: String, size: Int = 36) {
-    Image(painterResource(DirectShare.platformIcon(plat)), contentDescription = plat, modifier = Modifier.size(size.dp))
-}
-
-private fun platLabel(plat: String) = when (plat) {
-    "macos" -> "Mac"; "windows" -> "Windows"; "linux" -> "Linux"; "android" -> "Android"; "ios" -> "iPhone/iPad"; else -> plat
-}
-
-@Composable
-private fun DarkCard(modifier: Modifier = Modifier, onClick: (() -> Unit)? = null, content: @Composable () -> Unit) {
-    Card(
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = CardBg),
-        modifier = modifier.fillMaxWidth().padding(bottom = 12.dp).let { if (onClick != null) it.clickable(onClick = onClick) else it },
-    ) { content() }
-}
-
-@Composable
-private fun SwitchRow(title: String, subtitle: String, checked: Boolean, onChange: (Boolean) -> Unit) {
-    Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-        Column(Modifier.weight(1f)) {
-            Text(title, color = Color.White, fontSize = 16.sp)
-            Text(subtitle, color = Color.Gray, fontSize = 13.sp)
-        }
-        Switch(checked = checked, onCheckedChange = onChange,
-            colors = SwitchDefaults.colors(checkedThumbColor = Accent, checkedTrackColor = Accent.copy(alpha = 0.5f)))
     }
 }
 
@@ -410,19 +451,20 @@ private fun rememberNearbyPermission(onResult: (Boolean) -> Unit = {}): Pair<Boo
     return ok to { if (ok) onResult(true) else launcher.launch(NearbyTransport.requiredPermissions()) }
 }
 
+// ---- Add a device ----
+
 @Composable
-private fun DiscoveryScreen(
+private fun AddDeviceScreen(
     pairedIds: Set<String>,
-    onPairWithCode: (DiscoveredHost, String) -> Unit,
-    onCancel: () -> Unit,
+    onPickHost: (DiscoveredHost) -> Unit,
+    onBack: (() -> Unit)?,
     onOpenScanner: () -> Unit,
-    showCancel: Boolean,
+    onOpenSettings: () -> Unit,
 ) {
-    if (showCancel) BackHandler(onBack = onCancel)
+    if (onBack != null) BackHandler(onBack = onBack)
     val ctx = LocalContext.current
     val hosts by Discovery.hosts.collectAsState()
     val androids by NearbyTransport.found.collectAsState()
-    var codeFor by remember { mutableStateOf<DiscoveredHost?>(null) }
 
     val (nearbyOk, requestNearby) = rememberNearbyPermission()
     LaunchedEffect(Unit) { requestNearby() }
@@ -435,229 +477,240 @@ private fun DiscoveryScreen(
         if (ok) onOpenScanner() else toast(ctx, "Camera permission is needed to scan the QR code")
     }
 
-    codeFor?.let { host ->
-        var code by remember(host) { mutableStateOf("") }
-        AlertDialog(
-            onDismissRequest = { codeFor = null },
-            title = { Text("Pair with ${host.name}") },
-            text = {
-                Column {
-                    Text("Enter the 6-digit code shown on ${host.name}.")
-                    Spacer(Modifier.height(12.dp))
-                    OutlinedTextField(
-                        value = code,
-                        onValueChange = { v -> code = v.filter { it.isDigit() }.take(6) },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-                        textStyle = MaterialTheme.typography.headlineMedium,
+    val hostList = hosts.values.sortedBy { it.name.lowercase() }
+    val androidList = androids.filter { it.peerId == null || it.peerId !in pairedIds }
+
+    AbScaffold(
+        title = "Add a device",
+        onBack = onBack,
+        actions = { if (onBack == null) IconButton(onClick = onOpenSettings) { Icon(Icons.Outlined.Settings, contentDescription = "Settings") } },
+        bottomBar = {
+            Column(Modifier.navigationBarsPadding().padding(Dimens.md)) {
+                SecondaryButton("Scan QR code", icon = Icons.Outlined.QrCodeScanner, onClick = {
+                    if (granted(ctx, Manifest.permission.CAMERA)) onOpenScanner() else cameraLauncher.launch(Manifest.permission.CAMERA)
+                })
+            }
+        },
+    ) {
+        LazyColumn(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(Dimens.sm)) {
+            item {
+                Text(
+                    "Pick your computer to pair. You'll check that both screens show the same code.",
+                    style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            item { SectionHeader("On this Wi-Fi") }
+            if (hostList.isEmpty()) item {
+                SearchingCard(Icons.Outlined.Wifi, "Looking for computers…", "Open AirBridge on your Mac or PC. Both devices need to be on the same Wi-Fi.")
+            }
+            items(hostList, key = { it.id }) { host ->
+                val isPaired = host.id in pairedIds
+                AbCard(onClick = if (isPaired) null else ({ onPickHost(host) })) {
+                    InfoRow(
+                        title = host.name,
+                        subtitle = platformLabel(host.plat),
+                        leading = { PlatformAvatar(host.plat) },
+                        trailing = {
+                            if (isPaired) StatusChip("Paired", ChipTone.SUCCESS)
+                            else Text("Pair", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                        },
                     )
                 }
-            },
-            confirmButton = {
-                TextButton(enabled = code.length == 6, onClick = { codeFor = null; onPairWithCode(host, code) }) { Text("Pair") }
-            },
-            dismissButton = { TextButton(onClick = { codeFor = null }) { Text("Cancel") } },
-        )
-    }
-
-    Column(Modifier.fillMaxSize().background(Bg).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        Text("Looking for Devices...", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = Color.White,
-            modifier = Modifier.padding(bottom = 8.dp, top = 32.dp))
-        Text(if (nearbyOk) "Searching Wi-Fi and nearby phones" else "Searching Wi-Fi", color = Color.Gray, fontSize = 14.sp,
-            modifier = Modifier.padding(bottom = 24.dp))
-
-        val hostList = hosts.values.sortedBy { it.name.lowercase() }
-        val androidList = androids.filter { it.peerId == null || it.peerId !in pairedIds }
-        if (hostList.isEmpty() && androidList.isEmpty()) {
-            Box(Modifier.weight(1f), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = Accent) }
-        } else {
-            LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
-                items(hostList, key = { it.id }) { host ->
-                    val isPaired = host.id in pairedIds
-                    DarkCard(onClick = if (isPaired) null else ({ codeFor = host })) {
-                        Row(Modifier.padding(20.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                            PlatformIcon(host.plat)
-                            Spacer(Modifier.width(16.dp))
-                            Column(Modifier.weight(1f)) {
-                                Text(host.name, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                                Text(if (isPaired) "Already paired" else "${platLabel(host.plat)} · tap to enter code",
-                                    color = if (isPaired) Good else Color.Gray, fontSize = 13.sp)
-                            }
-                        }
+            }
+            item { SectionHeader("Nearby phones") }
+            if (!nearbyOk) item {
+                AbCard {
+                    InfoRow(
+                        title = "Find nearby phones",
+                        subtitle = "Pair with another Android phone directly. No Wi-Fi network needed.",
+                        leading = { PlatformAvatar("android") },
+                    )
+                    Box(Modifier.padding(start = Dimens.md, end = Dimens.md, bottom = Dimens.md)) {
+                        SecondaryButton("Allow nearby devices", icon = Icons.Outlined.NearMe, onClick = requestNearby)
                     }
                 }
-                items(androidList, key = { "nearby:" + it.endpointId }) { a ->
-                    DarkCard(onClick = {
-                        AirBridgeService.start(ctx)
-                        NearbyTransport.requestConnection(a.endpointId)
-                        toast(ctx, "Requesting ${a.name}…")
-                    }) {
-                        Row(Modifier.padding(20.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                            PlatformIcon("android")
-                            Spacer(Modifier.width(16.dp))
-                            Column {
-                                Text(a.name, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                                Text("Nearby Android", color = Good, fontSize = 13.sp)
-                            }
-                        }
-                    }
+            } else if (androidList.isEmpty()) item {
+                SearchingCard(Icons.Outlined.NearMe, "Looking for phones…", "Open AirBridge on the other phone. Wi-Fi and Bluetooth must be on; no shared network is needed.")
+            }
+            if (nearbyOk) items(androidList, key = { "nearby:" + it.endpointId }) { a ->
+                AbCard(onClick = {
+                    AirBridgeService.start(ctx)
+                    NearbyTransport.requestConnection(a.endpointId)
+                    toast(ctx, "Asking ${a.name}…")
+                }) {
+                    InfoRow(
+                        title = a.name,
+                        subtitle = "Android · Nearby",
+                        leading = { PlatformAvatar("android") },
+                        trailing = { Text("Pair", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary) },
+                    )
                 }
             }
-        }
-
-        TextButton(
-            onClick = { if (granted(ctx, Manifest.permission.CAMERA)) onOpenScanner() else cameraLauncher.launch(Manifest.permission.CAMERA) },
-            modifier = Modifier.padding(top = 16.dp),
-        ) { Text("Scan QR Code Instead", color = Color(0xFF60A5FA)) }
-
-        if (!nearbyOk) TextButton(onClick = requestNearby) { Text("Allow nearby phones", color = Color(0xFF60A5FA)) }
-
-        if (showCancel) {
-            Spacer(Modifier.height(16.dp))
-            Button(onClick = onCancel, colors = ButtonDefaults.buttonColors(containerColor = Color.DarkGray),
-                modifier = Modifier.fillMaxWidth().height(56.dp)) { Text("Cancel", color = Color.White, fontSize = 16.sp) }
+            item { Spacer(Modifier.height(Dimens.md)) }
         }
     }
 }
 
 @Composable
-private fun ConnectedScreen(
+private fun SearchingCard(icon: ImageVector, title: String, body: String) {
+    AbCard {
+        InfoRow(
+            title = title,
+            subtitle = body,
+            leading = {
+                Box(
+                    Modifier.size(Dimens.avatar).background(MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.shapes.medium),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(Dimens.iconSm))
+                }
+            },
+            trailing = { CircularProgressIndicator(Modifier.size(Dimens.iconSm), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onSurfaceVariant) },
+        )
+    }
+}
+
+// ---- Devices ----
+
+@Composable
+private fun DevicesScreen(
     paired: List<PairedPeer>,
     onOpenSettings: () -> Unit,
     onAddDevice: () -> Unit,
     onForget: (PairedPeer) -> Unit,
 ) {
     val ctx = LocalContext.current
-    val prefs = remember { ctx.getSharedPreferences("AirBridgePrefs", Context.MODE_PRIVATE) }
     val status by Hub.status.collectAsState()
     val transfers by Hub.transfers.collectAsState()
     val myName by Identity.nameFlow.collectAsState()
-    var autoConnect by remember { mutableStateOf(prefs.getBoolean(WsClient.PREF_AUTO_CONNECT, true)) }
-    var visible by remember { mutableStateOf(prefs.getBoolean(NearbyTransport.PREF_VISIBLE, false)) }
-    var renaming by remember { mutableStateOf(false) }
+    val suppress by BubbleController.reasons.collectAsState()
+    val reportedHolder by BubbleController.leaseHolder.collectAsState()
+    val lastInput by Hub.lastInputPeer.collectAsState()
+    val controller = if ("lease" in suppress) reportedHolder ?: lastInput else null
     var forgetting by remember { mutableStateOf<PairedPeer?>(null) }
-
-    val (_, requestNearby) = rememberNearbyPermission { ok ->
-        if (ok) {
-            visible = true
-            NearbyTransport.setVisible(true)
-            AirBridgeService.start(ctx)
-        } else toast(ctx, "Nearby permissions are needed for phone-to-phone")
-    }
-
-    if (renaming) {
-        var name by remember { mutableStateOf(Identity.customName ?: "") }
-        AlertDialog(
-            onDismissRequest = { renaming = false },
-            title = { Text("Rename this phone") },
-            text = {
-                OutlinedTextField(value = name, onValueChange = { name = it.take(64) }, singleLine = true,
-                    placeholder = { Text(Build.MODEL) })
-            },
-            confirmButton = { TextButton(onClick = { Hub.renameSelf(name); renaming = false }) { Text("Save") } },
-            dismissButton = { TextButton(onClick = { renaming = false }) { Text("Cancel") } },
-        )
-    }
 
     forgetting?.let { p ->
         AlertDialog(
             onDismissRequest = { forgetting = null },
             title = { Text("Forget ${p.name}?") },
-            text = { Text("You'll need to pair again to reconnect.") },
-            confirmButton = { TextButton(onClick = { forgetting = null; onForget(p) }) { Text("Forget", color = Color(0xFFE57373)) } },
+            text = { Text("It will be disconnected and removed from both devices. You'll need to pair again to reconnect.") },
+            confirmButton = { TextButton(onClick = { forgetting = null; onForget(p) }) { Text("Forget", color = AbTheme.status.danger) } },
             dismissButton = { TextButton(onClick = { forgetting = null }) { Text("Cancel") } },
         )
     }
 
-    Column(Modifier.fillMaxSize().background(Bg).padding(24.dp).verticalScroll(rememberScrollState()), horizontalAlignment = Alignment.CenterHorizontally) {
-        Row(Modifier.fillMaxWidth().padding(bottom = 24.dp, top = 32.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            Text("Your Devices", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = Color.White)
-            IconButton(onClick = onOpenSettings) { Icon(Icons.Default.Settings, contentDescription = "Settings", tint = Color.White) }
+    AbScaffold(
+        title = "AirBridge",
+        actions = { IconButton(onClick = onOpenSettings) { Icon(Icons.Outlined.Settings, contentDescription = "Settings") } },
+        bottomBar = {
+            Column(Modifier.navigationBarsPadding().padding(Dimens.md)) {
+                PrimaryButton("Add device", icon = Icons.Outlined.Add, onClick = onAddDevice)
+            }
+        },
+    ) {
+        LazyColumn(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(Dimens.sm)) {
+            item {
+                Text("This phone · $myName", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            val list = transfers.values.sortedBy { it.key }
+            if (list.isNotEmpty()) {
+                item { SectionHeader("Transfers") }
+                items(list, key = { "xfer:" + it.key }) { TransferCard(it) }
+            }
+            item { SectionHeader("Devices") }
+            if (paired.isEmpty()) item {
+                AbCard { EmptyState(Icons.Outlined.Devices, "No devices yet", "Pair your Mac, PC or another phone to share the clipboard and files.") }
+            }
+            items(paired, key = { it.id }) { peer ->
+                val st = status[peer.id] ?: PeerStatus.OFFLINE
+                DeviceCard(
+                    peer = peer,
+                    status = st,
+                    controllingYou = st == PeerStatus.CONNECTED && controller == peer.id,
+                    onForget = { forgetting = peer },
+                    onTrackpad = {
+                        ctx.startActivity(Intent(ctx, TrackpadActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP))
+                    },
+                )
+            }
+            item { Spacer(Modifier.height(Dimens.md)) }
         }
+    }
+}
 
-        DarkCard {
-            Row(Modifier.padding(horizontal = 20.dp, vertical = 12.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text("This phone", color = Color.Gray, fontSize = 13.sp)
-                    Text(myName, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+@Composable
+private fun DeviceCard(peer: PairedPeer, status: PeerStatus, controllingYou: Boolean, onForget: () -> Unit, onTrackpad: () -> Unit) {
+    var menu by remember { mutableStateOf(false) }
+    val (label, tone) = when {
+        controllingYou -> "Controlling you" to ChipTone.INFO
+        status == PeerStatus.CONNECTED -> "Connected" to ChipTone.SUCCESS
+        status == PeerStatus.CONNECTING -> "Connecting" to ChipTone.WARNING
+        status == PeerStatus.RECONNECTING -> "Reconnecting" to ChipTone.WARNING
+        else -> "Offline" to ChipTone.NEUTRAL
+    }
+    val desktop = peer.plat == "macos" || peer.plat == "windows" || peer.plat == "linux"
+    AbCard {
+        Row(
+            Modifier.fillMaxWidth().padding(start = Dimens.md, top = Dimens.md, bottom = Dimens.md, end = Dimens.xs),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            PlatformAvatar(peer.plat)
+            Spacer(Modifier.width(Dimens.md))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Dimens.xs)) {
+                Text(peer.name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text("${platformLabel(peer.plat)} · ${if (peer.via == "nearby") "Nearby" else "Wi-Fi"}",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                StatusChip(label, tone)
+            }
+            Box {
+                IconButton(onClick = { menu = true }) { Icon(Icons.Outlined.MoreVert, contentDescription = "More options for ${peer.name}") }
+                DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                    if (desktop && status == PeerStatus.CONNECTED) DropdownMenuItem(
+                        text = { Text("Use as trackpad") },
+                        onClick = { menu = false; onTrackpad() },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Forget device", color = AbTheme.status.danger) },
+                        onClick = { menu = false; onForget() },
+                    )
                 }
-                IconButton(onClick = { renaming = true }) { Icon(Icons.Default.Edit, contentDescription = "Rename", tint = Color.White) }
             }
-        }
-
-        transfers.values.sortedBy { it.key }.forEach { TransferCard(it) }
-
-        paired.forEach { peer ->
-            val st = status[peer.id] ?: PeerStatus.OFFLINE
-            val (label, color) = when (st) {
-                PeerStatus.CONNECTED -> "● Connected" to Good
-                PeerStatus.CONNECTING -> "Connecting…" to Color(0xFFFFD54F)
-                PeerStatus.RECONNECTING -> "Reconnecting…" to Color(0xFFFFB74D)
-                PeerStatus.OFFLINE -> "Offline" to Color.Gray
-            }
-            DarkCard {
-                Row(Modifier.padding(20.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    PlatformIcon(peer.plat)
-                    Spacer(Modifier.width(16.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text(peer.name, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                        Text("$label · ${if (peer.via == "nearby") "Nearby" else "Wi-Fi"}", color = color, fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 4.dp))
-                    }
-                    IconButton(onClick = { forgetting = peer }) {
-                        Icon(Icons.Default.Delete, contentDescription = "Forget", tint = Color.Red.copy(alpha = 0.8f))
-                    }
-                }
-            }
-        }
-
-        SwitchRow("Auto-Reconnect", "Connect to paired devices automatically", autoConnect) {
-            autoConnect = it
-            prefs.edit().putBoolean(WsClient.PREF_AUTO_CONNECT, it).apply()
-            if (it) WsClient.retryAllNow(unpause = true)
-        }
-        SwitchRow("Device Visibility", if (visible) "Visible to nearby phones" else "Turn on so nearby phones can find this one", visible) { on ->
-            if (on) requestNearby()
-            else {
-                visible = false
-                NearbyTransport.setVisible(false)
-                AirBridgeService.stopIfIdle(ctx)
-            }
-        }
-
-        Spacer(Modifier.height(8.dp))
-        Button(onClick = onAddDevice, colors = ButtonDefaults.buttonColors(containerColor = Accent),
-            modifier = Modifier.fillMaxWidth().height(56.dp), shape = RoundedCornerShape(16.dp)) {
-            Icon(Icons.Default.Add, contentDescription = null, tint = Color.White)
-            Spacer(Modifier.width(8.dp))
-            Text("Add another Device", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
         }
     }
 }
 
 @Composable
 private fun TransferCard(t: TransferUi) {
-    DarkCard {
-        Column(Modifier.padding(20.dp)) {
-            Text(
-                (if (t.incoming) "Receiving from " else "Sending to ") + t.peerName,
-                color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp,
-            )
-            Text(t.fileName, color = Color.Gray, fontSize = 13.sp, maxLines = 1)
-            Spacer(Modifier.height(10.dp))
+    AbCard {
+        Column(Modifier.padding(Dimens.md), verticalArrangement = Arrangement.spacedBy(Dimens.sm)) {
+            Text((if (t.incoming) "Receiving from " else "Sending to ") + t.peerName, style = MaterialTheme.typography.titleSmall)
+            Text(t.fileName, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1, overflow = TextOverflow.Ellipsis)
             if (t.result == null) {
                 val p = if (t.bytesTotal > 0) (t.bytesDone.toFloat() / t.bytesTotal).coerceIn(0f, 1f) else 0f
-                LinearProgressIndicator(progress = { p }, modifier = Modifier.fillMaxWidth(), color = Accent)
-                Spacer(Modifier.height(6.dp))
-                Text("${minOf(t.filesDone + 1, t.filesTotal)}/${t.filesTotal} files · ${(p * 100).toInt()}% · ${formatSpeed(t.bytesPerSec)}",
-                    color = Color.Gray, fontSize = 12.sp)
+                LinearProgressIndicator(
+                    progress = { p },
+                    modifier = Modifier.fillMaxWidth().semantics { contentDescription = "${(p * 100).toInt()} percent" },
+                    trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                )
+                Text("${minOf(t.filesDone + 1, t.filesTotal)} of ${t.filesTotal} · ${(p * 100).toInt()}% · ${formatSpeed(t.bytesPerSec)}",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             } else {
                 val ok = t.result == "Sent" || t.result == "Received"
-                Text(t.result, color = if (ok) Good else Color(0xFFE57373), fontWeight = FontWeight.Bold)
+                val c = if (ok) AbTheme.status.success else AbTheme.status.danger
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(if (ok) Icons.Outlined.CheckCircle else Icons.Outlined.ErrorOutline, contentDescription = null, tint = c,
+                        modifier = Modifier.size(Dimens.iconSm))
+                    Spacer(Modifier.width(Dimens.sm))
+                    Text(t.result, style = MaterialTheme.typography.labelLarge, color = c)
+                }
             }
         }
     }
 }
+
+// ---- QR scanner ----
 
 @Composable
 private fun CameraScannerScreen(onCancel: () -> Unit, onScanned: (String) -> Boolean) {
@@ -704,14 +757,26 @@ private fun CameraScannerScreen(onCancel: () -> Unit, onScanned: (String) -> Boo
             },
             modifier = Modifier.fillMaxSize(),
         )
-        Column(Modifier.fillMaxWidth().padding(top = 64.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Text("AirBridge", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = Color.White)
-            Text("Scan the QR code on your computer", color = Color.White, modifier = Modifier.padding(top = 8.dp))
-            Spacer(Modifier.height(32.dp))
-            Button(onClick = onCancel, colors = ButtonDefaults.buttonColors(containerColor = Color.Red.copy(alpha = 0.8f))) { Text("Cancel") }
+        // Viewfinder frame.
+        Box(
+            Modifier.align(Alignment.Center).size(240.dp)
+                .border(3.dp, MaterialTheme.colorScheme.primary, MaterialTheme.shapes.extraLarge),
+        )
+        Surface(color = MaterialTheme.colorScheme.scrim, modifier = Modifier.fillMaxWidth().align(Alignment.TopCenter)) {
+            Row(Modifier.statusBarsPadding().padding(Dimens.sm), verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onCancel) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
+                Spacer(Modifier.width(Dimens.sm))
+                Column {
+                    Text("Scan the pairing code", style = MaterialTheme.typography.titleMedium)
+                    Text("Shown by AirBridge on your computer when you add a device.", style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
         }
     }
 }
+
+// ---- Settings ----
 
 @Composable
 private fun SettingsScreen(onBack: () -> Unit) {
@@ -720,10 +785,14 @@ private fun SettingsScreen(onBack: () -> Unit) {
     val prefs = remember { ctx.getSharedPreferences("AirBridgePrefs", Context.MODE_PRIVATE) }
     val resumeTick = rememberResumeTick()
     val scope = rememberCoroutineScope()
+    val myName by Identity.nameFlow.collectAsState()
 
     var invertX by remember { mutableStateOf(prefs.getBoolean("INVERT_X", false)) }
     var invertY by remember { mutableStateOf(prefs.getBoolean("INVERT_Y", false)) }
     var bubble by remember { mutableStateOf(prefs.getBoolean(FloatingBubble.PREF_ENABLED, true)) }
+    var autoConnect by remember { mutableStateOf(prefs.getBoolean(WsClient.PREF_AUTO_CONNECT, true)) }
+    var visible by remember { mutableStateOf(prefs.getBoolean(NearbyTransport.PREF_VISIBLE, false)) }
+    var renaming by remember { mutableStateOf(false) }
 
     val accessibilityOn = remember(resumeTick) {
         (Settings.Secure.getString(ctx.contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES) ?: "")
@@ -733,78 +802,112 @@ private fun SettingsScreen(onBack: () -> Unit) {
     val dndAccess = remember(resumeTick) { ctx.getSystemService(NotificationManager::class.java)?.isNotificationPolicyAccessGranted == true }
     val notificationsOn = remember(resumeTick) { ctx.getSystemService(NotificationManager::class.java)?.areNotificationsEnabled() == true }
 
+    val (_, requestNearby) = rememberNearbyPermission { ok ->
+        if (ok) {
+            visible = true
+            NearbyTransport.setVisible(true)
+            AirBridgeService.start(ctx)
+        } else toast(ctx, "Nearby permissions are needed to pair with phones")
+    }
+
     fun open(intent: Intent) = scope.launch {
         try { ctx.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } catch (_: Exception) { toast(ctx, "Not available on this device") }
     }
 
-    Column(Modifier.fillMaxSize().background(Bg).padding(24.dp).verticalScroll(rememberScrollState())) {
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 32.dp, bottom = 24.dp)) {
-            IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White) }
-            Text("Settings", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Color.White)
-        }
+    if (renaming) {
+        var name by remember { mutableStateOf(Identity.customName ?: "") }
+        AlertDialog(
+            onDismissRequest = { renaming = false },
+            title = { Text("Phone name") },
+            text = {
+                OutlinedTextField(value = name, onValueChange = { name = it.take(64) }, singleLine = true,
+                    label = { Text("Shown on your other devices") }, placeholder = { Text(Build.MODEL) })
+            },
+            confirmButton = { TextButton(onClick = { Hub.renameSelf(name); renaming = false }) { Text("Save") } },
+            dismissButton = { TextButton(onClick = { renaming = false }) { Text("Cancel") } },
+        )
+    }
 
-        SectionTitle("Universal Control")
-        DarkCard {
-            Column(Modifier.padding(20.dp)) {
-                if (!accessibilityOn) {
-                    Button(
-                        onClick = { open(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF333333)),
-                        modifier = Modifier.fillMaxWidth().height(50.dp).padding(bottom = 12.dp), shape = RoundedCornerShape(12.dp),
-                    ) { Text("Enable Mouse Control", color = Color(0xFFFFB74D), fontWeight = FontWeight.Bold) }
-                } else {
-                    Text("🟢 Mouse Control Enabled", color = Color.Green, fontSize = 14.sp, modifier = Modifier.padding(bottom = 8.dp))
-                }
-                SwitchRow("Invert Horizontal Arrows", "Swap Left/Right key actions", invertX) {
-                    invertX = it; prefs.edit().putBoolean("INVERT_X", it).apply()
-                }
-                SwitchRow("Invert Vertical Arrows", "Swap Up/Down key actions", invertY) {
-                    invertY = it; prefs.edit().putBoolean("INVERT_Y", it).apply()
-                }
+    AbScaffold(title = "Settings", onBack = onBack) {
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+            SectionHeader("This phone")
+            AbCard {
+                InfoRow(title = "Name", subtitle = myName, trailing = {
+                    IconButton(onClick = { renaming = true }) { Icon(Icons.Outlined.Edit, contentDescription = "Rename this phone") }
+                })
+                RowDivider()
+                SwitchRow("Visible to nearby phones", "Lets other Android phones find and pair with this one", visible, { on ->
+                    if (on) requestNearby()
+                    else {
+                        visible = false
+                        NearbyTransport.setVisible(false)
+                        AirBridgeService.stopIfIdle(ctx)
+                    }
+                })
             }
-        }
 
-        SectionTitle("Clipboard")
-        DarkCard {
-            Column(Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) {
-                SwitchRow("Floating bubble", "Tap the bubble to send your clipboard", bubble) {
-                    bubble = it
-                    prefs.edit().putBoolean(FloatingBubble.PREF_ENABLED, it).apply()
-                    if (AirBridgeService.isRunning) AirBridgeService.start(ctx, AirBridgeService.ACTION_REFRESH_BUBBLE)
-                }
+            SectionHeader("Connection")
+            AbCard {
+                SwitchRow("Reconnect automatically", "Connect to paired devices whenever they're reachable", autoConnect, {
+                    autoConnect = it
+                    prefs.edit().putBoolean(WsClient.PREF_AUTO_CONNECT, it).apply()
+                    if (it) WsClient.retryAllNow(unpause = true)
+                })
             }
-        }
 
-        SectionTitle("System access")
-        DarkCard {
-            Column(Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) {
+            SectionHeader("Clipboard")
+            AbCard {
+                SwitchRow(
+                    "Floating bubble",
+                    "Tap it to send your clipboard. Hidden while you use the trackpad or another device controls this phone.",
+                    bubble,
+                    {
+                        bubble = it
+                        prefs.edit().putBoolean(FloatingBubble.PREF_ENABLED, it).apply()
+                        if (AirBridgeService.isRunning) AirBridgeService.start(ctx, AirBridgeService.ACTION_REFRESH_BUBBLE)
+                    },
+                )
+            }
+
+            SectionHeader("Remote control")
+            AbCard {
+                AccessRow("Control from your computer", "Accessibility service for the cursor, taps and typing", accessibilityOn) {
+                    open(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                }
+                RowDivider()
+                SwitchRow("Invert left/right arrows", null, invertX, { invertX = it; prefs.edit().putBoolean("INVERT_X", it).apply() })
+                RowDivider()
+                SwitchRow("Invert up/down arrows", null, invertY, { invertY = it; prefs.edit().putBoolean("INVERT_Y", it).apply() })
+            }
+
+            SectionHeader("System access")
+            AbCard {
                 AccessRow("Notifications", "Transfer progress and pairing requests", notificationsOn) {
                     open(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, ctx.packageName))
                 }
+                RowDivider()
                 AccessRow("Modify system settings", "Brightness keys from your computer", canWriteSettings) {
                     open(Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS, Uri.parse("package:${ctx.packageName}")))
                 }
+                RowDivider()
                 AccessRow("Do Not Disturb access", "Toggle Do Not Disturb from your computer", dndAccess) {
                     open(Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS))
                 }
             }
+
+            SectionHeader("About")
+            AbCard {
+                InfoRow(title = "AirBridge ${BuildConfig.VERSION_NAME}", subtitle = "Protocol v2 · encrypted end to end")
+            }
+            Spacer(Modifier.height(Dimens.xl))
         }
     }
-}
-
-@Composable
-private fun SectionTitle(text: String) {
-    Text(text, color = Color.Gray, fontSize = 14.sp, modifier = Modifier.padding(bottom = 8.dp, start = 4.dp, top = 8.dp))
 }
 
 @Composable
 private fun AccessRow(title: String, subtitle: String, granted: Boolean, onOpen: () -> Unit) {
-    Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) {
-            Text(title, color = Color.White, fontSize = 16.sp)
-            Text(subtitle, color = Color.Gray, fontSize = 12.sp)
-        }
-        if (granted) Text("Allowed", color = Good, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-        else TextButton(onClick = onOpen) { Text("Allow", color = Color(0xFF60A5FA)) }
-    }
+    InfoRow(title = title, subtitle = subtitle, trailing = {
+        if (granted) StatusChip("Allowed", ChipTone.SUCCESS)
+        else TextButton(onClick = onOpen, modifier = Modifier.height(Dimens.touch)) { Text("Allow") }
+    })
 }
