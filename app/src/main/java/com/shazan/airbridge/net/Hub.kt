@@ -1,5 +1,6 @@
 package com.shazan.airbridge.net
 
+import android.app.Application
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.LinkProperties
@@ -8,6 +9,8 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import android.widget.Toast
+import com.shazan.airbridge.net.link.LinkManager
+import com.shazan.airbridge.net.link.WfdJoiner
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -101,6 +104,7 @@ object Hub : PeerBus.Transport {
             sessions.forEach { s -> try { s.tick(now) } catch (e: Exception) { Log.w(TAG, "tick", e) } }
         }, 1, 1, TimeUnit.SECONDS)
         PeerBus.transport = this
+        (app as? Application)?.let { WfdJoiner.Foreground.install(it) }
     }
 
     // ---- service lifetime ----
@@ -121,6 +125,7 @@ object Hub : PeerBus.Transport {
         if (!running) return
         running = false
         unregisterNetworkCallback()
+        LinkManager.stopAll() // releases Wi-Fi Direct network requests
         WsClient.stop()
         NearbyTransport.onServiceStop()
         Discovery.release()
@@ -170,6 +175,7 @@ object Hub : PeerBus.Transport {
         if (pairingSession === s) { pairingSession = null; _pairing.value = null }
         if (s.isPairing) _events.tryEmit(NetEvent.PairResult(true, s.peerName))
         peersChanged()
+        LinkManager.onSessionReady(s) // after the old session was retired: a held xfer_offer goes on [s]
     }
 
     fun onClosed(s: Session, outcome: Outcome) {
@@ -272,6 +278,8 @@ object Hub : PeerBus.Transport {
         when {
             t == "clip" -> ClipboardSync.onRemote(s, m)
             t.startsWith("xfer_") -> s.xfer.onControl(t, m)
+            // §10.1 link upgrades are network-half business, never routed to the input half.
+            t.startsWith("link_") -> LinkManager.onMessage(s, t, m)
             else -> {
                 if (t in LEASE_INPUT && _controlledBy.value != id) _controlledBy.value = id
                 if (PeerBus.controlHandler == null) {
@@ -326,6 +334,10 @@ object Hub : PeerBus.Transport {
     fun putTransfer(t: TransferUi) {
         _transfers.value = _transfers.value + (t.key to t)
         if (t.result != null) scheduler.schedule({ _transfers.value = _transfers.value - t.key }, 4, TimeUnit.SECONDS)
+    }
+
+    fun removeTransfer(key: String) {
+        if (_transfers.value.containsKey(key)) _transfers.value = _transfers.value - key
     }
 
     fun toast(msg: String, long: Boolean = false) {
