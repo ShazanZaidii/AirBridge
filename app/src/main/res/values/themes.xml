@@ -1,5 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-
-    <style name="Theme.AirBridge" parent="android:Theme.Material.Light.NoActionBar" />
+    <!-- Dark window so there is no white flash before Compose draws. -->
+    <style name="Theme.AirBridge" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/ab_background</item>
+        <item name="android:colorBackground">@color/ab_background</item>
+        <item name="android:colorAccent">@color/ab_accent</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
 </resources>
