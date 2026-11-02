@@ -36,6 +36,15 @@ phases 0–2), C = Linux. Phases A and B are independent and can run in parallel
 
 ---
 
+> **Update 2026-11-02 (after the AWDL spec research, `/Users/xaidi/AirBridge-AWDL/docs/AWDL_NOTES.md`).** The
+> conclusions in §1 below that AWDL needs raw-frame injection with patched (Nexmon-style) firmware and that OWL is
+> the end of the line are **outdated for Linux**: **Owly** (github.com/t4t5/owly, MIT, maintained, v0.4.2 on
+> 2026-10-31) does AirDrop with iOS 26 on ordinary Linux Wi-Fi cards (Intel, Realtek, MediaTek, Atheros) through
+> standard nl80211 interfaces, and also stays on a single social channel, so channel hopping is not required. It
+> also corrects "every peer hops": Apple devices do, a peer need not. **For Android the verdict is unchanged in
+> practice:** the same raw action-frame TX/RX, MAC control and hardware ACK need root (or a vendor hook as in
+> Google's WonderTap design), which a locked, unrooted phone such as the vivo T3 Pro does not offer.
+
 ## 1. The AirDrop/AWDL question: settled
 
 ### 1.1 How AirDrop works
