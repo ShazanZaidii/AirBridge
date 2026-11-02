@@ -245,7 +245,15 @@ class Session:
         return True
 
     async def run_host_handshake(self):
+        try:
+            return await self._run_host_handshake()
+        except Exception as e:
+            log(f"handshake aborted: {type(e).__name__}: {e}")
+            return False
+
+    async def _run_host_handshake(self):
         h = json.loads(await asyncio.wait_for(self.ws.recv(), 10))
+        log("hello from", h.get("name"), h.get("plat"), "caps=", h.get("caps"), "pk" in h and "pk-ok")
         if h.get("t") != "hello" or h.get("v") != 2:
             await self.send_plain({"t": "auth_fail", "reason": "version"})
             return False
@@ -273,12 +281,14 @@ class Session:
             await self.send_plain({"t": "auth_ok", "mac": b64(hmac256(self.k, b"auth_ack|" + T))})
         elif r.get("t") == "pair":
             mode = r.get("mode", "confirm")
+            log("pair request mode=", mode)
             if mode == "qr":
                 cands = [hmac256(s, f"airbridge/v2/pair|{h['id']}|{self.my_id}".encode()) for s in self.pairing.secrets()]
             else:
                 cands = [hkdf(z, c_nonce + h_nonce, f"airbridge/v2/pairkey|{h['id']}|{self.my_id}".encode(), 32)]
             ok = next((k for k in cands if hmac.compare_digest(b64(hmac256(k, b"pair|" + T)), r.get("proof", ""))), None)
             if ok is None:
+                log("pair proof did not verify (mode", mode, ")")
                 self.pairing.fail()
                 await self.send_plain({"t": "pair_fail", "reason": "locked" if self.pairing.locked() else "bad_proof"})
                 return False
@@ -295,6 +305,7 @@ class Session:
             await self.send_plain({"t": "pair_ok", "proof": b64(hmac256(self.k, b"pair_ack|" + T))})
             log("paired new client", h["name"])
         else:
+            log("unexpected handshake message:", r)
             return False
         self.derive_session_keys(z, c_nonce + h_nonce, T, h["id"], self.my_id)
         self.priv = None
@@ -499,6 +510,44 @@ class Pairing:
         return f"airbridge://pair?v=2&id={host_id}&name={name}&plat=linux&addr={addr}&port={port}&k={k}"
 
 
+async def run_command(s: "Session", st: dict, cmd: str, rest: str) -> bool:
+    """Control/mirror commands shared by host and client modes. Returns False if `cmd` is unknown."""
+    a = rest.split()
+    if cmd == "ping":
+        await s.send({"t": "ping", "ts": int(time.time() * 1000)})
+    elif cmd == "enter":
+        await s.send({"t": "ctl_enter", "edge": a[0], "rel": float(a[1])})
+    elif cmd == "leave":
+        await s.send({"t": "ctl_leave"})
+    elif cmd == "move":
+        await s.send({"t": "ptr_move", "dx": float(a[0]), "dy": float(a[1])})
+    elif cmd == "abs":
+        await s.send({"t": "ptr_abs", "x": float(a[0]), "y": float(a[1])})
+    elif cmd == "scroll":
+        await s.send({"t": "ptr_scroll", "dx": float(a[0]), "dy": float(a[1]), "px": True})
+    elif cmd == "btn":
+        await s.send({"t": "ptr_btn", "b": int(a[0]), "down": a[1] == "down"})
+    elif cmd == "click":
+        await s.send({"t": "ptr_click", "b": int(a[0]), "n": int(a[1]) if len(a) > 1 else 1})
+    elif cmd == "key":
+        hid = int(a[0], 0)
+        m = {"t": "key", "hid": hid, "down": True, "mods": 0}
+        if len(a) > 1:
+            m["text"] = a[1]
+        await s.send(m)
+        await s.send({"t": "key", "hid": hid, "down": False, "mods": 0})
+    elif cmd == "action":
+        await s.send({"t": "action", "name": a[0]})
+    elif cmd == "mirror":
+        w, h, fps = (int(a[0]), int(a[1]), int(a[2])) if len(a) >= 3 else (1280, 800, 30)
+        await s.send({"t": "mirror_start", "codecs": ["h264", "hevc"], "maxW": w, "maxH": h, "fps": fps, "bitrate": 6_000_000})
+    elif cmd == "mirror_stop":
+        await s.send({"t": "mirror_stop"})
+    else:
+        return False
+    return True
+
+
 # ----------------------------------------------------------------------------- modes
 async def run_host(args):
     st = load_state()
@@ -564,6 +613,10 @@ async def run_host(args):
             elif cmd == "send":
                 for s in sessions:
                     asyncio.create_task(s.send_files(rest.split()))
+            else:
+                for s in sessions:
+                    if not await run_command(s, st, cmd, rest):
+                        log("?")
     finally:
         if dnssd:
             dnssd.terminate()
@@ -599,6 +652,8 @@ async def run_client(args):
                         if cmd == "quit":
                             await s.send({"t": "bye", "reason": "user"})
                             return
+                        elif await run_command(s, st, cmd, rest):
+                            pass
                         elif cmd == "clip":
                             await s.send_clip(rest)
                         elif cmd == "send":

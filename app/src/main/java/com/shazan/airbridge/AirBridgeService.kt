@@ -50,7 +50,7 @@ class AirBridgeService : Service() {
 
         /** Run while anything is paired or the phone is visible to nearby phones. */
         fun shouldRun(ctx: Context): Boolean =
-            !PairStore.isEmpty() ||
+            !PairStore.isEmpty() || Hub.isPairing() ||
                 ctx.getSharedPreferences("AirBridgePrefs", Context.MODE_PRIVATE).getBoolean(NearbyTransport.PREF_VISIBLE, false)
 
         fun start(ctx: Context, action: String? = null) {
