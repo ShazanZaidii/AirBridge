@@ -233,17 +233,21 @@ class Session:
                 return
 
     async def reader(self):
-        async for frame in self.ws:
-            self.last_rx = time.time()
-            if isinstance(frame, bytes):
-                await self.on_binary(frame)
-            else:
-                try:
-                    msg = json.loads(frame)
-                except Exception:
-                    log("bad json:", frame[:80])
-                    continue
-                await self.on_text(msg)
+        try:
+            async for frame in self.ws:
+                self.last_rx = time.time()
+                if isinstance(frame, bytes):
+                    await self.on_binary(frame)
+                else:
+                    try:
+                        msg = json.loads(frame)
+                    except Exception:
+                        log("bad json:", frame[:80])
+                        continue
+                    await self.on_text(msg)
+        except websockets.exceptions.ConnectionClosed as e:
+            # A peer may drop the TCP connection right after `bye` without a close frame; that's allowed.
+            log(f"connection closed ({e.code if hasattr(e, 'code') else e})")
 
     async def on_text(self, m: dict):
         t = m.get("t")
