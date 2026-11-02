@@ -15,7 +15,16 @@ object Protocol {
     const val WS_PATH = "/v2"
     const val PLATFORM = "android"
     val APP_VERSION: String = BuildConfig.VERSION_NAME
-    val CAPS = listOf("clip", "xfer", "ctl_target", "trackpad")
+    /** §3.1 caps. `mirror_sink` (input half, §8.7) only if the device can decode H.264. */
+    val CAPS: List<String> by lazy {
+        listOf("clip", "xfer", "ctl_target", "trackpad") + (if (hasH264Decoder()) listOf("mirror_sink") else emptyList())
+    }
+
+    private fun hasH264Decoder(): Boolean = try {
+        android.media.MediaCodecList(android.media.MediaCodecList.REGULAR_CODECS).codecInfos.any { info ->
+            !info.isEncoder && info.supportedTypes.any { it.equals("video/avc", ignoreCase = true) }
+        }
+    } catch (_: Throwable) { true } // can't tell: assume yes (every Android device ships one)
 
     const val HANDSHAKE_TIMEOUT_MS = 10_000L
     /** Whole `confirm`/`qr` pairing must finish within this long after `pair_start` (§3.3). */

@@ -205,6 +205,7 @@ object Hub : PeerBus.Transport {
         if (s.isClosed) return
         pairingSession = s
         _pairing.value = PairProgress(name, plat, mode, PairStage.CONNECTING)
+        if (s.confirmDigits != null) onPairPrompt(s) // digits arrived before we got here
     }
 
     /** Session callback: digits are known, or the user's confirmation went out. */

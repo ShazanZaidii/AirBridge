@@ -163,8 +163,9 @@ object Crypto {
  * The `0x02` encrypted envelope (§3.6): `0x02 | u64 seq | AES-256-GCM(innerKind | payload)`,
  * nonce = 0^4 ‖ seq, AAD = the 9 header bytes, one strictly increasing seq per direction.
  *
- * [seal] and [open] are each thread-safe; the caller must hand sealed frames to the transport in
- * the order they were sealed (Session holds one lock across seal + enqueue).
+ * [seal] and [open] are each thread-safe and use separate locks (a large decrypt never stalls
+ * sends); the caller must hand sealed frames to the transport in the order they were sealed
+ * (Session holds one lock across seal + enqueue).
  */
 class Envelope(sendKey: ByteArray, recvKey: ByteArray) {
     companion object {
@@ -186,14 +187,15 @@ class Envelope(sendKey: ByteArray, recvKey: ByteArray) {
     private val dec = Cipher.getInstance("AES/GCM/NoPadding")
     private var sendSeq = 0L
     private var recvSeq = 0L
+    private val encLock = Any()
+    private val decLock = Any()
 
     init {
         // SecretKeySpec keeps its own copy.
         Arrays.fill(sendKey, 0); Arrays.fill(recvKey, 0)
     }
 
-    @Synchronized
-    fun seal(innerKind: Int, payload: ByteArray): ByteArray {
+    fun seal(innerKind: Int, payload: ByteArray): ByteArray = synchronized(encLock) {
         val seq = sendSeq++
         val out = ByteArray(OVERHEAD + payload.size)
         out[0] = KIND.toByte()
@@ -203,12 +205,13 @@ class Envelope(sendKey: ByteArray, recvKey: ByteArray) {
         var n = enc.update(byteArrayOf(innerKind.toByte()), 0, 1, out, HEADER)
         n += enc.doFinal(payload, 0, payload.size, out, HEADER + n)
         check(n == 1 + payload.size + TAG)
-        return out
+        out
     }
 
     /** Decrypts the next frame. Null = wrong kind, wrong seq, or authentication failure: close. */
-    @Synchronized
-    fun open(frame: ByteArray): Opened? {
+    fun open(frame: ByteArray): Opened? = synchronized(decLock) { openLocked(frame) }
+
+    private fun openLocked(frame: ByteArray): Opened? {
         if (frame.size < OVERHEAD || (frame[0].toInt() and 0xFF) != KIND) return null
         val seq = ByteBuffer.wrap(frame, 1, 8).long
         if (seq != recvSeq) return null

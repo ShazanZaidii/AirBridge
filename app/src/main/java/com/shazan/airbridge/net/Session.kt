@@ -128,6 +128,8 @@ class Session(
     /** Send an inner binary frame (starts with its own kind byte: 0x01 chunk, 0x03 video). */
     fun sendBinary(frame: ByteArray): Boolean {
         if (state != State.READY || frame.isEmpty()) return false
+        // §9: peers close on oversized frames, so never send one.
+        if (frame.size > Protocol.MAX_BINARY_FRAME) { Log.w(tag, "inner binary frame too large (${frame.size})"); return false }
         val ok = synchronized(sendLock) {
             val ch = channel ?: return false
             link.sendBinary(ch.seal(Envelope.INNER_BINARY, frame))
@@ -437,7 +439,14 @@ class Session(
                 peerName = it.take(128)
                 Hub.onPeerRenamed(this)
             }
-            "error" -> Log.i(tag, "peer error ${m.str("code")}: ${m.str("msg")}")
+            "error" -> {
+                val code = m.str("code") ?: ""
+                Log.i(tag, "peer error $code: ${m.str("msg")}")
+                // Mirror errors (e.g. no screen-recording permission on the Mac) are shown by the input half.
+                if (code.startsWith("mirror_")) peerId?.let { id ->
+                    try { PeerBus.dispatchControl(id, m) } catch (e: Exception) { Log.w(tag, "controlHandler", e) }
+                }
+            }
             "hello", "auth", "auth_ok", "auth_fail", "pair_start", "pair", "pair_ok", "pair_fail" -> Unit
             else -> Hub.route(this, t, m)
         }
