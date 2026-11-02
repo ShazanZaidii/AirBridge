@@ -4,8 +4,9 @@
   xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
   xmlns:uap3="http://schemas.microsoft.com/appx/manifest/uap/windows10/3"
   xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"
+  xmlns:desktop2="http://schemas.microsoft.com/appx/manifest/desktop/windows10/2"
   xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
-  IgnorableNamespaces="uap uap3 desktop rescap">
+  IgnorableNamespaces="uap uap3 desktop desktop2 rescap">
 
 	<Identity
 	  Name="950c48f1-ccef-4230-a5b8-0a80b8e23443"
@@ -56,12 +57,22 @@
 						<desktop:ExecutionAlias Alias="AirBridgeRun.exe" />
 					</uap3:AppExecutionAlias>
 				</uap3:Extension>
+
+				<!-- Protocol v2: WebSocket host on TCP 47632-47641 and mDNS on UDP 5353 (inbound). -->
+				<desktop2:Extension Category="windows.firewallRules">
+					<desktop2:FirewallRules Executable="AirBridge\AirBridge.exe">
+						<desktop2:Rule Direction="in" IPProtocol="TCP" Profile="all" LocalPortMin="47632" LocalPortMax="47641" />
+						<desktop2:Rule Direction="in" IPProtocol="UDP" Profile="all" LocalPortMin="5353" LocalPortMax="5353" />
+					</desktop2:FirewallRules>
+				</desktop2:Extension>
 			</Extensions>
 		</Application>
 	</Applications>
 
 	<Capabilities>
 		<Capability Name="internetClient" />
+		<Capability Name="internetClientServer" />
+		<Capability Name="privateNetworkClientServer" />
 		<rescap:Capability Name="runFullTrust" />
 	</Capabilities>
 </Package>
