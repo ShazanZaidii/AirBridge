@@ -2,8 +2,12 @@ import Cocoa
 import CoreGraphics
 import ApplicationServices
 
-/// Entry point of the input half. Wires PeerBus to the controller (event tap, Input/Controller.swift)
-/// and the target-side injector (Input/Injector.swift). See docs/protocol.md §8 and §12.
+/// Entry point of the input half. Wires PeerBus to the controller (event tap, Input/Controller.swift),
+/// the target-side injector with its control lease (Input/Injector.swift) and the screen-mirror source
+/// (Input/MirrorSource.swift). See docs/protocol.md §8 and §12.
+///
+/// Status for the menu: `ControlStatus` posts `Notification.Name("AirBridgeControlStatus")` with
+/// `userInfo["text"]` (String, or NSNull when idle) on the main thread on every change.
 nonisolated final class InputInterceptor: @unchecked Sendable {
     static let shared = InputInterceptor()
 
@@ -25,6 +29,7 @@ nonisolated final class InputInterceptor: @unchecked Sendable {
         let bus = PeerBus.shared
         bus.controlHandler = { [unowned self] peer, msg in self.route(peer, msg) }
         bus.peersHandler = { [unowned self] peers in self.peersChanged(peers) }
+        bus.binaryHandler = { _, _ in } // the Mac is a mirror source only; it never receives video
         peersChanged(bus.peers())
 
         DispatchQueue.main.async {
@@ -50,6 +55,11 @@ nonisolated final class InputInterceptor: @unchecked Sendable {
         case "ctl_enter":
             Controller.shared.perform { Controller.shared.peerTookOver(peer) }
             Injector.shared.submit(peer, msg)
+        case "ctl_busy":
+            let holder = msg["holder"] as? String ?? ""
+            Controller.shared.perform { Controller.shared.busy(peer: peer, holder: holder) }
+        case "mirror_start", "mirror_stop", "mirror_key", "mirror_ack", "mirror_info":
+            MirrorSource.shared.handle(peer, msg)
         case "key_state":
             break // no caps-lock indicator on the Mac
         default:
@@ -65,7 +75,8 @@ nonisolated final class InputInterceptor: @unchecked Sendable {
 
         Layout.shared.autoAssign(peers.filter { $0.caps.contains("ctl_target") })
         Controller.shared.perform { Controller.shared.peersChanged(peers) }
-        Injector.shared.peersChanged(Set(peers.map(\.id)))
+        Injector.shared.peersChanged(peers)
+        MirrorSource.shared.peersChanged(Set(peers.map(\.id)))
         DispatchQueue.main.async { PeerDirectory.shared.peers = peers }
 
         // §8.3: tell new trackpad sessions the current caps-lock state.

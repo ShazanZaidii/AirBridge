@@ -43,6 +43,19 @@ nonisolated final class Layout: @unchecked Sendable {
                                 end: (d["end"] as? Double) ?? 1,
                                 name: (d["name"] as? String) ?? "")
         }
+        // §8.6: at most one peer per edge. Park duplicates left by older builds (deterministically).
+        var seen: Set<ScreenEdge> = []
+        for id in map.keys.sorted() {
+            guard let e = map[id]?.edge else { continue }
+            if !seen.insert(e).inserted { map[id]?.edge = nil }
+        }
+    }
+
+    /// The single peer assigned to `edge`, if any.
+    func assignment(for edge: ScreenEdge) -> (id: String, placement: Placement)? {
+        lock.lock(); defer { lock.unlock() }
+        guard let hit = map.first(where: { $0.value.edge == edge }) else { return nil }
+        return (hit.key, hit.value)
     }
 
     func placement(for id: String) -> Placement? {

@@ -27,7 +27,9 @@ nonisolated enum Msg {
 }
 
 /// Target side (protocol.md §8): injects pointer/keyboard/action messages from peers into macOS.
-/// All state lives on `queue`. Every posted event carries `tag` so our own event tap ignores it.
+/// Holds the single control lease (§8.6): `ctl_enter` takes it explicitly (and pre-empts), the first
+/// trackpad/mirror input takes it implicitly; input from anyone else is dropped and answered with
+/// `ctl_busy`. All state lives on `queue`. Every posted event carries `tag` so our own event tap ignores it.
 nonisolated final class Injector: @unchecked Sendable {
     static let shared = Injector()
     static let tag: Int64 = 0x4149_5242 // "AIRB"
@@ -45,7 +47,28 @@ nonisolated final class Injector: @unchecked Sendable {
         var buttons: Set<Int> = []   // protocol button ids held
     }
     private var states: [String: PeerState] = [:]
-    private var entered: (peer: String, edge: ScreenEdge)?
+
+    private struct Lease {
+        let peer: String
+        let edge: ScreenEdge?          // entry edge of an explicit (ctl_enter) lease; nil = implicit
+        var last: CFAbsoluteTime       // last input from the holder
+    }
+    private var lease: Lease?
+    private var busySent: [String: CFAbsoluteTime] = [:]
+    private var names: [String: String] = [:]
+    private var watchdog: DispatchSourceTimer?
+    private var scrollPhaseOpen = false
+    private var scrollEnd: DispatchWorkItem?
+
+    private static let implicitLeaseTTL = 1.5      // §8.6
+    private static let busyInterval = 2.0          // §8.6: ctl_busy at most once per 2 s per peer
+    private static let buttonWatchdog = 5.0        // stuck-button guard for trackpad/mirror peers
+
+    /// The explicit (`ctl_enter`) controller, if any.
+    private var entered: (peer: String, edge: ScreenEdge)? {
+        guard let l = lease, let e = l.edge else { return nil }
+        return (l.peer, e)
+    }
     private var cursor: CGPoint?
     private var lastPost: CFAbsoluteTime = 0
     private var geo = DisplayGeometry.current()
@@ -59,10 +82,14 @@ nonisolated final class Injector: @unchecked Sendable {
         queue.async { self.handle(peer, msg) }
     }
 
-    func peersChanged(_ ready: Set<String>) {
+    func peersChanged(_ peers: [PeerInfo]) {
+        let ready = Set(peers.map(\.id))
         queue.async {
+            for p in peers { self.names[p.id] = p.name }
             for peer in self.states.keys where !ready.contains(peer) { self.release(peer) }
-            if let e = self.entered, !ready.contains(e.peer) { self.entered = nil }
+            if let l = self.lease, !ready.contains(l.peer) { self.setLease(nil) }
+            self.busySent = self.busySent.filter { ready.contains($0.key) }
+            self.startWatchdog()
         }
     }
 
@@ -81,9 +108,17 @@ nonisolated final class Injector: @unchecked Sendable {
         case "ctl_enter":
             let edge = (m["edge"] as? String).flatMap(ScreenEdge.init(rawValue:)) ?? .left
             enter(peer, edge, Msg.num(m["rel"]) ?? 0.5)
+            return
         case "ctl_leave":
-            if entered?.peer == peer { entered = nil }
+            if lease?.peer == peer { setLease(nil) }
             release(peer)
+            return
+        case "ptr_move", "ptr_scroll", "ptr_btn", "ptr_click", "ptr_abs", "key", "action":
+            guard admit(peer) else { return }
+        default:
+            return
+        }
+        switch t {
         case "ptr_move":
             move(peer, Msg.num(m["dx"]) ?? 0, Msg.num(m["dy"]) ?? 0)
         case "ptr_scroll":
@@ -93,6 +128,9 @@ nonisolated final class Injector: @unchecked Sendable {
             button(peer, b, down: down)
         case "ptr_click":
             click(peer, Msg.int(m["b"]) ?? 0, count: Msg.int(m["n"]) ?? 1)
+        case "ptr_abs":
+            guard let x = Msg.num(m["x"]), let y = Msg.num(m["y"]) else { return }
+            absolute(peer, x, y)
         case "key":
             let down = Msg.bool(m["down"]) ?? true
             key(peer, hid: Msg.int(m["hid"]) ?? 0, down: down, mods: Msg.int(m["mods"]),
@@ -101,6 +139,78 @@ nonisolated final class Injector: @unchecked Sendable {
             if let name = m["name"] as? String { action(name) }
         default:
             break
+        }
+    }
+
+    // MARK: lease (§8.6)
+
+    private func name(_ peer: String) -> String { names[peer] ?? "another device" }
+
+    private func setLease(_ l: Lease?) {
+        let before = lease?.peer
+        let wasImplicit = lease?.edge == nil
+        lease = l
+        if before != l?.peer || wasImplicit != (l?.edge == nil) {
+            ControlStatus.shared.setControlledBy(l.map { name($0.peer) }, implicit: l?.edge == nil)
+        }
+    }
+
+    /// Implicit lease is stale: no input for 1.5 s and no button held (a held button keeps it until the
+    /// 5 s watchdog, so a paused drag isn't broken by the lease timer).
+    private func implicitExpired(_ l: Lease, _ now: CFAbsoluteTime) -> Bool {
+        guard l.edge == nil else { return false }
+        let holding = !(states[l.peer]?.buttons.isEmpty ?? true)
+        return now - l.last > (holding ? Self.buttonWatchdog : Self.implicitLeaseTTL)
+    }
+
+    /// Input gate. Returns true if `peer` holds (or just took) the lease.
+    private func admit(_ peer: String) -> Bool {
+        let now = CFAbsoluteTimeGetCurrent()
+        if var l = lease {
+            if l.peer == peer {
+                l.last = now
+                lease = l
+                return true
+            }
+            if implicitExpired(l, now) {
+                release(l.peer)
+                setLease(nil)
+            } else {
+                if now - (busySent[peer] ?? 0) >= Self.busyInterval {
+                    busySent[peer] = now
+                    PeerBus.shared.send(to: peer, ["t": "ctl_busy", "holder": name(l.peer)])
+                }
+                return false
+            }
+        }
+        setLease(Lease(peer: peer, edge: nil, last: now))
+        startWatchdog()
+        return true
+    }
+
+    private func startWatchdog() {
+        guard watchdog == nil else { return }
+        let t = DispatchSource.makeTimerSource(queue: queue)
+        t.schedule(deadline: .now() + 0.25, repeating: 0.25, leeway: .milliseconds(50))
+        t.setEventHandler { [weak self] in self?.tick() }
+        t.resume()
+        watchdog = t
+    }
+
+    /// Releases expired implicit leases and anything a silent trackpad/mirror peer left held.
+    private func tick() {
+        let now = CFAbsoluteTimeGetCurrent()
+        if let l = lease, implicitExpired(l, now) {
+            release(l.peer)
+            setLease(nil)
+        }
+        // Belt and braces: buttons held by any non-explicit peer with no input for 5 s.
+        for (peer, st) in states where !st.buttons.isEmpty && entered?.peer != peer {
+            let last = lease?.peer == peer ? lease!.last : 0
+            if now - last > Self.buttonWatchdog {
+                NSLog("[AirBridge] inject: releasing buttons held by silent peer %@", name(peer))
+                releaseButtons(peer)
+            }
         }
     }
 
@@ -128,16 +238,23 @@ nonisolated final class Injector: @unchecked Sendable {
     }
 
     private func enter(_ peer: String, _ edge: ScreenEdge, _ rel: Double) {
-        if let old = entered, old.peer != peer {
-            // §8.1: a new controller takes over; hand the old one back its cursor.
-            let c = currentCursor()
-            let g = geometry()
-            PeerBus.shared.send(to: old.peer, ["t": "ctl_leave", "edge": old.edge.rawValue,
-                                               "rel": Msg.round(g.fraction(old.edge, old.edge.isVertical ? c.y : c.x), 10000)])
+        if let old = lease, old.peer != peer {
+            // §8.1/§8.6: a person pushing a cursor in always wins.
+            if let oldEdge = old.edge {
+                // Hand the old controller its cursor back at its entry edge.
+                let c = currentCursor()
+                let g = geometry()
+                PeerBus.shared.send(to: old.peer, ["t": "ctl_leave", "edge": oldEdge.rawValue,
+                                                   "rel": Msg.round(g.fraction(oldEdge, oldEdge.isVertical ? c.y : c.x), 10000)])
+            } else {
+                // Implicit (trackpad/mirror) holder has no edge to return to: tell it who has the Mac now.
+                busySent[old.peer] = CFAbsoluteTimeGetCurrent()
+                PeerBus.shared.send(to: old.peer, ["t": "ctl_busy", "holder": name(peer)])
+            }
             release(old.peer)
         }
         release(peer)
-        entered = (peer, edge)
+        setLease(Lease(peer: peer, edge: edge, last: CFAbsoluteTimeGetCurrent()))
         let g = geometry()
         let along = g.span(edge, max(0, min(1, rel)), 0).0
         let p = g.edgePoint(edge, along: along, inset: 1)
@@ -157,12 +274,25 @@ nonisolated final class Injector: @unchecked Sendable {
             if isEntered, let e = entered, pushedPast(e.edge, p, c, g) {
                 let rel = g.fraction(e.edge, e.edge.isVertical ? c.y : c.x)
                 PeerBus.shared.send(to: peer, ["t": "ctl_leave", "edge": e.edge.rawValue, "rel": Msg.round(rel, 10000)])
-                entered = nil
+                setLease(nil)
                 release(peer)
                 return
             }
             p = c
         }
+        postPointer(peer, to: p, from: from)
+    }
+
+    /// `ptr_abs`: normalised to the mirrored display when `peer` is our mirror sink, else the main display.
+    private func absolute(_ peer: String, _ x: Double, _ y: Double) {
+        let r = MirrorSource.shared.mirroredBounds(for: peer) ?? CGDisplayBounds(CGMainDisplayID())
+        let fx = CGFloat(max(0, min(1, x))), fy = CGFloat(max(0, min(1, y)))
+        let p = CGPoint(x: r.minX + fx * max(0, r.width - 1), y: r.minY + fy * max(0, r.height - 1))
+        postPointer(peer, to: p, from: currentCursor())
+    }
+
+    /// Moves the cursor to `p`; a held button turns the move into a drag.
+    private func postPointer(_ peer: String, to p: CGPoint, from: CGPoint) {
         let held = heldButtons
         let (type, btn): (CGEventType, CGMouseButton) =
             held.contains(0) ? (.leftMouseDragged, .left) :
@@ -204,8 +334,12 @@ nonisolated final class Injector: @unchecked Sendable {
             e.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
             e.setDoubleValueField(.scrollWheelEventPointDeltaAxis1, value: a1)
             e.setDoubleValueField(.scrollWheelEventPointDeltaAxis2, value: a2)
+            // Gesture phases (began → changed … → ended) give AppKit smooth, responsive scrolling.
+            e.setIntegerValueField(.scrollWheelEventScrollPhase, value: scrollPhaseOpen ? 2 : 1)
+            scrollPhaseOpen = true
             e.flags = modifierFlags(states[peer])
             Self.post(e)
+            scheduleScrollEnd()
         } else {
             guard i1 != 0 || i2 != 0 else { return }
             scrollRemainder.y -= i1
@@ -215,6 +349,24 @@ nonisolated final class Injector: @unchecked Sendable {
             e.flags = modifierFlags(states[peer])
             Self.post(e)
         }
+    }
+
+    /// Closes the scroll gesture 120 ms after the last pixel delta.
+    private func scheduleScrollEnd() {
+        scrollEnd?.cancel()
+        let w = DispatchWorkItem { [weak self] in self?.endScrollPhase() }
+        scrollEnd = w
+        queue.asyncAfter(deadline: .now() + 0.12, execute: w)
+    }
+
+    private func endScrollPhase() {
+        guard scrollPhaseOpen else { return }
+        scrollPhaseOpen = false
+        scrollRemainder = (0, 0)
+        guard let e = CGEvent(scrollWheelEvent2Source: source, units: .pixel, wheelCount: 2, wheel1: 0, wheel2: 0, wheel3: 0) else { return }
+        e.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
+        e.setIntegerValueField(.scrollWheelEventScrollPhase, value: 4) // ended
+        Self.post(e)
     }
 
     private func mouseEvent(_ b: Int, down: Bool, at p: CGPoint, clicks: Int64, flags: CGEventFlags) {
@@ -254,17 +406,17 @@ nonisolated final class Injector: @unchecked Sendable {
         mouseEvent(b, down: down, at: p, clicks: clicks, flags: modifierFlags(st))
     }
 
+    /// §8.2: one click per message; `n` is this click's count (1, then 2 for a double tap). Never
+    /// synthesise extra clicks.
     private func click(_ peer: String, _ b: Int, count: Int) {
         guard (0...2).contains(b) else { return }
         let p = currentCursor()
         let flags = modifierFlags(states[peer])
-        var n = nextClickCount(b, p)
-        for i in 0..<max(1, min(count, 3)) {
-            if i > 0 { n = nextClickCount(b, p); usleep(10_000) }
-            mouseEvent(b, down: true, at: p, clicks: n, flags: flags)
-            usleep(8_000)
-            mouseEvent(b, down: false, at: p, clicks: n, flags: flags)
-        }
+        let n = Int64(max(1, min(count, 3)))
+        lastDown = (b, CFAbsoluteTimeGetCurrent(), p, n)
+        mouseEvent(b, down: true, at: p, clicks: n, flags: flags)
+        usleep(6_000)
+        mouseEvent(b, down: false, at: p, clicks: n, flags: flags)
     }
 
     // MARK: keyboard
@@ -321,7 +473,16 @@ nonisolated final class Injector: @unchecked Sendable {
         }
     }
 
+    private func releaseButtons(_ peer: String) {
+        guard var st = states[peer], !st.buttons.isEmpty else { return }
+        let p = currentCursor()
+        for b in st.buttons { mouseEvent(b, down: false, at: p, clicks: 1, flags: []) }
+        st.buttons.removeAll()
+        states[peer] = st
+    }
+
     private func release(_ peer: String) {
+        endScrollPhase()
         guard let st = states.removeValue(forKey: peer) else { return }
         let p = currentCursor()
         for kc in st.keys where KeyMap.modifierFlags(forMac: kc) == nil { keyEvent(kc, down: false, flags: []) }
@@ -371,15 +532,38 @@ nonisolated final class Injector: @unchecked Sendable {
         switch name {
         case "mission_control": runMissionControl([], fallback: 0x7E)
         case "app_expose": runMissionControl(["2"], fallback: 0x7D)
-        case "desktop_left": chord([0x3B], 0x7B)   // Ctrl+←
-        case "desktop_right": chord([0x3B], 0x7C)  // Ctrl+→
-        case "spotlight": chord([0x37], 0x31)      // Cmd+Space
+        case "desktop_left": hotkey(79, default: ([0x3B], 0x7B))   // "Move left a space", Ctrl+←
+        case "desktop_right": hotkey(81, default: ([0x3B], 0x7C))  // "Move right a space", Ctrl+→
+        case "spotlight": hotkey(64, default: ([0x37], 0x31))      // "Show Spotlight search", Cmd+Space
         case "copy": chord([0x37], 0x08)           // Cmd+C
         case "paste": chord([0x37], 0x09)          // Cmd+V
         case "lock": lockScreen()
         case "keyboard_toggle": toggleAccessibilityKeyboard()
         default: break // Android-only and gesture actions have no Mac meaning
         }
+    }
+
+    /// Posts the user's configured shortcut for a system symbolic hotkey (com.apple.symbolichotkeys),
+    /// so Spaces/Spotlight work even when the defaults were remapped. No AppleScript involved.
+    private func hotkey(_ id: Int, default def: ([UInt16], UInt16)) {
+        let all = UserDefaults(suiteName: "com.apple.symbolichotkeys")?.dictionary(forKey: "AppleSymbolicHotKeys")
+        guard let entry = all?[String(id)] as? [String: Any] else { chord(def.0, def.1); return }
+        if let on = Msg.bool(entry["enabled"]), !on {
+            NSLog("[AirBridge] inject: system shortcut %d is disabled in Keyboard Shortcuts; using the default", id)
+            chord(def.0, def.1)
+            return
+        }
+        guard let value = entry["value"] as? [String: Any], let params = value["parameters"] as? [Any], params.count >= 3,
+              let kc = Msg.int(params[1]), kc >= 0, kc < 0xFFFF, let m = Msg.int(params[2]) else {
+            chord(def.0, def.1)
+            return
+        }
+        var mods: [UInt16] = []
+        if m & 0x40000 != 0 { mods.append(0x3B) }   // control
+        if m & 0x80000 != 0 { mods.append(0x3A) }   // option
+        if m & 0x20000 != 0 { mods.append(0x38) }   // shift
+        if m & 0x100000 != 0 { mods.append(0x37) }  // command
+        chord(mods, UInt16(kc))
     }
 
     /// Mission Control binary: no argument = Mission Control, "2" = App Exposé (current app's windows).

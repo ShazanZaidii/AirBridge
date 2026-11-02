@@ -28,11 +28,35 @@ nonisolated final class Controller: @unchecked Sendable {
     private var pendingDX = 0.0, pendingDY = 0.0
     private var lastMoveSent: CFAbsoluteTime = 0
     private var escDowns: [CFAbsoluteTime] = []
-    private var lastReturn: CFAbsoluteTime = 0
     private var capsOn = false
     private var peers: [PeerInfo] = []
     private var geo = DisplayGeometry.current()
     private var geoAt: CFAbsoluteTime = 0
+
+    // Capture intent (§8.2): outward push while pinned at an edge, summed over a sliding window.
+    private struct Charge {
+        let peer: String
+        let edge: ScreenEdge
+        let span: (CGFloat, CGFloat)
+        let bar: CGRect                   // indicator rect, global CG coordinates
+        var samples: [(t: CFAbsoluteTime, v: Double)] = []
+    }
+    private struct Candidate {
+        let peer: String
+        let edge: ScreenEdge
+        let span: (CGFloat, CGFloat)
+        let rel: Double
+        let bar: CGRect
+    }
+    private var charge: Charge?
+    private var lastLocal: CGPoint?
+    private var cooldownUntil: [ScreenEdge: CFAbsoluteTime] = [:]
+    private var dragging = false
+    private var lastDragEnd: CFAbsoluteTime = 0
+    private var settings = CaptureSettings.load()
+    private var settingsAt: CFAbsoluteTime = 0
+    private var shownLevel: Double = -1
+    private var lastEnded: (peer: String, at: CFAbsoluteTime)?
 
     private static let moveInterval = 1.0 / 120.0
 
@@ -56,6 +80,11 @@ nonisolated final class Controller: @unchecked Sendable {
             }
             CFRunLoopAddTimer(rl, flush, .commonModes)
             flushTimer = flush
+            // Lets a charging edge indicator decay when the user stops pushing (no events arrive then).
+            let decay = CFRunLoopTimerCreateWithHandler(nil, CFAbsoluteTimeGetCurrent(), 0.05, 0, 0) { [weak self] _ in
+                self?.decayCharge()
+            }
+            CFRunLoopAddTimer(rl, decay, .commonModes)
             ready.signal()
             CFRunLoopRun()
         }
@@ -100,6 +129,23 @@ nonisolated final class Controller: @unchecked Sendable {
         if let s = session, !list.contains(where: { $0.id == s.peer }) {
             end(resumeAt: inward(s.anchor, s.edge), sendLeave: false)
         }
+        if let c = charge, !list.contains(where: { $0.id == c.peer }) { resetCharge() }
+    }
+
+    /// `ctl_busy` from a peer (§8.6): it is held by someone else. Stop forwarding, give the cursor back.
+    func busy(peer: String, holder: String) {
+        let name = peerName(peer)
+        let who = holder.isEmpty ? "another device" : holder
+        if let s = session, s.peer == peer {
+            end(resumeAt: inward(s.anchor, s.edge), sendLeave: true)
+            ControlStatus.shared.showNotice("\(name) is being used by \(who)")
+        } else if let l = lastEnded, l.peer == peer, CFAbsoluteTimeGetCurrent() - l.at < 2 {
+            ControlStatus.shared.showNotice("\(name) is being used by \(who)")
+        }
+    }
+
+    private func peerName(_ id: String) -> String {
+        peers.first { $0.id == id }?.name ?? Layout.shared.placement(for: id)?.name ?? "The device"
     }
 
     /// `ctl_leave` from the peer we control: resume at the matching point of our edge.
@@ -129,6 +175,10 @@ nonisolated final class Controller: @unchecked Sendable {
         let pass = Unmanaged.passUnretained(event)
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
             if let tap { CGEvent.tapEnable(tap: tap, enable: true) }
+            // We missed events while disabled; don't trust button/drag tracking.
+            localButtons.removeAll()
+            dragging = false
+            resetCharge()
             return pass
         }
         if event.getIntegerValueField(.eventSourceUserData) == Injector.tag { return pass }
@@ -160,14 +210,26 @@ nonisolated final class Controller: @unchecked Sendable {
             let b = Self.buttonNumber(type, e)
             swallowButtonUps.remove(b)
             localButtons.insert(b)
+            resetCharge()
         case .leftMouseUp, .rightMouseUp, .otherMouseUp:
             let b = Self.buttonNumber(type, e)
             localButtons.remove(b)
+            if dragging && localButtons.isEmpty {
+                dragging = false
+                lastDragEnd = CFAbsoluteTimeGetCurrent()
+            }
+            lastLocal = e.location
             if swallowButtonUps.remove(b) != nil { return false }
+        case .leftMouseDragged, .rightMouseDragged, .otherMouseDragged:
+            // Drags never cross (§8.2: a held button resets the accumulator).
+            dragging = true
+            lastLocal = e.location
+            resetCharge()
         case .mouseMoved:
-            // A plain move means no button is down (drags arrive as *Dragged and never cross).
+            // A plain move means no button is down.
             localButtons.removeAll()
-            if let hit = portalHit(e) {
+            if dragging { dragging = false; lastDragEnd = CFAbsoluteTimeGetCurrent() }
+            if let hit = pushThrough(e) {
                 begin(hit.peer, hit.edge, hit.span, hit.rel, e)
                 return false
             }
@@ -183,31 +245,118 @@ nonisolated final class Controller: @unchecked Sendable {
         return geo
     }
 
-    private func portalHit(_ e: CGEvent) -> (peer: String, edge: ScreenEdge, span: (CGFloat, CGFloat), rel: Double)? {
-        guard CFAbsoluteTimeGetCurrent() - lastReturn > 0.25 else { return nil }
-        let targets = peers.filter { $0.caps.contains("ctl_target") }
-        guard !targets.isEmpty else { return nil }
-        let p = e.location
-        let dx = e.getDoubleValueField(.mouseEventDeltaX), dy = e.getDoubleValueField(.mouseEventDeltaY)
+    private func currentSettings() -> CaptureSettings {
+        let now = CFAbsoluteTimeGetCurrent()
+        if now - settingsAt > 1 { settings = CaptureSettings.load(); settingsAt = now }
+        return settings
+    }
+
+    /// Outward component of a delta for `edge` (positive = pushing out of the screen).
+    private static func outward(_ edge: ScreenEdge, _ dx: Double, _ dy: Double) -> Double {
+        switch edge {
+        case .left: return -dx
+        case .right: return dx
+        case .top: return -dy
+        case .bottom: return dy
+        }
+    }
+
+    /// The edge the cursor is pinned against that leads to an online, assigned, enabled peer.
+    /// Only the peer assigned to that edge is ever considered (§8.6); offline peers leave the edge inert.
+    private func candidate(at p: CGPoint, dx: Double, dy: Double, _ cfg: CaptureSettings) -> Candidate? {
         let g = geometry()
         guard let r = g.display(at: p) else { return nil }
-        for peer in targets {
-            guard let pl = Layout.shared.placement(for: peer.id), let edge = pl.edge else { continue }
-            let outward: Bool
-            switch edge {
-            case .left: outward = dx < 0
-            case .right: outward = dx > 0
-            case .top: outward = dy < 0
-            case .bottom: outward = dy > 0
-            }
-            guard outward, g.isOuter(p, of: r, edge) else { continue }
+        var best: (Candidate, Double)?
+        for edge in ScreenEdge.allCases where cfg.enabled(edge) && g.isOuter(p, of: r, edge) {
+            guard let (id, pl) = Layout.shared.assignment(for: edge),
+                  peers.contains(where: { $0.id == id && $0.caps.contains("ctl_target") }) else { continue }
             let span = g.span(edge, pl.start, pl.end)
             let along = edge.isVertical ? p.y : p.x
             guard along >= span.0 - 0.5, along <= span.1 + 0.5 else { continue }
             let rel = Double(max(0, min(1, (along - span.0) / max(1, span.1 - span.0))))
-            return (peer.id, edge, span, rel)
+            // Indicator: the part of this display's edge that belongs to the peer's span.
+            let lo = max(span.0, edge.isVertical ? r.minY : r.minX)
+            let hi = min(span.1, edge.isVertical ? r.maxY : r.maxX)
+            let t = EdgeIndicator.thickness
+            let bar: CGRect
+            switch edge {
+            case .left: bar = CGRect(x: r.minX, y: lo, width: t, height: max(t, hi - lo))
+            case .right: bar = CGRect(x: r.maxX - t, y: lo, width: t, height: max(t, hi - lo))
+            case .top: bar = CGRect(x: lo, y: r.minY, width: max(t, hi - lo), height: t)
+            case .bottom: bar = CGRect(x: lo, y: r.maxY - t, width: max(t, hi - lo), height: t)
+            }
+            let push = Self.outward(edge, dx, dy)
+            if best == nil || push > best!.1 { best = (Candidate(peer: id, edge: edge, span: span, rel: rel, bar: bar), push) }
         }
+        return best?.0
+    }
+
+    /// §8.2 Capture intent: returns the portal to enter once the user has deliberately pushed through.
+    private func pushThrough(_ e: CGEvent) -> Candidate? {
+        let now = CFAbsoluteTimeGetCurrent()
+        let p = e.location
+        let prev = lastLocal
+        lastLocal = p
+        let dx = e.getDoubleValueField(.mouseEventDeltaX), dy = e.getDoubleValueField(.mouseEventDeltaY)
+        let cfg = currentSettings()
+        guard !dragging, localButtons.isEmpty, now - lastDragEnd >= CaptureSettings.dragCooldown,
+              !peers.isEmpty, let c = candidate(at: p, dx: dx, dy: dy, cfg) else {
+            resetCharge()
+            return nil
+        }
+        if let until = cooldownUntil[c.edge], now < until { resetCharge(); return nil }
+        if cfg.requireOption && !e.flags.contains(.maskAlternate) { resetCharge(); return nil }
+
+        var push = Self.outward(c.edge, dx, dy)
+        if push < 0 { resetCharge(); return nil } // any inward motion
+        // Only motion while pinned counts: subtract the distance travelled to reach the edge.
+        if let prev {
+            let travelled = c.edge.isVertical ? abs(p.x - prev.x) : abs(p.y - prev.y)
+            push = max(0, push - Double(travelled))
+        }
+        if charge == nil || charge!.peer != c.peer || charge!.edge != c.edge {
+            charge = Charge(peer: c.peer, edge: c.edge, span: c.span, bar: c.bar)
+        }
+        charge!.samples.removeAll { now - $0.t > CaptureSettings.window }
+        if push > 0 { charge!.samples.append((now, push)) }
+        let sum = charge!.samples.reduce(0) { $0 + $1.v }
+        if sum >= cfg.threshold {
+            let bar = c.bar
+            charge = nil
+            shownLevel = -1
+            DispatchQueue.main.async { EdgeIndicator.shared.flash(rect: bar) }
+            return c
+        }
+        showLevel(sum / cfg.threshold, c.bar)
         return nil
+    }
+
+    private func showLevel(_ level: Double, _ bar: CGRect) {
+        if level <= 0.02 {
+            if shownLevel > 0 { DispatchQueue.main.async { EdgeIndicator.shared.hide() } }
+            shownLevel = 0
+            return
+        }
+        guard abs(level - shownLevel) >= 0.03 else { return }
+        shownLevel = level
+        DispatchQueue.main.async { EdgeIndicator.shared.update(rect: bar, level: level) }
+    }
+
+    private func resetCharge() {
+        charge = nil
+        if shownLevel > 0 { DispatchQueue.main.async { EdgeIndicator.shared.hide() } }
+        shownLevel = -1
+    }
+
+    /// Timer: samples age out of the window even when no events arrive (pause > 500 ms empties it).
+    private func decayCharge() {
+        guard var c = charge else { return }
+        let now = CFAbsoluteTimeGetCurrent()
+        c.samples.removeAll { now - $0.t > CaptureSettings.window }
+        charge = c
+        let sum = c.samples.reduce(0) { $0 + $1.v }
+        if sum <= 0 { resetCharge(); return }
+        showLevel(sum / currentSettings().threshold, c.bar)
     }
 
     private func begin(_ peer: String, _ edge: ScreenEdge, _ span: (CGFloat, CGFloat), _ rel: Double, _ e: CGEvent) {
@@ -232,6 +381,7 @@ nonisolated final class Controller: @unchecked Sendable {
         }
 
         let anchor = e.location
+        resetCharge()
         session = Session(peer: peer, edge: edge, span: span, anchor: anchor)
         remoteKeys.removeAll()
         remoteButtons.removeAll()
@@ -241,6 +391,7 @@ nonisolated final class Controller: @unchecked Sendable {
         DispatchQueue.main.async { CursorHider.hide() }
         PeerBus.shared.send(to: peer, ["t": "ctl_enter", "edge": edge.opposite.rawValue, "rel": Msg.round(rel, 10000)])
         PeerBus.shared.send(to: peer, ["t": "key_state", "caps": capsOn])
+        ControlStatus.shared.setControlling(peerName(peer))
     }
 
     private func end(resumeAt p: CGPoint, sendLeave: Bool) {
@@ -253,7 +404,11 @@ nonisolated final class Controller: @unchecked Sendable {
         remoteButtons.removeAll()
         escDowns.removeAll()
         session = nil
-        lastReturn = CFAbsoluteTimeGetCurrent()
+        let now = CFAbsoluteTimeGetCurrent()
+        cooldownUntil[s.edge] = now + CaptureSettings.returnCooldown // no bounce back out
+        lastEnded = (s.peer, now)
+        lastLocal = p
+        ControlStatus.shared.setControlling(nil)
         CGWarpMouseCursorPosition(p)
         CGAssociateMouseAndMouseCursorPosition(1)
         DispatchQueue.main.async { CursorHider.show() }
