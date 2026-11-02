@@ -6,6 +6,13 @@ import android.os.SystemClock
 import android.view.HapticFeedbackConstants
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -218,12 +225,68 @@ class RemoteKeyboardController(private val sender: TrackpadSender) {
 
 // ------------------------------------------------------------------------------------ UI
 
-private val KeyBg = Color(0xFF161616)
-private val KeyPressed = Color(0xFF3A3A3A)
-private val Accent = Color(0xFF4285F4)
-private val LedOn = Color(0xFF34C759)
+private val KeyBg = Tp.KeyFace
+private val KeyPressed = Tp.KeyPressed
+private val Accent = Tp.Accent
+private val LedOn = Tp.Accent
+private val LedOff = Tp.Secondary
 
-private enum class Look { Normal, OneShot, Locked }
+private enum class Look { Normal, OneShot, Locked, Lit }
+
+/**
+ * Header strip above the keys: an unmistakable Caps Lock chip (driven by the peer's `key_state`,
+ * local toggle as fallback) and the F-row mode toggle.
+ */
+@Composable
+fun RemoteKeyboardHeader(controller: RemoteKeyboardController, modifier: Modifier = Modifier, trailing: @Composable RowScope.() -> Unit = {}) {
+    val caps = controller.capsOn
+    Row(
+        modifier.fillMaxWidth().height(Tp.TouchTarget).background(Tp.KeyboardBg).padding(horizontal = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        CapsChip(caps)
+        Spacer(Modifier.weight(1f))
+        val fMode = controller.fKeysMode
+        Row(
+            Modifier.height(Tp.TouchTarget).clip(RoundedCornerShape(10.dp))
+                .semantics { role = Role.Switch; stateDescription = if (fMode) "F-keys" else "Media keys" }
+                .clickable { controller.fKeysMode = !fMode }
+                .padding(horizontal = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                if (fMode) "F1–F12" else "Media keys",
+                color = if (fMode) Tp.OnAccent else Tp.Foreground,
+                fontSize = 13.sp, fontWeight = FontWeight.Medium,
+                modifier = Modifier.clip(RoundedCornerShape(8.dp))
+                    .background(if (fMode) Accent else Tp.SurfaceHigh)
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+            )
+        }
+        trailing()
+    }
+}
+
+/** "CAPS" chip: bright green with a lit dot when on, dim outline when off. */
+@Composable
+fun CapsChip(on: Boolean, modifier: Modifier = Modifier) {
+    Row(
+        modifier.clip(RoundedCornerShape(8.dp))
+            .background(if (on) LedOn else Color.Transparent)
+            .border(1.dp, if (on) LedOn else Tp.Border, RoundedCornerShape(8.dp))
+            .semantics { contentDescription = if (on) "Caps Lock on" else "Caps Lock off" }
+            .padding(horizontal = 10.dp, vertical = 5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(8.dp).clip(CircleShape).background(if (on) Tp.OnAccent else LedOff))
+        Spacer(Modifier.width(6.dp))
+        Text(
+            "CAPS", fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp,
+            color = if (on) Tp.OnAccent else Tp.MutedForeground,
+        )
+    }
+}
 
 @Composable
 fun RemoteKeyboard(
@@ -244,7 +307,7 @@ fun RemoteKeyboard(
     val fMode = controller.fKeysMode xor controller.fnActive
 
     Column(
-        modifier = modifier.background(Color(0xFF2C2C2C)).padding(horizontal = 6.dp, vertical = 6.dp),
+        modifier = modifier.background(Tp.KeyboardBg).padding(horizontal = 6.dp, vertical = 6.dp),
         verticalArrangement = Arrangement.spacedBy(5.dp),
     ) {
         KeyRow {
@@ -284,12 +347,18 @@ fun RemoteKeyboard(
             CharKey(controller, Hid.BACKSLASH, shift)
         }
         KeyRow {
-            KeyCap(Modifier.weight(1.8f).fillMaxHeight(), onDown = { controller.capsLock() }) {
-                Box(Modifier.fillMaxWidth().fillMaxHeight()) {
+            KeyCap(Modifier.weight(1.8f).fillMaxHeight(), look = if (caps) Look.Lit else Look.Normal, onDown = { controller.capsLock() }) {
+                Box(Modifier.fillMaxWidth().fillMaxHeight().semantics(mergeDescendants = true) {
+                    contentDescription = if (caps) "Caps Lock, on" else "Caps Lock, off"
+                }) {
+                    // The LED: a lit green dot with a halo when on, a dark dot when off.
                     Box(
-                        Modifier.align(Alignment.TopStart).padding(5.dp).size(6.dp).clip(CircleShape)
-                            .background(if (caps) LedOn else Color(0xFF444444)),
-                    )
+                        Modifier.align(Alignment.TopStart).padding(5.dp).size(12.dp).clip(CircleShape)
+                            .background(if (caps) LedOn.copy(alpha = 0.35f) else Color.Transparent),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Box(Modifier.size(7.dp).clip(CircleShape).background(if (caps) LedOn else LedOff))
+                    }
                     Box(Modifier.align(Alignment.Center)) { KeyFace(text = "caps lock") }
                 }
             }
@@ -351,8 +420,8 @@ private fun RowScope.CharKey(c: RemoteKeyboardController, hid: Int, shift: Boole
             val lo = KeyMap.label(hid, false) ?: ""
             val hi = KeyMap.label(hid, true) ?: ""
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(hi, color = if (shift) Color.White else Color.Gray, fontSize = 11.sp, lineHeight = 12.sp)
-                Text(lo, color = if (shift) Color.Gray else Color.White, fontSize = 13.sp, lineHeight = 14.sp)
+                Text(hi, color = if (shift) Tp.Foreground else Tp.MutedForeground, fontSize = 11.sp, lineHeight = 12.sp)
+                Text(lo, color = if (shift) Tp.MutedForeground else Tp.Foreground, fontSize = 13.sp, lineHeight = 14.sp)
             }
         }
     }
@@ -407,6 +476,7 @@ private fun KeyCap(
     val bg = when {
         look == Look.Locked -> Accent
         pressed -> KeyPressed
+        look == Look.Lit -> Tp.Accent.copy(alpha = 0.22f)
         else -> KeyBg
     }
     Box(
@@ -414,7 +484,7 @@ private fun KeyCap(
         modifier = modifier
             .clip(shape)
             .background(bg)
-            .then(if (look == Look.OneShot) Modifier.border(2.dp, Accent, shape) else Modifier)
+            .then(if (look == Look.OneShot || look == Look.Lit) Modifier.border(2.dp, Accent, shape) else Modifier)
             .pointerInput(Unit) {
                 awaitEachGesture {
                     val d = awaitFirstDown()
@@ -442,14 +512,14 @@ private fun KeyCap(
 private fun KeyFace(text: String = "", icon: ImageVector? = null, small: Boolean = false, large: Boolean = false) {
     Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
         if (icon != null) {
-            Icon(icon, contentDescription = text.ifEmpty { null }, tint = Color.White,
+            Icon(icon, contentDescription = text.ifEmpty { null }, tint = Tp.Foreground,
                 modifier = Modifier.size(if (text.isNotEmpty()) 13.dp else 18.dp))
         }
         if (icon != null && text.isNotEmpty()) Spacer(Modifier.height(1.dp))
         if (text.isNotEmpty()) {
             Text(
                 text = text,
-                color = if (icon != null) Color.Gray else Color.White,
+                color = if (icon != null) Tp.MutedForeground else Tp.Foreground,
                 fontSize = when {
                     large -> 16.sp
                     small || text.contains("\n") -> 9.sp

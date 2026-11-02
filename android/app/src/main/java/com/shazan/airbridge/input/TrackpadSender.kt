@@ -27,6 +27,8 @@ class TrackpadSender {
     private var scrollX = 0f
     private var scrollY = 0f
     private var lastFlush = 0L
+    private var absX = Float.NaN // pending ptr_abs (coalesced like moves)
+    private var absY = Float.NaN
     /** Primary button currently held on the peer (drag). */
     var buttonDown = false; private set
     private val machines = LinkedHashSet<TrackpadGestureMachine>()
@@ -34,13 +36,18 @@ class TrackpadSender {
 
     val connected: Boolean get() = peerId != null
     val hasPending: Boolean
-        get() = abs(moveX) >= 0.01f || abs(moveY) >= 0.01f || abs(scrollX) >= 0.01f || abs(scrollY) >= 0.01f
+        get() = abs(moveX) >= 0.01f || abs(moveY) >= 0.01f || abs(scrollX) >= 0.01f || abs(scrollY) >= 0.01f ||
+            !absX.isNaN()
 
     /** Called after every pointer batch and on timer wake-ups; rate-limited unless [force]. */
     fun flush(force: Boolean = false) {
         val now = SystemClock.uptimeMillis()
         if (!force && now - lastFlush < 8) return
         lastFlush = now
+        if (!absX.isNaN()) {
+            send(JSONObject().put("t", "ptr_abs").put("x", r4(absX)).put("y", r4(absY)))
+            absX = Float.NaN; absY = Float.NaN
+        }
         if (abs(moveX) >= 0.01f || abs(moveY) >= 0.01f) {
             send(JSONObject().put("t", "ptr_move").put("dx", r2(moveX)).put("dy", r2(moveY)))
             moveX = 0f; moveY = 0f
@@ -80,10 +87,12 @@ class TrackpadSender {
         send(JSONObject().put("t", "ptr_btn").put("b", 0).put("down", down))
     }
 
-    /** Absolute position on the target's (mirrored) display, 0..1 (§8.2 `ptr_abs`). */
+    /**
+     * Absolute position on the target's (mirrored) display, 0..1 (§8.2 `ptr_abs`). Coalesced: only the
+     * latest position is sent at the next flush, and always before a following click/button/key.
+     */
     fun pointAt(nx: Float, ny: Float) {
-        flush(force = true)
-        send(JSONObject().put("t", "ptr_abs").put("x", r4(nx.coerceIn(0f, 1f))).put("y", r4(ny.coerceIn(0f, 1f))))
+        absX = nx.coerceIn(0f, 1f); absY = ny.coerceIn(0f, 1f)
     }
 
     fun action(name: String) = send(JSONObject().put("t", "action").put("name", name))
@@ -113,6 +122,7 @@ class TrackpadSender {
         for (m in machines.toList()) m.reset(now)
         for (h in resetHooks.toList()) h()
         moveX = 0f; moveY = 0f; scrollX = 0f; scrollY = 0f
+        absX = Float.NaN; absY = Float.NaN
         if (buttonDown) {
             buttonDown = false
             send(JSONObject().put("t", "ptr_btn").put("b", 0).put("down", false))
