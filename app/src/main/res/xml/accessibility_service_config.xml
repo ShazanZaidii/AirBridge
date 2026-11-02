@@ -1,8 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- flagInputMethodEditor (API 33+) lets the target type into the focused field like a keyboard. -->
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeViewFocused|typeViewTextChanged|typeViewTextSelectionChanged|typeWindowStateChanged"
     android:accessibilityFeedbackType="feedbackGeneric"
-    android:accessibilityFlags="flagDefault"
+    android:accessibilityFlags="flagDefault|flagRetrieveInteractiveWindows|flagInputMethodEditor"
     android:canPerformGestures="true"
-    android:canRequestFilterKeyEvents="true"
-    android:description="@string/app_name"
+    android:canRetrieveWindowContent="true"
+    android:description="@string/accessibility_service_description"
     android:notificationTimeout="100" />
