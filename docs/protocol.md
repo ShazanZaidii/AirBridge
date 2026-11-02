@@ -644,8 +644,9 @@ The network half **implements** `send/broadcast/sendBinary/peers` and **calls** 
 input half **registers** the handlers and **calls** `send/broadcast/sendBinary`. Control-type messages routed
 to the input half are exactly: `ctl_enter`, `ctl_leave`, `ctl_busy`, `ptr_move`, `ptr_scroll`, `ptr_btn`,
 `ptr_click`, `ptr_abs`, `key`, `key_state`, `action`, `mirror_start`, `mirror_info`, `mirror_key`,
-`mirror_ack`, `mirror_stop`. Inner binary frames of kind `0x03` (video) are routed to the input half's binary
-handler; kind `0x01` (file chunks) stays in the network half. Encryption/decryption (§3.6) is entirely the
+`mirror_ack`, `mirror_stop`, plus `error` messages whose `code` starts with `mirror_`. Inner binary frames of
+kind `0x03` (video) are routed to the input half's binary handler; kind `0x01` (file chunks) stays in the
+network half. Encryption/decryption (§3.6) is entirely the
 network half's job — the input half only ever sees plaintext messages.
 
 (The example in §11 shows messages in the clear for readability; on the wire every message after `auth_ok`
