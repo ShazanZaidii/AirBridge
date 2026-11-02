@@ -88,8 +88,8 @@ Hosts display a QR encoding:
 airbridge://pair?v=2&id=<hostId>&name=<urlencoded name>&plat=<plat>&addr=<ip>&port=<port>&k=<base64url secret>
 ```
 
-- `k` is 32 random bytes, base64url without padding. It is the **pairing secret** (§3.3). The host rotates
-  it every time the QR is shown again after a successful pairing, and at most every 10 minutes.
+- `k` is 32 random bytes, base64url without padding. It is the **pairing secret** (§3.3). A secret lives at
+  most 10 minutes; the host also rotates it the next time the QR is shown after a successful pairing.
 - `addr`/`port` are hints; the client still prefers the mDNS address for `id` if available.
 
 Hosts also display a **6-digit pairing code** (regenerated after every successful pairing and every 5 minutes)
@@ -154,7 +154,7 @@ H→C  {"t":"auth_fail","reason":"unpaired|bad_mac|version|busy"}
 
 The client **must verify** `auth_ok.mac` (mutual authentication) and close if it is wrong.
 On `auth_fail` with `unpaired` or `bad_mac`, the client forgets its stored key for that host and shows
-"Pair again".
+"Pair again". The host closes the socket after sending any `auth_fail` or `pair_fail`.
 
 ### 3.3 `pair` / `pair_ok` / `pair_fail` (first contact)
 
@@ -193,7 +193,8 @@ brute-forceable offline by a LAN sniffer and exists for convenience (TLS is a pl
 
 If a `hello` arrives from an `id` that already has a ready session, the host finishes the handshake on the
 new socket, then sends `{"t":"bye","reason":"replaced"}` on the old one and closes it. Clients do the same
-for outbound connections.
+for outbound connections. A side that received `bye replaced` must not dial that peer again until a network
+change or an explicit user action; a device never dials a peer it already has a ready session with.
 
 ### 3.5 Unpairing
 
@@ -251,10 +252,15 @@ R→S {"t":"xfer_reject","id":7,"reason":"busy|disk|user"}
 R→S {"t":"xfer_ack","id":7,"received":1048576}
 S→R {"t":"xfer_done","id":7}
 R→S {"t":"xfer_complete","id":7,"ok":true,"saved":["IMG_0001.jpg"]}
-any {"t":"xfer_cancel","id":7,"reason":"user|error|disconnect"}
+any {"t":"xfer_cancel","id":7,"dir":"out","reason":"user|error|disconnect"}
 ```
 
-- `id` is chosen by the sender, unique within the session (a counter is fine).
+- `id` is chosen by the sender, unique within the session (a counter is fine). Because both directions pick
+  their own ids, `xfer_cancel` carries `dir` from the point of view of the device sending the cancel:
+  `"out"` = "my outgoing transfer", `"in"` = "the transfer I am receiving".
+- The receiver sends `xfer_complete` only after it has processed `xfer_done` and written every earlier chunk.
+  If a file is still incomplete when `xfer_done` arrives, the receiver sends `xfer_cancel` with reason `error`
+  (there is no `ok:false`).
 - `files[].i` is the file index, 0-based, in send order. `size` in bytes (may be 0).
 - Paired devices **auto-accept** by default. (A future "ask first" setting may `xfer_reject` with `user`.)
 - `xfer_ack.received` is the cumulative number of payload bytes received across all files of the transfer.
@@ -284,9 +290,10 @@ bytes 17..    : payload (1 .. 1 MiB bytes; recommended 256–512 KiB)
 - Destination: `~/Downloads/AirBridge Transfers/` (macOS, Windows, Linux) or MediaStore `Download/AirBridge
   Transfers/` (Android).
 - File name sanitisation (receiver, mandatory): take the last path component only; remove `\0`, `/`, `\`,
-  control characters; strip leading dots and spaces; reject Windows reserved names (`CON`, `PRN`, `AUX`,
-  `NUL`, `COM1-9`, `LPT1-9`); truncate to 200 bytes; if empty use `file`. If the name exists, append
-  ` (2)`, ` (3)` … before the extension.
+  control characters and `<>:"|?*`; strip leading dots and spaces and trailing dots and spaces; prefix
+  Windows reserved names (`CON`, `PRN`, `AUX`, `NUL`, `COM1-9`, `LPT1-9`, with or without extension) with
+  `_`; truncate to 200 bytes; if empty use `file`. If the name exists, append ` (2)`, ` (3)` … before the
+  extension.
 - After completion the receiver puts the received file URLs on the clipboard (where the platform supports
   file clipboards) and shows a notification.
 
@@ -334,7 +341,9 @@ controller→target {"t":"ctl_leave"}
 - On `ctl_leave` in either direction, **both** sides release anything held: the target synthesises key-up for
   every pressed key, button-up for every pressed button; the controller resets its modifier tracking.
 - A target controlled by one session that receives `ctl_enter` from another session accepts the new one and
-  sends `ctl_leave` to the old one.
+  sends `ctl_leave` (with the old controller's entry edge and the current `rel`) to the old one.
+- With several displays, `rel` is measured along the bounding box of **all** displays combined; a controller
+  places an entering cursor on the outermost display at that coordinate.
 - Trackpad/direct mode: a `trackpad` controller sends `ptr_*`/`key`/`action` **without** `ctl_enter`;
   targets accept them from any ready session.
 
@@ -350,10 +359,16 @@ nothing is exchanged. A controller may assign at most one peer per edge.
 {"t":"ptr_click","b":0,"n":2}                   // discrete click(s); n = click count (1 single, 2 double)
 ```
 
-- Positive `dy` moves down, positive `dx` moves right. Scroll: positive `dy` = content moves up (natural
-  scrolling is the target's preference, applied on the target).
-- `ptr_btn` down/up are always paired by the controller. Drags are button-down + moves + button-up; the target
-  must support real-time drag (Android: `StrokeDescription` with `willContinue`).
+- `ptr_move`: positive `dy` moves down, positive `dx` moves right. Units are the controller's native pointer
+  units (points on macOS, physical pixels on Windows and Android); the target applies its own gain.
+- `ptr_scroll` values describe **content motion**: positive `dy` = content moves up, positive `dx` = content
+  moves left. The controller converts its physical input using its own natural-scrolling preference; targets
+  apply the values as-is and never invert again.
+- `ptr_btn`: `b:0` is the primary button. Down/up are always paired by the controller. Drags are button-down +
+  moves + button-up; the target must support real-time drag (Android: `StrokeDescription` with `willContinue`).
+- `ptr_click.n` is the click count **of this click** (like macOS `clickState`): a double tap arrives as `n:1`
+  followed by `n:2` within the double-click interval. Targets inject one click per message and must not
+  synthesise extra clicks.
 - Controllers may coalesce moves to ≤ 120 messages/s.
 
 ### 8.3 Keyboard
@@ -366,9 +381,9 @@ nothing is exchanged. A controller may assign at most one peer per edge.
 |--------|---------|
 | `hid`  | USB HID usage ID, page 0x07 (see §8.4). Modifier keys use their own IDs (0xE0–0xE7). |
 | `down` | true = key down, false = key up. Every down must be followed by an up. |
-| `mods` | bitmask of modifiers held **after** this event: 1 shift · 2 ctrl · 4 alt/option · 8 gui (cmd/win) · 16 caps-lock on |
-| `rep`  | auto-repeat (optional, default false) |
-| `text` | the character(s) this key press produces with the current modifiers/layout, if printable (optional, only on `down`). Targets that cannot inject raw keys (Android accessibility) type `text` instead. |
+| `mods` | bitmask of modifiers held **after** this event: 1 shift · 2 ctrl · 4 alt/option · 8 gui (cmd/win) · 16 caps-lock on (the controller's caps state) |
+| `rep`  | auto-repeat (optional, default false). Controllers send repeats as further `down` events with `rep:true`; targets inject each one and never generate their own repeats. |
+| `text` | the character(s) this key press produces with the current modifiers/layout, if printable (optional, only on `down`). Omitted while ctrl or gui is held, so shortcuts never type. Targets that cannot inject raw keys (Android accessibility) type `text` instead. |
 
 - Controllers forward **every** key while controlling — they never hijack letters for special functions.
   Target-side semantics (e.g. Esc → Back on Android, Cmd/Win+H → Home) are decided by the **target**.
@@ -413,7 +428,7 @@ Platform mapping (each implementation owns a complete table):
 | name | Meaning (targets ignore what they can't do) |
 |------|------|
 | `home` `back` `recents` `last_app` `app_drawer` `notifications` `quick_settings` | Android navigation |
-| `mission_control` `app_expose` `desktop_left` `desktop_right` `spotlight` `lock` `keyboard_toggle` | macOS / desktop |
+| `mission_control` `app_expose` `desktop_left` `desktop_right` `spotlight` `lock` `keyboard_toggle` | macOS / desktop (`desktop_left` = switch to the desktop on the left, i.e. a three-finger swipe to the right on macOS) |
 | `vol_up` `vol_down` `vol_mute` `brightness_up` `brightness_down` | hardware |
 | `media_play_pause` `media_next` `media_prev` | media |
 | `assistant` `dnd_toggle` | system |
@@ -425,7 +440,8 @@ Platform mapping (each implementation owns a complete table):
 ## 9. Limits and encoding
 
 - Text frame ≤ 1 MiB; binary frame ≤ 1 MiB + 17 header bytes.
-- JSON: no comments, no NaN/Infinity. Floats are IEEE doubles formatted plainly (`-0.5`, not `-5E-1`).
+- JSON: no comments, no NaN/Infinity. Floats are IEEE doubles formatted plainly (`-0.5`, not `-5E-1`);
+  senders round to at most 4 decimals so stock JSON encoders never fall back to exponent notation.
 - Field names are exactly as written here (short, lowercase).
 - Timestamps are Unix milliseconds (`ts`).
 
