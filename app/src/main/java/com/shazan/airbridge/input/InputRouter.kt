@@ -87,6 +87,8 @@ object InputRouter {
                     _caps.update { it + (peerId to on) }
                 }
                 "mirror_info", "mirror_stop" -> mirrorControl?.invoke(peerId, msg)
+                // Only reaches us if the network half routes it (not in CONTROL_TYPES today).
+                "error" -> if (msg.optString("code").startsWith("mirror_")) mirrorControl?.invoke(peerId, msg)
                 // We never advertise mirror_source: mirror_start/key/ack addressed to us are ignored.
                 in TARGET_TYPES -> {
                     val t = target
