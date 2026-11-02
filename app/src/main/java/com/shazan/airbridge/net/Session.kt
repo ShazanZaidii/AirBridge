@@ -161,7 +161,9 @@ class Session(
             finish(Outcome.Ended("version"), null)
             return
         }
-        val id = m.str("id")?.lowercase()
+        // Used byte-exact in MACs; §2.1 requires lowercase, so a mismatch here explains a later bad MAC.
+        val id = m.str("id")
+        if (id != null && id != id.lowercase()) Log.w(tag, "peer id '$id' is not lowercase (spec §2.1)")
         val nonce = Protocol.unb64(m.str("nonce"))
         if (id.isNullOrBlank() || nonce == null || nonce.isEmpty() || id == Identity.id) {
             finish(Outcome.Ended("bad hello"), null)
@@ -253,7 +255,8 @@ class Session(
         val s = pairSecret
         if (s == null) {
             send(Protocol.withReason("pair_fail", "not_pairing"))
-            finish(Outcome.PairFailed("not_pairing"), null)
+            // The peer lost its key for us; ours is now useless. Forget it so both sides prompt next time.
+            finish(if (PairStore.key(id) != null) Outcome.Unpaired("peer re-pairing") else Outcome.PairFailed("not_pairing"), null)
             return
         }
         val k = Protocol.deriveKey(s, id, Identity.id)

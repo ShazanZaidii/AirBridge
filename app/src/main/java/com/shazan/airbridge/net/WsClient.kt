@@ -30,17 +30,22 @@ object WsClient {
             .readTimeout(0, TimeUnit.SECONDS)
             .writeTimeout(15, TimeUnit.SECONDS)
             .socketFactory(NoDelaySocketFactory)
-            // Never compress outgoing frames (§6.4); OkHttp still offers the extension.
+            // §6.4: permessage-deflate off. OkHttp adds the offer itself; strip it before it is sent.
+            .addInterceptor { chain ->
+                chain.proceed(chain.request().newBuilder().removeHeader("Sec-WebSocket-Extensions").build())
+            }
             .minWebSocketMessageToCompress(Long.MAX_VALUE)
             .build()
     }
 
+    // Mutated under synchronized(dialer); volatile so statusOf can read without locking
+    // (Session.finish → Hub.recomputeStatus → statusOf runs while another dialer's lock is held).
     private class Dialer(val peerId: String) {
-        var session: Session? = null
+        @Volatile var session: Session? = null
         var backoffMs = 1000L
-        var retry: ScheduledFuture<*>? = null
+        @Volatile var retry: ScheduledFuture<*>? = null
         /** Set after bye user/replaced etc.; cleared by explicit user action or app foreground. */
-        var paused = false
+        @Volatile var paused = false
         /** Pause came from `bye replaced`: a network change also clears it (§3.4). */
         var pausedByReplace = false
     }
@@ -69,13 +74,12 @@ object WsClient {
 
     fun statusOf(peerId: String): PeerStatus {
         val d = dialers[peerId] ?: return PeerStatus.OFFLINE
-        synchronized(d) {
-            return when {
-                d.session?.isReady == true -> PeerStatus.CONNECTED
-                d.session != null -> PeerStatus.CONNECTING
-                running && !d.paused && d.retry != null -> PeerStatus.RECONNECTING
-                else -> PeerStatus.OFFLINE
-            }
+        val s = d.session
+        return when {
+            s?.isReady == true -> PeerStatus.CONNECTED
+            s != null -> PeerStatus.CONNECTING
+            running && !d.paused && d.retry != null -> PeerStatus.RECONNECTING
+            else -> PeerStatus.OFFLINE
         }
     }
 
