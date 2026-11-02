@@ -104,6 +104,10 @@ class Session(
     /** Per-session file transfer state (§6, rule 4). */
     val xfer by lazy { FileTransfer(this) }
 
+    private val traffic = java.util.concurrent.atomic.AtomicLong()
+    /** Inner binary bytes (file chunks, video) sent + received: link idle detection (§10.1). */
+    val trafficBytes: Long get() = traffic.get()
+
     fun info(): PeerInfo = PeerInfo(peerId ?: "", peerName, peerPlat, peerCaps, peerScreenW, peerScreenH)
 
     /** Call once the transport is open. The client sends `hello`; the host waits for one. */
@@ -134,7 +138,7 @@ class Session(
             val ch = channel ?: return false
             link.sendBinary(ch.seal(Envelope.INNER_BINARY, frame))
         }
-        if (ok) lastTx = System.currentTimeMillis()
+        if (ok) { lastTx = System.currentTimeMillis(); traffic.addAndGet(frame.size.toLong()) }
         return ok
     }
 
@@ -203,6 +207,7 @@ class Session(
 
     private fun onInnerBinary(frame: ByteArray) {
         if (frame.isEmpty()) return
+        traffic.addAndGet(frame.size.toLong())
         when (frame[0].toInt() and 0xFF) {
             Protocol.KIND_FILE_CHUNK -> xfer.onChunk(frame)
             Protocol.KIND_VIDEO -> peerId?.let { id ->
