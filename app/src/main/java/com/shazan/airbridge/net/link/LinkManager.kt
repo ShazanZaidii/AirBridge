@@ -215,13 +215,17 @@ object LinkManager {
             if (!started) Hub.scheduler.execute { onEnd(DialEnd(false, false, "service not running")); publish() }
         }
 
-        override fun closeLinkSession(peerId: String) = WsClient.closeLink(peerId)
+        override fun closeLinkSession(peerId: String) = WsClient.closeLink(peerId, bye = "replaced")
         override fun resumeLan(peerId: String, overLink: Boolean) = WsClient.resumeAfterLink(peerId, overLink)
         override fun lanReady(peerId: String) = Hub.readySession(peerId)?.let { it.link.kind != WsClient.KIND_WFD } == true
         override fun linkReady(peerId: String) = Hub.readySession(peerId)?.link?.kind == WsClient.KIND_WFD
         override fun traffic(peerId: String) = Hub.readySession(peerId)?.trafficBytes ?: 0L
         override fun busy(peerId: String) = Hub.readySession(peerId)?.xfer?.isBusy() == true
         override fun log(line: String) = appendLog(line)
+        override fun failed(peerId: String, reason: String, byPeer: Boolean, local: Boolean) {
+            // Only for links this phone asked for (a held transfer falls back to the existing session).
+            if (local && reason != "no_session") Hub.toast("${LinkPolicy.failText(reason)}. Sending over the current connection.")
+        }
     }
 }
 

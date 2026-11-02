@@ -14,6 +14,9 @@
     <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+    <!-- Wi-Fi Direct link upgrade (PROTOCOL §10.1): joining the PC's group with WifiNetworkSpecifier needs only
+         CHANGE_NETWORK_STATE / CHANGE_WIFI_STATE / ACCESS_WIFI_STATE above (NEARBY_WIFI_DEVICES is not required for it).
+         When targetSdk moves to 37, add android.permission.ACCESS_LOCAL_NETWORK (runtime) for LAN and link sockets. -->
 
     <!-- connectedDevice FGS: allowed from BOOT_COMPLETED and has no time limit on Android 15+.
          Its runtime prerequisite is satisfied by CHANGE_NETWORK_STATE / CHANGE_WIFI_STATE above. -->

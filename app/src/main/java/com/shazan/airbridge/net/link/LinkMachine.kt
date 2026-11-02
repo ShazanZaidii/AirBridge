@@ -72,6 +72,7 @@ interface LinkEnv<N> {
     fun join(peerId: String, lid: Int, creds: WfdCreds, timeoutMs: Long, onResult: (JoinOutcome<N>) -> Unit, onLost: () -> Unit): Cancellable
     /** Dial `ws://host:port/v2` bound to [network]. Success is reported through [LinkMachine.onLinkSessionReady]. */
     fun dial(peerId: String, host: String, port: Int, network: N, onEnd: (DialEnd) -> Unit)
+    /** Close the link session (with `bye replaced`, §10.1). */
     fun closeLinkSession(peerId: String)
     /** Clear the replaced-session pause and kick the LAN dialer. [overLink]: allowed while the link session is still ready (make-before-break back). */
     fun resumeLan(peerId: String, overLink: Boolean)
@@ -84,6 +85,8 @@ interface LinkEnv<N> {
     /** A file transfer is in progress with the peer. */
     fun busy(peerId: String): Boolean
     fun log(line: String)
+    /** A link failed before becoming ready. [local] = this phone asked for it (show [LinkPolicy.failText]). */
+    fun failed(peerId: String, reason: String, byPeer: Boolean, local: Boolean) {}
 }
 
 class LinkMachine<N>(private val env: LinkEnv<N>) {
@@ -103,7 +106,6 @@ class LinkMachine<N>(private val env: LinkEnv<N>) {
         var lastActiveAt = 0L
         var readyAt = 0L
         var doneReason = ""
-        var notifyDone = false
         var waitingLan = false
         var finished = false
         val holders = mutableListOf<(Boolean) -> Unit>()
@@ -358,16 +360,21 @@ class LinkMachine<N>(private val env: LinkEnv<N>) {
         if (hs.isNotEmpty()) log(l, "xfer_release", "held=${hs.size} via=existing")
         hs.forEach { it(false) }
         log(l, "released")
+        env.failed(l.peer, reason, remote, l.local)
     }
 
-    /** From READY. If the phone kept its home Wi-Fi, bring the LAN session back first (make-before-break back). */
+    /**
+     * From READY. `link_done` goes out first (on the link session); then, if the phone kept its home
+     * Wi-Fi, the LAN is redialled while the link session is still open (§10.1: up to 3 s) and the link
+     * session is closed with `bye replaced` once the LAN session is ready (Hub does that) or at the deadline.
+     */
     private fun done(l: Link, reason: String, notifyPeer: Boolean) {
         if (l.state == LinkState.TEARDOWN) return
         l.state = LinkState.TEARDOWN
         l.timers.forEach { it.cancel() }; l.timers.clear()
         l.doneReason = reason
-        l.notifyDone = notifyPeer
-        log(l, "teardown", "reason=$reason sta=${l.joined?.sta}")
+        log(l, "teardown", "reason=$reason sta=${l.joined?.sta}" + if (notifyPeer) "" else " by=peer")
+        if (notifyPeer) env.send(l.peer, LinkMsg.Done(l.lid, reason))
         if (l.joined?.sta == "kept" && env.linkReady(l.peer)) {
             l.waitingLan = true
             env.resumeLan(l.peer, overLink = true)
@@ -381,8 +388,6 @@ class LinkMachine<N>(private val env: LinkEnv<N>) {
         l.finished = true
         l.timers.forEach { it.cancel() }; l.timers.clear()
         val lanBack = env.lanReady(l.peer)
-        // On the LAN session if it is back, otherwise still on the link session (before closing it).
-        if (l.notifyDone) env.send(l.peer, LinkMsg.Done(l.lid, l.doneReason))
         env.closeLinkSession(l.peer)
         l.joinHandle?.cancel(); l.joinHandle = null
         if (links[l.peer] === l) links.remove(l.peer)
