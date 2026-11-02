@@ -91,21 +91,24 @@ nonisolated final class WebSocket: @unchecked Sendable {
         sendFrame(opcode: 0x2, payload: data, completion: completion)
     }
 
-    /// Sends a close frame, then cancels the connection once it is flushed.
+    /// Closing handshake (RFC 6455 §5.5.1): sends a close frame and waits for the peer's close frame (which
+    /// cancels the connection in `handleFrame`), or cancels after 2 s if none arrives. No data frames are sent
+    /// after the close frame. Calling it again while a close is in progress does nothing.
     func close(code: UInt16 = 1000) {
         guard !finished else { return }
-        guard open, !closeSent else { connection.cancel(); return }
+        guard open else { connection.cancel(); return }
+        guard !closeSent else { return }
         closeSent = true
         var payload = Data()
         withUnsafeBytes(of: code.bigEndian) { payload.append(contentsOf: $0) }
-        sendFrame(opcode: 0x8, payload: payload) { [weak self] _ in self?.connection.cancel() }
+        sendFrame(opcode: 0x8, payload: payload, completion: nil)
         queue.asyncAfter(deadline: .now() + 2) { [weak self] in self?.connection.cancel() }
     }
 
     func cancel() { connection.cancel() }
 
     private func sendFrame(opcode: UInt8, payload: Data, completion: ((Bool) -> Void)?) {
-        guard open, !finished else { completion?(false); return }
+        guard open, !finished, !(closeSent && opcode < 0x8) else { completion?(false); return }
         var header = Data(capacity: 14)
         header.append(0x80 | opcode)
         let maskBit: UInt8 = role == .client ? 0x80 : 0
@@ -292,10 +295,13 @@ nonisolated final class WebSocket: @unchecked Sendable {
         switch opcode {
         case 0x8:
             if !closeSent {
+                // Peer-initiated: echo the status code, then close the TCP connection once it is flushed.
                 closeSent = true
                 let echo = payload.count >= 2 ? payload.prefix(2) : Data()
                 sendFrame(opcode: 0x8, payload: Data(echo)) { [weak self] _ in self?.connection.cancel() }
+                queue.asyncAfter(deadline: .now() + 2) { [weak self] in self?.connection.cancel() }
             } else {
+                // The echo to our own close frame: the handshake is complete.
                 connection.cancel()
             }
         case 0x9:
@@ -303,6 +309,7 @@ nonisolated final class WebSocket: @unchecked Sendable {
         case 0xA:
             break
         case 0x1, 0x2:
+            guard !closeSent else { return }
             guard fragOpcode == nil else { fail(code: 1002); return }
             if fin { deliver(opcode, payload) } else { fragOpcode = opcode; fragData = payload }
         case 0x0:
@@ -319,9 +326,19 @@ nonisolated final class WebSocket: @unchecked Sendable {
         if opcode == 0x1 { onText?(data) } else { onBinary?(data) }
     }
 
+    /// Protocol violation: best-effort close frame, then the socket is dead for callers immediately.
     private func fail(code: UInt16 = 1002) {
-        if open { close(code: code) } else { connection.cancel() }
-        finish(nil)
+        guard !finished else { return }
+        if open, !closeSent {
+            closeSent = true
+            var payload = Data()
+            withUnsafeBytes(of: code.bigEndian) { payload.append(contentsOf: $0) }
+            sendFrame(opcode: 0x8, payload: payload) { [weak self] _ in self?.connection.cancel() }
+            queue.asyncAfter(deadline: .now() + 2) { [weak self] in self?.connection.cancel() }
+            finishedEarly()
+        } else {
+            finish(nil)
+        }
     }
 
     /// Marks the socket dead for callers without cancelling yet (lets an HTTP error response flush).

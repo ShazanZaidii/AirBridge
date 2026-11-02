@@ -34,12 +34,12 @@ nonisolated enum Identity {
         return (CGDisplayPixelsWide(display), CGDisplayPixelsHigh(display))
     }
 
-    static func hello(nonce: Data, paired: Bool?) -> [String: Any] {
+    static func hello(nonce: Data, publicKey: Data, paired: Bool?) -> [String: Any] {
         let screen = screenPixels
         var msg: [String: Any] = [
             "t": "hello", "v": Proto.version, "id": id, "name": name, "plat": Proto.platform,
             "app": Proto.appVersion, "caps": Proto.caps, "nonce": nonce.base64EncodedString(),
-            "screen": ["w": screen.w, "h": screen.h],
+            "pk": publicKey.base64EncodedString(), "screen": ["w": screen.w, "h": screen.h],
         ]
         if let paired { msg["paired"] = paired }
         return msg

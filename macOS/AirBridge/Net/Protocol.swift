@@ -1,5 +1,6 @@
 import Foundation
 import CryptoKit
+import CoreGraphics
 
 /// Protocol v2 constants and wire helpers. See docs/protocol.md.
 nonisolated enum Proto {
@@ -10,14 +11,22 @@ nonisolated enum Proto {
     static let path = "/v2"
     static let serviceType = "_airbridge._tcp"
     static let serviceDomain = "local."
-    static let caps = ["clip", "xfer", "ctl_source", "ctl_target"]
+    static let baseCaps = ["clip", "xfer", "ctl_source", "ctl_target"]
+
+    /// `hello.caps`: `mirror_source` only while the screen-recording permission is granted (§8.7).
+    static var caps: [String] { CGPreflightScreenCaptureAccess() ? baseCaps + ["mirror_source"] : baseCaps }
 
     static let handshakeTimeout: TimeInterval = 10
+    /// Mode `confirm`: the whole pairing must finish within this long after `pair_start` (§3.3).
+    static let confirmTimeout: TimeInterval = 60
     static let pingAfterIdle: TimeInterval = 5
     static let deadAfterSilence: TimeInterval = 15
 
     static let maxTextFrame = 1 << 20
+    /// Largest plaintext inner binary frame (file chunk header + 1 MiB payload).
     static let maxBinaryFrame = (1 << 20) + 17
+    /// Largest envelope accepted on the wire (§9, plus the innerKind byte).
+    static let maxEnvelope = max(maxBinaryFrame, maxTextFrame) + SecureChannel.overhead
     static let clipMaxBytes = 512 * 1024
 
     static let chunkSize = 512 * 1024
@@ -89,25 +98,28 @@ nonisolated enum Proto {
         return Data(h.finalize())
     }
 
-    static func deriveKey(secret: Data, clientId: String, hostId: String) -> Data {
+    /// HKDF-SHA256 (RFC 5869), extract-then-expand.
+    static func hkdf(ikm: Data, salt: Data, info: Data, length: Int) -> Data {
+        let key = HKDF<SHA256>.deriveKey(inputKeyMaterial: SymmetricKey(data: ikm), salt: salt, info: info,
+                                         outputByteCount: length)
+        return key.withUnsafeBytes { Data($0) }
+    }
+
+    /// `T = cNonce | "|" | hNonce | "|" | clientId | "|" | hostId | "|" | cPk | "|" | hPk` (§3.2).
+    static func transcript(cNonce: Data, hNonce: Data, clientId: String, hostId: String, cPk: Data, hPk: Data) -> Data {
+        let bar = Data("|".utf8)
+        return cNonce + bar + hNonce + bar + Data(clientId.utf8) + bar + Data(hostId.utf8) + bar + cPk + bar + hPk
+    }
+
+    /// Mode `qr` long-term key: HMAC(S, "airbridge/v2/pair|" | clientId | "|" | hostId).
+    static func qrKey(secret: Data, clientId: String, hostId: String) -> Data {
         hmac(key: secret, "airbridge/v2/pair|", clientId, "|", hostId)
     }
 
-    static func authMac(_ k: Data, cNonce: Data, hNonce: Data, clientId: String) -> Data {
-        hmac(key: k, "auth|", cNonce, "|", hNonce, "|", clientId)
-    }
-
-    static func authAckMac(_ k: Data, cNonce: Data, hNonce: Data, hostId: String) -> Data {
-        hmac(key: k, "auth_ack|", hNonce, "|", cNonce, "|", hostId)
-    }
-
-    static func pairProof(_ k: Data, cNonce: Data, hNonce: Data, clientId: String) -> Data {
-        hmac(key: k, "pair|", cNonce, "|", hNonce, "|", clientId)
-    }
-
-    static func pairAckProof(_ k: Data, cNonce: Data, hNonce: Data, hostId: String) -> Data {
-        hmac(key: k, "pair_ack|", hNonce, "|", cNonce, "|", hostId)
-    }
+    static func authMac(_ k: Data, _ t: Data) -> Data { hmac(key: k, "auth|", t) }
+    static func authAckMac(_ k: Data, _ t: Data) -> Data { hmac(key: k, "auth_ack|", t) }
+    static func pairProof(_ k: Data, _ t: Data) -> Data { hmac(key: k, "pair|", t) }
+    static func pairAckProof(_ k: Data, _ t: Data) -> Data { hmac(key: k, "pair_ack|", t) }
 
     static func constantTimeEqual(_ a: Data, _ b: Data) -> Bool {
         guard a.count == b.count else { return false }

@@ -15,11 +15,27 @@ import UserNotifications
     @Published var port: UInt16?
     @Published var deviceName = Identity.name
 
-    @Published var pairingCode = ""
     @Published var qrImage: NSImage?
     @Published var allowPairing = true
     @Published var pairingLocked = false
     private var pairingLink: String?
+
+    /// Confirm-mode pairings waiting for the user (§3.3), oldest first.
+    @Published var pairPrompts: [PairPrompt] = []
+
+    /// Control state from the input half, e.g. "Controlled by Pixel 9" or
+    /// "Controlling Pixel 9 · Ctrl+Opt+Cmd+Esc to return". nil = idle.
+    ///
+    /// Contract: post `Notification.Name("AirBridgeControlStatus")` on `NotificationCenter.default` from any
+    /// thread with `userInfo: ["text": String]`. A missing, nil (`NSNull`) or empty `text` clears the status.
+    /// Optional keys: `"peer"` (peer id, String) and `"role"` (`"controlling"` | `"controlled"`) let the menu
+    /// mark that device's row; without them only the banner is shown.
+    @Published var controlStatus: String?
+    @Published var controlPeer: String?
+    @Published var controlRole: String?
+
+    /// Screen-recording permission (gates the `mirror_source` capability, §8.7).
+    @Published var screenCaptureAllowed = CGPreflightScreenCaptureAccess()
 
     @Published var transfers: [TransferStatus] = []
     @Published var noticeText: String?
@@ -49,13 +65,72 @@ import UserNotifications
     }
 
     func applyPairing(_ snap: Pairing.Snapshot, link: String?) {
-        pairingCode = snap.code
         allowPairing = snap.allowPairing
         pairingLocked = (snap.lockedUntil ?? .distantPast) > Date()
         if link != pairingLink {
             pairingLink = link
             qrImage = link.flatMap(AppModel.qrCode)
         }
+    }
+
+    // MARK: Control status (input half → menu)
+
+    private static let controlStatusNote = Notification.Name("AirBridgeControlStatus")
+    private var controlObserver: NSObjectProtocol?
+
+    /// Starts listening for `AirBridgeControlStatus` (see `controlStatus`).
+    func startObservingControlStatus() {
+        guard controlObserver == nil else { return }
+        controlObserver = NotificationCenter.default.addObserver(
+            forName: AppModel.controlStatusNote, object: nil, queue: nil) { note in
+            let info = note.userInfo ?? [:]
+            let text = (info["text"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+            let peer = info["peer"] as? String
+            let role = info["role"] as? String
+            onMain {
+                let m = AppModel.shared
+                if m.controlStatus != text { m.controlStatus = text }
+                let p = text == nil ? nil : peer, r = text == nil ? nil : role
+                if m.controlPeer != p { m.controlPeer = p }
+                if m.controlRole != r { m.controlRole = r }
+            }
+        }
+    }
+
+    // MARK: Screen mirroring permission
+
+    func refreshScreenCapture() {
+        let now = CGPreflightScreenCaptureAccess()
+        if screenCaptureAllowed != now { screenCaptureAllowed = now }
+    }
+
+    /// Shows the system prompt (first time) or opens the Screen Recording settings pane.
+    func requestScreenCapture() {
+        if !CGRequestScreenCaptureAccess(),
+           let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") {
+            NSWorkspace.shared.open(url)
+        }
+        refreshScreenCapture()
+        if !screenCaptureAllowed {
+            notice("After allowing AirBridge under Screen Recording, quit and reopen it to enable mirroring")
+        }
+    }
+
+    // MARK: Confirm-mode pairing prompts
+
+    func showPairPrompt(_ p: PairPrompt) {
+        if let i = pairPrompts.firstIndex(where: { $0.id == p.id }) { pairPrompts[i] = p } else { pairPrompts.append(p) }
+        PairPromptPanels.shared.show(p)
+    }
+
+    func endPairPrompt(_ id: String) {
+        pairPrompts.removeAll { $0.id == id }
+        PairPromptPanels.shared.dismiss(id)
+    }
+
+    func respond(to p: PairPrompt, accept: Bool) {
+        PeerManager.shared.respondToPairing(promptId: p.id, accept: accept)
+        if !accept { endPairPrompt(p.id) }
     }
 
     func updateTransfer(_ s: TransferStatus) {

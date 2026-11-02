@@ -46,6 +46,8 @@ nonisolated final class PeerManager: PeerTransport, @unchecked Sendable {
     private static let outboundKey = "AirBridgeOutboundPeers"
     private static let lastAddressKey = "AirBridgeLastAddresses"
     private static let maxPending = 32
+    /// At most this many incoming confirm-mode prompts at once; more get `pair_fail locked`.
+    static let maxIncomingPrompts = 3
 
     private init() {
         queue = DispatchQueue(label: "com.shazan.airbridge.net", qos: .userInitiated)
@@ -78,6 +80,7 @@ nonisolated final class PeerManager: PeerTransport, @unchecked Sendable {
     func shutdown() {
         queue.sync {
             for s in ready.values { s.close(bye: "shutdown") }
+            for s in pending.values { s.close(bye: nil) }
             server.stop()
         }
         Thread.sleep(forTimeInterval: 0.2)
@@ -105,7 +108,9 @@ nonisolated final class PeerManager: PeerTransport, @unchecked Sendable {
         snapLock.lock()
         let isReady = snapshot.contains { $0.id == peerId }
         snapLock.unlock()
-        guard isReady else { return false }
+        guard isReady, frame.count <= Proto.maxBinaryFrame, let kind = frame.first, kind != SecureChannel.envelopeKind else {
+            return false
+        }
         queue.async { [self] in ready[peerId]?.sendBinary(frame) { _ in } }
         return true
     }
@@ -142,14 +147,23 @@ nonisolated final class PeerManager: PeerTransport, @unchecked Sendable {
 
     // MARK: User actions (any thread)
 
-    /// Pair with a discovered host using the 6-digit code it displays.
-    func pair(hostId: String, code: String) {
+    /// Pair with a discovered host by numeric comparison (§3.3, mode `confirm`): both devices show the
+    /// same 6 digits. `hint` is an address to use when mDNS has nothing (tests, manual entry).
+    func pairConfirm(hostId: String, hint: (host: String, port: UInt16)? = nil) {
         queue.async { [self] in
             let c = connector(for: hostId)
-            c.pairSecret = Data(code.utf8)
+            c.pairing = .confirm
+            if let hint { c.hint = hint }
             c.paused = false
             c.kick(resetBackoff: true)
             publishUI()
+        }
+    }
+
+    /// The user answered a confirm-mode prompt (Accept/Confirm = true, Reject/Cancel = false).
+    func respondToPairing(promptId: String, accept: Bool) {
+        queue.async { [self] in
+            pending.values.first { $0.prompt?.id == promptId }?.userResponded(accept: accept)
         }
     }
 
@@ -169,7 +183,7 @@ nonisolated final class PeerManager: PeerTransport, @unchecked Sendable {
         }()
         queue.async { [self] in
             let c = connector(for: id)
-            c.pairSecret = k
+            c.pairing = .qr(k)
             c.hint = hint
             c.paused = false
             c.kick(resetBackoff: true)
@@ -270,6 +284,16 @@ nonisolated final class PeerManager: PeerTransport, @unchecked Sendable {
     }
 
     func hasReady(_ peerId: String) -> Bool { ready[peerId] != nil }
+
+    var incomingPromptCount: Int { pending.values.filter(\.hasIncomingPrompt).count }
+
+    func pairPromptChanged(_ p: PairPrompt) {
+        onMain { AppModel.shared.showPairPrompt(p) }
+    }
+
+    func pairPromptEnded(_ id: String) {
+        onMain { AppModel.shared.endPairPrompt(id) }
+    }
 
     func endpoint(for peerId: String, hint: (host: String, port: UInt16)?) -> NWEndpoint? {
         if let h = discovery.hosts[peerId] { return h.endpoint }
@@ -398,7 +422,7 @@ nonisolated final class OutboundConnector: @unchecked Sendable {
     let peerId: String
     private unowned let manager: PeerManager
     private let queue: DispatchQueue
-    var pairSecret: Data?
+    var pairing: PairMode?
     var hint: (host: String, port: UInt16)?
     var paused = false
     private(set) var status: String?
@@ -413,7 +437,7 @@ nonisolated final class OutboundConnector: @unchecked Sendable {
     }
 
     /// False once there is nothing left to do for this peer (not paired and not pairing).
-    var isUseful: Bool { attempt != nil || pairSecret != nil || PeerStore.shared.hasKey(peerId) }
+    var isUseful: Bool { attempt != nil || pairing != nil || PeerStore.shared.hasKey(peerId) }
 
     func kick(resetBackoff: Bool = false) {
         if resetBackoff { backoff = 1 }
@@ -432,7 +456,7 @@ nonisolated final class OutboundConnector: @unchecked Sendable {
 
     private func dial() {
         guard attempt == nil, !paused, !manager.hasReady(peerId) else { return }
-        guard pairSecret != nil || PeerStore.shared.hasKey(peerId) else { return }
+        guard pairing != nil || PeerStore.shared.hasKey(peerId) else { return }
         guard let endpoint = manager.endpoint(for: peerId, hint: hint) else {
             status = "Not found on the network"
             scheduleRetry()
@@ -442,9 +466,13 @@ nonisolated final class OutboundConnector: @unchecked Sendable {
         (params.defaultProtocolStack.internetProtocol as? NWProtocolIP.Options)?.version = .v4
         let conn = NWConnection(to: endpoint, using: params)
         let s = Session(ws: WebSocket(connection: conn, role: .client, queue: queue), role: .client, queue: queue,
-                        manager: manager, expectedPeerId: peerId, pairSecret: pairSecret)
+                        manager: manager, expectedPeerId: peerId, pairing: pairing)
         attempt = s
-        status = pairSecret != nil ? "Pairing…" : "Connecting…"
+        switch pairing {
+        case .confirm: status = "Confirm the code on both devices…"
+        case .qr: status = "Pairing…"
+        case nil: status = "Connecting…"
+        }
         manager.track(s)
         s.start()
     }
@@ -452,8 +480,8 @@ nonisolated final class OutboundConnector: @unchecked Sendable {
     func sessionReady(_ s: Session) {
         if s === attempt {
             attempt = nil
-            if pairSecret != nil { manager.pairingFinished(peerId, error: nil) }
-            pairSecret = nil
+            if pairing != nil { manager.pairingFinished(peerId, error: nil) }
+            pairing = nil
             hint = nil
         }
         backoff = 1
@@ -465,18 +493,22 @@ nonisolated final class OutboundConnector: @unchecked Sendable {
     func sessionEnded(_ s: Session, wasReady: Bool) {
         if s === attempt {
             attempt = nil
-            let wasPairing = pairSecret != nil
+            let wasPairing = pairing != nil
             switch s.clientOutcome ?? .network {
             case .ready:
                 break
             case .needsPairing:
-                stop("Pairing required — enter the code again", wasPairing: true)
+                stop("Pairing required — pair again from Connect to host…", wasPairing: true)
+            case .pairFailed("cancelled"):
+                stop("Pairing cancelled", wasPairing: true)
             case .pairFailed(let reason):
                 let text: String
                 switch reason {
-                case "locked": text = "Too many attempts — wait a minute and try again"
-                case "not_pairing": text = "That device is not accepting new pairings"
-                default: text = "Wrong code"
+                case "locked": text = "too many attempts — wait a minute and try again"
+                case "not_pairing": text = "that device is not accepting new pairings"
+                case "rejected": text = "the other device declined"
+                case "timeout": text = "nobody confirmed within a minute"
+                default: text = "the codes did not match"
                 }
                 stop("Pairing failed: \(text)", wasPairing: true)
             case .badHost(let why):
@@ -498,7 +530,7 @@ nonisolated final class OutboundConnector: @unchecked Sendable {
     }
 
     private func stop(_ message: String, wasPairing: Bool) {
-        pairSecret = nil
+        pairing = nil
         hint = nil
         status = PeerStore.shared.hasKey(peerId) ? message : nil
         manager.pairingFinished(peerId, error: message)
@@ -508,7 +540,7 @@ nonisolated final class OutboundConnector: @unchecked Sendable {
         guard !paused, isUseful else { return }
         let delay = backoff
         backoff = min(backoff * 2, 30)
-        if status == nil || status == "Connecting…" || status == "Pairing…" { status = "Reconnecting…" }
+        if status == nil || status == "Connecting…" { status = "Reconnecting…" }
         retryWork?.cancel()
         let work = DispatchWorkItem { [weak self] in
             guard let self else { return }

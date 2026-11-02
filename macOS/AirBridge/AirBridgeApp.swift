@@ -36,6 +36,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         ])
         center.requestAuthorization(options: [.alert, .sound]) { _, _ in }
 
+        AppModel.shared.startObservingControlStatus()
         PeerManager.shared.start()
         ClipboardSync.shared.start()
         ShareInbox.purgeStale()
@@ -133,113 +134,274 @@ func platformIcon(_ plat: String) -> String {
     }
 }
 
+func platformName(_ plat: String) -> String {
+    switch plat {
+    case "android": return "Android"
+    case "ios": return "iOS"
+    case "macos": return "Mac"
+    case "windows": return "Windows"
+    case "linux": return "Linux"
+    default: return plat.isEmpty ? "unknown device" : plat
+    }
+}
+
 func formatBytes(_ n: Int64) -> String {
     ByteCountFormatter.string(fromByteCount: n, countStyle: .file)
+}
+
+/// Design tokens: 4/8/16 spacing, 8–12 pt radii.
+/// Surfaces use system materials so the menu follows light/dark mode with native contrast.
+enum Theme {
+    static let accent = Color(red: 0x22 / 255, green: 0xC5 / 255, blue: 0x5E / 255)
+    static let destructive = Color(red: 0xEF / 255, green: 0x44 / 255, blue: 0x44 / 255)
+    static let radius: CGFloat = 10
+    static let xs: CGFloat = 4, sm: CGFloat = 8, md: CGFloat = 16
+    static let motion = Animation.easeOut(duration: 0.18)
+}
+
+/// "483920" → "483 920".
+func spacedDigits(_ c: String) -> String { c.count == 6 ? "\(c.prefix(3)) \(c.suffix(3))" : c }
+
+/// Full-width menu row with a hover highlight.
+struct MenuRowButtonStyle: ButtonStyle {
+    @State private var hovering = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, Theme.sm)
+            .padding(.vertical, 5)
+            .contentShape(Rectangle())
+            .background(RoundedRectangle(cornerRadius: 6)
+                .fill(Color.primary.opacity(configuration.isPressed ? 0.14 : (hovering ? 0.08 : 0))))
+            .onHover { h in
+                if reduceMotion { hovering = h } else { withAnimation(Theme.motion) { hovering = h } }
+            }
+    }
+}
+
+struct SectionHeader: View {
+    let title: String
+    var body: some View {
+        Text(title.uppercased())
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .tracking(0.6)
+            .accessibilityAddTraits(.isHeader)
+    }
 }
 
 struct MenuView: View {
     @ObservedObject var model: AppModel
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showPairing = false
     @State private var showHosts = false
     @State private var showSettings = false
-    @State private var codeHost: String?
-    @State private var code = ""
     @State private var newName = ""
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text("AirBridge").font(.headline)
-                Spacer()
-                if let ip = model.localIP, let port = model.port {
-                    Text("\(ip):\(String(port))").font(.caption2).foregroundStyle(.secondary)
-                } else {
-                    Text("Starting…").font(.caption2).foregroundStyle(.secondary)
-                }
-            }
+        VStack(alignment: .leading, spacing: 12) {
+            header
+
+            if let status = model.controlStatus { controlBanner(status) }
+
+            ForEach(model.pairPrompts) { PairPromptCard(prompt: $0, model: model, compact: true) }
 
             devicesSection
 
             if !model.transfers.isEmpty {
-                Divider()
-                ForEach(model.transfers) { TransferRowView(status: $0) }
-            }
-
-            Divider()
-
-            DisclosureGroup("Pair a new device", isExpanded: $showPairing) { pairingSection }
-            DisclosureGroup("Connect to host…", isExpanded: $showHosts) { hostsSection }
-            DisclosureGroup("Settings", isExpanded: $showSettings) { settingsSection }
-
-            if let notice = model.noticeText {
-                Text(notice).font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
-            }
-
-            Divider()
-
-            Button("Display Arrangement…") { openAndFront("arrangement", title: "AirBridge Display Arrangement") }
-                .buttonStyle(.plain)
-            Button("Clipboard Filters…") { openAndFront("filters", title: "Clipboard Filters") }
-                .buttonStyle(.plain)
-            Button("Quit AirBridge") { NSApplication.shared.terminate(nil) }
-                .buttonStyle(.plain)
-                .keyboardShortcut("q")
-        }
-        .padding()
-        .frame(width: 300)
-        .onAppear { if model.devices.isEmpty { showPairing = true } }
-    }
-
-    private var devicesSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Devices").font(.subheadline).foregroundStyle(.secondary)
-            if model.devices.isEmpty {
-                Text("No paired devices yet").font(.caption).foregroundStyle(.secondary)
-            }
-            ForEach(model.devices) { d in
-                HStack(spacing: 8) {
-                    Image(systemName: platformIcon(d.plat)).frame(width: 18)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(d.name).lineLimit(1)
-                        Text(d.connected ? "Connected" : (d.status ?? "Not connected"))
-                            .font(.caption2).foregroundStyle(d.connected ? .green : .secondary)
-                    }
-                    Spacer()
-                    Circle().fill(d.connected ? Color.green : Color.gray.opacity(0.4)).frame(width: 8, height: 8)
-                    Menu {
-                        if d.connected {
-                            Button("Disconnect") { PeerManager.shared.disconnect(peerId: d.id) }
-                        } else if d.outbound {
-                            Button("Connect") { PeerManager.shared.connect(peerId: d.id) }
-                        }
-                        Button("Forget Device", role: .destructive) { PeerManager.shared.forget(peerId: d.id) }
-                    } label: {
-                        Image(systemName: "ellipsis.circle")
-                    }
-                    .menuStyle(.borderlessButton)
-                    .menuIndicator(.hidden)
-                    .fixedSize()
+                VStack(alignment: .leading, spacing: Theme.sm) {
+                    SectionHeader(title: "Transfers")
+                    ForEach(model.transfers) { TransferRowView(status: $0) }
                 }
             }
+
+            if let notice = model.noticeText {
+                Label(notice, systemImage: "exclamationmark.circle")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 2) {
+                DisclosureGroup(isExpanded: $showPairing) { pairingSection } label: {
+                    Label("Pair a new device", systemImage: "qrcode")
+                }
+                DisclosureGroup(isExpanded: $showHosts) { hostsSection } label: {
+                    Label("Connect to host…", systemImage: "antenna.radiowaves.left.and.right")
+                }
+            }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 0) {
+                Button { openAndFront("arrangement", title: "AirBridge Display Arrangement") } label: {
+                    Label("Display Arrangement…", systemImage: "rectangle.3.group")
+                }
+                Button { openAndFront("filters", title: "Clipboard Filters") } label: {
+                    Label("Clipboard Filters…", systemImage: "line.3.horizontal.decrease.circle")
+                }
+                if !model.screenCaptureAllowed {
+                    Button { model.requestScreenCapture() } label: {
+                        Label("Allow screen mirroring…", systemImage: "rectangle.on.rectangle")
+                    }
+                    .help("Lets a phone show and control this Mac's screen. Needs the Screen Recording permission.")
+                }
+                DisclosureGroup(isExpanded: $showSettings) { settingsSection } label: {
+                    Label("Device name", systemImage: "pencil")
+                }
+                .padding(.horizontal, Theme.sm)
+                .padding(.vertical, 5)
+                Button { NSApplication.shared.terminate(nil) } label: {
+                    Label("Quit AirBridge", systemImage: "power")
+                }
+                .keyboardShortcut("q")
+            }
+            .buttonStyle(MenuRowButtonStyle())
+            .padding(.horizontal, -Theme.sm)
+        }
+        .padding(Theme.md)
+        .frame(width: 320)
+        .animation(reduceMotion ? nil : Theme.motion, value: model.controlStatus)
+        .animation(reduceMotion ? nil : Theme.motion, value: model.pairPrompts)
+        .onAppear {
+            if model.devices.isEmpty { showPairing = true }
+            model.refreshScreenCapture()
         }
     }
 
+    // MARK: Header & status
+
+    private var header: some View {
+        HStack(alignment: .firstTextBaseline) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("AirBridge").font(.headline)
+                Text(model.deviceName).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            }
+            Spacer()
+            if let ip = model.localIP, let port = model.port {
+                Label("\(ip):\(String(port))", systemImage: "wifi")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                    .accessibilityLabel("Listening on \(ip) port \(String(port))")
+            } else {
+                Label("Starting…", systemImage: "hourglass").font(.caption2).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func controlBanner(_ text: String) -> some View {
+        let controlled = model.controlRole == "controlled"
+        return HStack(spacing: Theme.sm) {
+            Image(systemName: controlled ? "hand.raised.fill" : "cursorarrow.motionlines")
+                .font(.title3)
+                .foregroundStyle(Theme.accent)
+                .frame(width: 24)
+            Text(text)
+                .font(.callout.weight(.medium))
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+        .padding(Theme.sm + 2)
+        .background(RoundedRectangle(cornerRadius: Theme.radius).fill(Theme.accent.opacity(0.14)))
+        .overlay(RoundedRectangle(cornerRadius: Theme.radius).strokeBorder(Theme.accent.opacity(0.35)))
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.updatesFrequently)
+        .transition(.opacity)
+    }
+
+    // MARK: Devices
+
+    private var devicesSection: some View {
+        VStack(alignment: .leading, spacing: Theme.sm) {
+            SectionHeader(title: "Devices")
+            if model.devices.isEmpty {
+                Text("No paired devices yet — pair one below.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            ForEach(model.devices) { d in deviceRow(d) }
+        }
+    }
+
+    private func deviceRow(_ d: DeviceRow) -> some View {
+        let lease: String? = model.controlPeer == d.id
+            ? (model.controlRole == "controlled" ? "Controlling this Mac" : (model.controlRole == "controlling" ? "Under control" : nil))
+            : nil
+        return HStack(spacing: 10) {
+            ZStack(alignment: .bottomTrailing) {
+                Image(systemName: platformIcon(d.plat))
+                    .font(.system(size: 18))
+                    .frame(width: 28, height: 28)
+                    .foregroundStyle(d.connected ? .primary : .secondary)
+                Circle()
+                    .fill(d.connected ? Theme.accent : Color.secondary.opacity(0.5))
+                    .frame(width: 8, height: 8)
+                    .overlay(Circle().strokeBorder(.background, lineWidth: 1.5))
+            }
+            VStack(alignment: .leading, spacing: 1) {
+                Text(d.name).lineLimit(1)
+                HStack(spacing: Theme.xs) {
+                    Text(d.connected ? "Connected" : (d.status ?? "Not connected"))
+                        .foregroundStyle(d.connected ? Theme.accent : .secondary)
+                    if let lease {
+                        Text("·").foregroundStyle(.secondary)
+                        Text(lease).foregroundStyle(.primary)
+                    }
+                }
+                .font(.caption2)
+                .lineLimit(1)
+            }
+            Spacer()
+            Menu {
+                if d.connected {
+                    Button("Disconnect") { PeerManager.shared.disconnect(peerId: d.id) }
+                } else if d.outbound {
+                    Button("Connect") { PeerManager.shared.connect(peerId: d.id) }
+                }
+                Divider()
+                Button("Forget Device", role: .destructive) { PeerManager.shared.forget(peerId: d.id) }
+            } label: {
+                Image(systemName: "ellipsis.circle").font(.system(size: 15))
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .accessibilityLabel("Options for \(d.name)")
+        }
+        .accessibilityElement(children: .contain)
+    }
+
+    // MARK: Pairing
+
     private var pairingSection: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: Theme.sm) {
             if !model.allowPairing {
                 Text("New pairings are turned off").font(.caption).foregroundStyle(.secondary)
             } else {
                 if let qr = model.qrImage {
-                    Image(nsImage: qr).interpolation(.none).resizable().frame(width: 160, height: 160).cornerRadius(6)
-                    Text("Scan with the AirBridge app").font(.caption).foregroundStyle(.secondary)
+                    Image(nsImage: qr)
+                        .interpolation(.none)
+                        .resizable()
+                        .frame(width: 168, height: 168)
+                        .padding(Theme.sm)
+                        .background(RoundedRectangle(cornerRadius: Theme.radius).fill(.white))
+                        .accessibilityLabel("Pairing QR code")
                 }
-                Text(spacedCode(model.pairingCode))
-                    .font(.system(size: 24, weight: .semibold, design: .monospaced))
-                    .textSelection(.enabled)
-                Text("Or enter this code on the other device").font(.caption).foregroundStyle(.secondary)
+                Text("Pair from your phone or PC")
+                    .font(.callout.weight(.semibold))
+                Text("Scan this code in the AirBridge app, or pick this Mac from its device list — both screens then show the same 6 digits to confirm.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
                 if model.pairingLocked {
-                    Text("Too many wrong codes — pairing paused for a minute").font(.caption).foregroundStyle(.orange)
+                    Label("Too many failed attempts — pairing paused for a minute", systemImage: "lock")
+                        .font(.caption).foregroundStyle(.orange)
                 }
             }
             Toggle("Allow new pairings", isOn: Binding(
@@ -248,42 +410,33 @@ struct MenuView: View {
                 .toggleStyle(.switch).controlSize(.small)
         }
         .frame(maxWidth: .infinity)
-        .padding(.top, 4)
+        .padding(.vertical, Theme.sm)
     }
 
     private var hostsSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: Theme.sm) {
             if model.hosts.isEmpty {
-                Text("Searching for devices…").font(.caption).foregroundStyle(.secondary)
+                HStack(spacing: Theme.sm) {
+                    ProgressView().controlSize(.small)
+                    Text("Looking for AirBridge computers…").font(.caption).foregroundStyle(.secondary)
+                }
             }
             ForEach(model.hosts) { h in
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack {
-                        Image(systemName: platformIcon(h.plat)).frame(width: 18)
+                HStack(spacing: 10) {
+                    Image(systemName: platformIcon(h.plat)).frame(width: 28)
+                    VStack(alignment: .leading, spacing: 1) {
                         Text(h.name).lineLimit(1)
-                        Spacer()
-                        if codeHost != h.id {
-                            Button("Pair…") { codeHost = h.id; code = "" }.controlSize(.small)
-                        }
+                        Text(h.status ?? platformName(h.plat)).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
                     }
-                    if let status = h.status {
-                        Text(status).font(.caption2).foregroundStyle(.secondary)
-                    }
-                    if codeHost == h.id {
-                        HStack {
-                            TextField("6-digit code", text: $code)
-                                .textFieldStyle(.roundedBorder)
-                                .onSubmit { submitCode(h.id) }
-                            Button("Pair") { submitCode(h.id) }
-                                .disabled(code.filter(\.isNumber).count != 6)
-                            Button("Cancel") { codeHost = nil }
-                        }
+                    Spacer()
+                    Button("Pair") { PeerManager.shared.pairConfirm(hostId: h.id) }
                         .controlSize(.small)
-                    }
+                        .disabled(h.status != nil && model.pairPrompts.contains { !$0.incoming && $0.peerName == h.name })
+                        .accessibilityLabel("Pair with \(h.name)")
                 }
             }
         }
-        .padding(.top, 4)
+        .padding(.vertical, Theme.xs)
     }
 
     private var settingsSection: some View {
@@ -296,19 +449,7 @@ struct MenuView: View {
                 .disabled(newName.trimmingCharacters(in: .whitespaces).isEmpty || newName == model.deviceName)
         }
         .controlSize(.small)
-        .padding(.top, 4)
-    }
-
-    private func submitCode(_ hostId: String) {
-        let digits = code.filter(\.isNumber)
-        guard digits.count == 6 else { return }
-        PeerManager.shared.pair(hostId: hostId, code: digits)
-        codeHost = nil
-        code = ""
-    }
-
-    private func spacedCode(_ c: String) -> String {
-        c.count == 6 ? "\(c.prefix(3)) \(c.suffix(3))" : c
+        .padding(.top, Theme.xs)
     }
 
     private func openAndFront(_ id: String, title: String) {
@@ -321,6 +462,132 @@ struct MenuView: View {
                 window.orderFrontRegardless()
             }
         }
+    }
+}
+
+// MARK: - Confirm-mode pairing prompt
+
+/// Accept/Reject (incoming) or Confirm/Cancel (outgoing) card. Used in the menu and in the floating panel.
+struct PairPromptCard: View {
+    let prompt: PairPrompt
+    @ObservedObject var model: AppModel
+    var compact = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: compact ? Theme.sm : 12) {
+            HStack(spacing: Theme.sm) {
+                Image(systemName: platformIcon(prompt.peerPlat))
+                    .font(.system(size: compact ? 16 : 22))
+                    .foregroundStyle(Theme.accent)
+                    .frame(width: compact ? 22 : 30)
+                Text(title)
+                    .font(compact ? .callout.weight(.semibold) : .headline)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Text(spacedDigits(prompt.digits))
+                .font(.system(size: compact ? 26 : 34, weight: .semibold, design: .monospaced))
+                .frame(maxWidth: .infinity)
+                .textSelection(.enabled)
+                .accessibilityLabel("Code \(prompt.digits.map(String.init).joined(separator: " "))")
+            Text(subtitle)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack {
+                TimelineView(.periodic(from: .now, by: 1)) { ctx in
+                    let left = max(0, Int(prompt.expires.timeIntervalSince(ctx.date).rounded()))
+                    Text("\(left)s").font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
+                        .accessibilityLabel("\(left) seconds left")
+                }
+                Spacer()
+                if prompt.waiting {
+                    ProgressView().controlSize(.small)
+                    Button("Cancel") { model.respond(to: prompt, accept: false) }
+                } else {
+                    Button(prompt.incoming ? "Reject" : "Cancel") { model.respond(to: prompt, accept: false) }
+                        .keyboardShortcut(compact ? nil : .cancelAction)
+                    Button(prompt.incoming ? "Accept" : "Confirm") { model.respond(to: prompt, accept: true) }
+                        .buttonStyle(.borderedProminent)
+                        .tint(Theme.accent)
+                        .keyboardShortcut(compact ? nil : .defaultAction)
+                }
+            }
+            .controlSize(compact ? .small : .regular)
+        }
+        .padding(compact ? Theme.sm + 2 : Theme.md)
+        .background {
+            if compact {
+                RoundedRectangle(cornerRadius: Theme.radius).fill(.quaternary.opacity(0.6))
+            }
+        }
+        .accessibilityElement(children: .contain)
+    }
+
+    private var title: String {
+        if prompt.incoming { return "\(prompt.peerName) (\(platformName(prompt.peerPlat))) wants to pair" }
+        return prompt.waiting ? "Waiting for \(prompt.peerName) to accept…" : "Pair with \(prompt.peerName)?"
+    }
+
+    private var subtitle: String {
+        if prompt.incoming { return "Accept only if \(prompt.peerName) shows the same code." }
+        return prompt.waiting ? "Accept the pairing on \(prompt.peerName)." : "Confirm only if \(prompt.peerName) shows the same code."
+    }
+}
+
+/// Floating, non-activating panels for pairing prompts: they appear above other apps without stealing focus.
+@MainActor final class PairPromptPanels {
+    static let shared = PairPromptPanels()
+    private var panels: [String: NSPanel] = [:]
+
+    func show(_ p: PairPrompt) {
+        if let panel = panels[p.id] {
+            (panel.contentViewController as? NSHostingController<PairPromptPanelView>)?.rootView =
+                PairPromptPanelView(prompt: p, model: AppModel.shared)
+            return
+        }
+        let host = NSHostingController(rootView: PairPromptPanelView(prompt: p, model: AppModel.shared))
+        host.sizingOptions = [.preferredContentSize]
+        let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 340, height: 220),
+                            styleMask: [.nonactivatingPanel, .titled, .fullSizeContentView, .utilityWindow],
+                            backing: .buffered, defer: false)
+        panel.contentViewController = host
+        panel.titleVisibility = .hidden
+        panel.titlebarAppearsTransparent = true
+        panel.isMovableByWindowBackground = true
+        panel.level = .floating
+        panel.isFloatingPanel = true
+        panel.hidesOnDeactivate = false
+        panel.becomesKeyOnlyIfNeeded = true
+        panel.isReleasedWhenClosed = false
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        panel.standardWindowButton(.closeButton)?.isHidden = true
+        panel.standardWindowButton(.miniaturizeButton)?.isHidden = true
+        panel.standardWindowButton(.zoomButton)?.isHidden = true
+        panel.layoutIfNeeded()
+        if let screen = NSScreen.main {
+            let v = screen.visibleFrame
+            let size = panel.frame.size
+            let offset = CGFloat(panels.count) * 24
+            panel.setFrameOrigin(NSPoint(x: v.maxX - size.width - 16 - offset, y: v.maxY - size.height - 16 - offset))
+        }
+        panels[p.id] = panel
+        panel.orderFrontRegardless()
+        NSAccessibility.post(element: panel, notification: .windowCreated)
+    }
+
+    func dismiss(_ id: String) {
+        panels.removeValue(forKey: id)?.close()
+    }
+}
+
+struct PairPromptPanelView: View {
+    let prompt: PairPrompt
+    @ObservedObject var model: AppModel
+
+    var body: some View {
+        PairPromptCard(prompt: prompt, model: model)
+            .frame(width: 340)
+            .background(.regularMaterial)
     }
 }
 

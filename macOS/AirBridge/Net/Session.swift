@@ -5,17 +5,45 @@ import Network
 nonisolated enum ClientOutcome: Equatable {
     case ready
     case needsPairing          // host does not know us / our key was rejected
-    case pairFailed(String)    // pair_fail reason
+    case pairFailed(String)    // pair_fail reason, or "cancelled" when our user cancelled
     case badHost(String)       // wrong id, bad MAC/proof, version mismatch
     case busy
     case network               // closed before the handshake finished
 }
 
-/// One WebSocket connection: handshake (§3), liveness (§4), and routing of ready-state messages.
-/// All methods run on `PeerManager.queue`.
+/// How an outbound connection pairs (§3.3).
+nonisolated enum PairMode: Equatable, Sendable {
+    case qr(Data)    // the 32-byte secret `S` from the host's QR `k`
+    case confirm     // numeric comparison
+}
+
+/// A mode-`confirm` pairing waiting for the local user (§3.3).
+nonisolated struct PairPrompt: Identifiable, Equatable, Sendable {
+    let id: String
+    /// true: a client wants to pair with this Mac (Accept / Reject).
+    /// false: this Mac is pairing with a host (Confirm / Cancel).
+    let incoming: Bool
+    let peerName: String
+    let peerPlat: String
+    let digits: String
+    let expires: Date
+    /// Outgoing only: our user confirmed; waiting for the host's user.
+    var waiting = false
+}
+
+/// One WebSocket connection: handshake (§3), secure channel (§3.6), liveness (§4), and routing of
+/// ready-state messages. All methods run on `PeerManager.queue`.
 nonisolated final class Session: @unchecked Sendable {
     enum Role { case host, client }
-    enum State { case connecting, awaitingHello, awaitingAuth, awaitingPairResult, awaitingAuthResult, ready, closed }
+    enum State {
+        case connecting, awaitingHello
+        case awaitingAuth          // host: hello exchanged, waiting for auth / pair / pair_start
+        case confirming            // host: pair_start received, waiting for the user and/or the client's proof
+        case awaitingAuthResult    // client
+        case awaitingUserConfirm   // client, mode confirm: digits shown, waiting for our user
+        case awaitingPairResult    // client
+        case ready, closed
+    }
 
     let ws: WebSocket
     let role: Role
@@ -25,6 +53,9 @@ nonisolated final class Session: @unchecked Sendable {
 
     private let localNonce = Proto.randomBytes(16)
     private var remoteNonce = Data()
+    private var kx: KeyExchange? = KeyExchange()
+    private var channel: SecureChannel?
+    private var transcript = Data()
     private(set) var peerId = ""
     private(set) var peerName = "Unknown"
     private(set) var peerPlat = ""
@@ -34,12 +65,19 @@ nonisolated final class Session: @unchecked Sendable {
 
     // Client role.
     let expectedPeerId: String?
-    private let pairSecret: Data?
-    private var sessionKey: Data?
+    private let pairing: PairMode?
+    private var pairKey: Data?
     private(set) var clientOutcome: ClientOutcome?
+
+    // Mode confirm (both roles).
+    private var confirmStarted: TimeInterval?
+    private(set) var prompt: PairPrompt?
+    private var userAccepted = false
+    private var verifiedKey: Data?
 
     /// `bye` reason received from the peer, or the reason we closed with.
     private(set) var closeReason: String?
+    private var closing = false
     private let startedAt = ProcessInfo.processInfo.systemUptime
     private var lastSent = ProcessInfo.processInfo.systemUptime
     private var lastReceived = ProcessInfo.processInfo.systemUptime
@@ -47,16 +85,17 @@ nonisolated final class Session: @unchecked Sendable {
     private(set) var transfers: TransferService?
 
     init(ws: WebSocket, role: Role, queue: DispatchQueue, manager: PeerManager,
-         expectedPeerId: String? = nil, pairSecret: Data? = nil) {
+         expectedPeerId: String? = nil, pairing: PairMode? = nil) {
         self.ws = ws
         self.role = role
         self.queue = queue
         self.manager = manager
         self.expectedPeerId = expectedPeerId
-        self.pairSecret = pairSecret
+        self.pairing = pairing
     }
 
     var isReady: Bool { state == .ready }
+    var hasIncomingPrompt: Bool { prompt?.incoming == true }
 
     var peerInfo: PeerInfo {
         PeerInfo(id: peerId, name: peerName, platform: peerPlat, caps: peerCaps, screenW: screenW, screenH: screenH)
@@ -88,35 +127,72 @@ nonisolated final class Session: @unchecked Sendable {
         sendText(data)
     }
 
+    /// Sends a JSON message: in the clear during the handshake, inside the envelope once ready.
     func sendText(_ data: Data) {
-        guard state != .closed else { return }
+        guard state != .closed, !closing else { return }
         lastSent = ProcessInfo.processInfo.systemUptime
-        ws.sendText(data)
+        if state == .ready {
+            guard let channel, let env = channel.seal(.text, data) else { return }
+            ws.sendBinary(env)
+        } else {
+            ws.sendText(data)
+        }
     }
 
-    func sendBinary(_ data: Data, completion: @escaping (Bool) -> Void) {
-        guard state == .ready else { completion(false); return }
+    /// Sends an inner binary frame (starting with its own kind byte) inside the envelope.
+    func sendBinary(_ frame: Data, completion: @escaping (Bool) -> Void) {
+        guard state == .ready, !closing, let channel, frame.count <= Proto.maxBinaryFrame,
+              let env = channel.seal(.binary, frame) else { completion(false); return }
         lastSent = ProcessInfo.processInfo.systemUptime
-        ws.sendBinary(data, completion: completion)
+        ws.sendBinary(env, completion: completion)
     }
 
-    /// Best-effort `bye`, then close.
+    /// Best-effort `bye` (encrypted, ready sessions only), then a WebSocket close.
     func close(bye reason: String?) {
-        guard state != .closed else { return }
+        guard state != .closed, !closing else { return }
         if closeReason == nil { closeReason = reason }
         if let reason, state == .ready { send(["t": "bye", "reason": reason]) }
+        closing = true
         ws.close()
+    }
+
+    /// Our user accepted/confirmed (`true`) or rejected/cancelled (`false`) a pending confirm-mode pairing.
+    func userResponded(accept: Bool) {
+        guard prompt != nil else { return }
+        switch (role, state) {
+        case (.host, .confirming):
+            if accept {
+                userAccepted = true
+                finishConfirmIfPossible()
+            } else {
+                fail("pair_fail", "rejected")
+            }
+        case (.client, .awaitingUserConfirm):
+            if accept { sendConfirmProof() } else { finishClient(.pairFailed("cancelled")) }
+        case (.client, .awaitingPairResult):
+            if !accept { finishClient(.pairFailed("cancelled")) }
+        default:
+            break
+        }
     }
 
     private func fail(_ type: String, _ reason: String) {
         send(["t": type, "reason": reason])
         closeReason = closeReason ?? reason
+        closing = true
         ws.close()
     }
 
     private func finishClient(_ outcome: ClientOutcome) {
         if clientOutcome == nil { clientOutcome = outcome }
-        if outcome != .ready { ws.close() }
+        if outcome != .ready { closing = true; ws.close() }
+    }
+
+    /// Any plaintext or undecryptable frame after ready (§3.6): encrypted `bye error`, then close.
+    private func protocolError(_ why: String) {
+        NSLog("AirBridge: protocol error from \(peerName): \(why)")
+        closeReason = closeReason ?? "error"
+        close(bye: "error")
     }
 
     // MARK: Lifecycle
@@ -124,7 +200,7 @@ nonisolated final class Session: @unchecked Sendable {
     private func didOpen() {
         state = .awaitingHello
         lastReceived = ProcessInfo.processInfo.systemUptime
-        if role == .client { send(Identity.hello(nonce: localNonce, paired: nil)) }
+        if role == .client, let kx { send(Identity.hello(nonce: localNonce, publicKey: kx.publicKey, paired: nil)) }
     }
 
     private func tick() {
@@ -140,7 +216,12 @@ nonisolated final class Session: @unchecked Sendable {
                 send(["t": "ping", "ts": Proto.nowMs()])
             }
         default:
-            if now - startedAt > Proto.handshakeTimeout {
+            if let started = confirmStarted {
+                // Mode confirm: 60 s from pair_start (the host enforces it; the client allows a little slack).
+                let limit = Proto.confirmTimeout + (role == .client ? 5 : 0)
+                guard now - started > limit, !closing else { return }
+                if role == .host { fail("pair_fail", "timeout") } else { finishClient(.pairFailed("timeout")) }
+            } else if now - startedAt > Proto.handshakeTimeout {
                 if role == .client { clientOutcome = clientOutcome ?? .network }
                 ws.cancel()
             }
@@ -153,13 +234,26 @@ nonisolated final class Session: @unchecked Sendable {
         state = .closed
         timer?.cancel()
         timer = nil
+        kx?.destroy()
+        kx = nil
+        endPrompt()
         if role == .client, clientOutcome == nil { clientOutcome = .network }
         transfers?.teardown()
         transfers = nil
         manager?.sessionClosed(self, wasReady: wasReady)
     }
 
+    /// Derives the session keys (destroying the ephemeral key) and switches to the encrypted channel.
+    /// The caller has already sent `auth_ok`/`pair_ok` in the clear (host) or verified it (client).
     private func becomeReady() {
+        guard let ch = kx?.deriveChannel(isClient: role == .client) else {
+            closing = true
+            ws.close()
+            return
+        }
+        kx = nil
+        channel = ch
+        endPrompt()
         state = .ready
         transfers = TransferService(session: self, queue: queue)
         if role == .client { clientOutcome = .ready }
@@ -169,27 +263,63 @@ nonisolated final class Session: @unchecked Sendable {
     // MARK: Receiving
 
     private func didReceiveText(_ data: Data) {
+        guard !closing else { return }
+        if state == .ready { protocolError("plaintext text frame"); return }
         guard data.count <= Proto.maxTextFrame, let msg = Proto.decode(data), let t = msg.str("t") else { return }
-        if state == .ready { route(t, msg) } else { handshake(t, msg) }
+        handshake(t, msg)
     }
 
     private func didReceiveBinary(_ data: Data) {
-        guard state == .ready, data.first == Proto.chunkKind else { return }
-        transfers?.handleChunk(data)
+        guard !closing, state == .ready, let channel else { return } // Rule 5: nothing binary before ready.
+        guard let kind = data.first else { return }
+        switch kind {
+        case SecureChannel.envelopeKind:
+            break
+        case Proto.chunkKind, PeerBus.binaryKindVideo:
+            protocolError("unencrypted binary frame of kind \(kind)")
+            return
+        default:
+            return // Rule 2: unknown kind → ignore.
+        }
+        guard data.count <= Proto.maxEnvelope else { protocolError("oversized envelope"); return }
+        let inner: (kind: UInt8, payload: Data)
+        do {
+            inner = try channel.open(data)
+        } catch {
+            protocolError((error as? SecureChannel.OpenError) == .sequence ? "bad sequence number" : "envelope failed to decrypt")
+            return
+        }
+        switch SecureChannel.InnerKind(rawValue: inner.kind) {
+        case .text:
+            guard inner.payload.count <= Proto.maxTextFrame, let msg = Proto.decode(inner.payload),
+                  let t = msg.str("t") else { return }
+            route(t, msg)
+        case .binary:
+            switch inner.payload.first {
+            case Proto.chunkKind: transfers?.handleChunk(inner.payload)
+            case PeerBus.binaryKindVideo: PeerBus.shared.dispatchBinary(from: peerId, inner.payload)
+            default: break
+            }
+        case nil:
+            break
+        }
     }
 
     private func route(_ t: String, _ msg: [String: Any]) {
         switch t {
         case "ping":
             send(["t": "pong", "ts": msg["ts"] ?? Proto.nowMs()])
-        case "pong", "error", "hello", "auth", "pair":
+        case "pong", "error", "hello", "auth", "pair", "pair_start":
             break
         case "bye":
+            // Reply with a close frame (WebSocket.close waits for the peer's echo, max 2 s).
             closeReason = msg.str("reason") ?? "error"
+            closing = true
             ws.close()
         case "unpair":
             closeReason = "unpair"
             manager?.peerUnpairedUs(self)
+            closing = true
             ws.close()
         case "name":
             if let n = msg.str("name")?.trimmingCharacters(in: .whitespacesAndNewlines), !n.isEmpty {
@@ -209,18 +339,23 @@ nonisolated final class Session: @unchecked Sendable {
 
     // MARK: Handshake (§3)
 
-    /// Parses a peer `hello`. Returns false (after replying/closing) if it is unacceptable.
+    /// Parses a peer `hello` and completes the key agreement. Returns false (after replying/closing) if it
+    /// is unacceptable.
     private func acceptHello(_ msg: [String: Any]) -> Bool {
         guard msg.int("v") == Proto.version else {
             if role == .host { fail("auth_fail", "version") } else { finishClient(.badHost("version")) }
             return false
         }
-        guard let id = msg.str("id"), !id.isEmpty, id.count <= 100, id != Identity.id,
-              let nonceStr = msg.str("nonce"), let nonce = Data(base64Encoded: nonceStr), nonce.count >= 8 else {
-            ws.close()
-            if role == .client { clientOutcome = .badHost("Malformed hello") }
+        guard let id = msg.str("id"), !id.isEmpty, id.count <= 100, !id.contains("|"), id != Identity.id,
+              let nonceStr = msg.str("nonce"), let nonce = Data(base64Encoded: nonceStr),
+              nonce.count >= 8, nonce.count <= 64,
+              let peerKey = KeyExchange.parsePublicKey(msg.str("pk")),
+              let kx, kx.complete(peer: peerKey, isClient: role == .client, localNonce: localNonce,
+                                  remoteNonce: nonce, localId: Identity.id, remoteId: id) else {
+            if role == .client { finishClient(.badHost("Malformed hello")) } else { closing = true; ws.close() }
             return false
         }
+        transcript = kx.transcript
         peerId = id
         remoteNonce = nonce
         peerName = String((msg.str("name") ?? "Unknown").prefix(100))
@@ -235,35 +370,54 @@ nonisolated final class Session: @unchecked Sendable {
 
     private func handshake(_ t: String, _ msg: [String: Any]) {
         switch (role, state, t) {
+        // ---- Host ----
         case (.host, .awaitingHello, "hello"):
-            guard acceptHello(msg) else { return }
-            send(Identity.hello(nonce: localNonce, paired: PeerStore.shared.hasKey(peerId)))
+            guard acceptHello(msg), let kx else { return }
+            send(Identity.hello(nonce: localNonce, publicKey: kx.publicKey, paired: PeerStore.shared.hasKey(peerId)))
             state = .awaitingAuth
 
         case (.host, .awaitingAuth, "auth"):
             guard let k = PeerStore.shared.key(peerId) else { fail("auth_fail", "unpaired"); return }
-            let expected = Proto.authMac(k, cNonce: remoteNonce, hNonce: localNonce, clientId: peerId)
             guard let mac = msg.str("mac").flatMap({ Data(base64Encoded: $0) }),
-                  Proto.constantTimeEqual(mac, expected) else { fail("auth_fail", "bad_mac"); return }
-            let ack = Proto.authAckMac(k, cNonce: remoteNonce, hNonce: localNonce, hostId: Identity.id)
-            send(["t": "auth_ok", "mac": ack.base64EncodedString()])
+                  Proto.constantTimeEqual(mac, Proto.authMac(k, transcript)) else { fail("auth_fail", "bad_mac"); return }
+            send(["t": "auth_ok", "mac": Proto.authAckMac(k, transcript).base64EncodedString()])
             PeerStore.shared.rename(id: peerId, name: peerName)
             becomeReady()
 
-        case (.host, .awaitingAuth, "pair"):
+        case (.host, .awaitingAuth, "pair_start"):
+            guard (msg.str("mode") ?? "confirm") == "confirm" else { return }
+            startConfirm()
+
+        case (.host, .awaitingAuth, "pair"), (.host, .confirming, "pair"):
             guard let proof = msg.str("proof").flatMap({ Data(base64Encoded: $0) }) else {
-                fail("pair_fail", "bad_code"); return
+                fail("pair_fail", "bad_proof"); return
             }
-            switch Pairing.shared.verify(clientId: peerId, cNonce: remoteNonce, hNonce: localNonce, proof: proof) {
-            case .ok(let k):
-                PeerStore.shared.save(id: peerId, key: k, name: peerName, plat: peerPlat)
-                let ack = Proto.pairAckProof(k, cNonce: remoteNonce, hNonce: localNonce, hostId: Identity.id)
-                send(["t": "pair_ok", "proof": ack.base64EncodedString()])
-                becomeReady()
-            case .fail(let reason):
-                fail("pair_fail", reason)
+            switch msg.str("mode") ?? "qr" {
+            case "qr":
+                guard state == .awaitingAuth else { return }
+                switch Pairing.shared.verifyQR(clientId: peerId, transcript: transcript, proof: proof) {
+                case .ok(let k): completePairing(k)
+                case .fail(let reason): fail("pair_fail", reason)
+                }
+            case "confirm":
+                if state == .awaitingAuth {
+                    // Lenient: `pair` without `pair_start` starts the prompt now.
+                    startConfirm()
+                    guard state == .confirming else { return }
+                }
+                guard verifiedKey == nil, let k = kx?.confirmKey else { return }
+                switch Pairing.shared.verify(k: k, transcript: transcript, proof: proof) {
+                case .ok(let k):
+                    verifiedKey = k
+                    finishConfirmIfPossible()
+                case .fail(let reason):
+                    fail("pair_fail", reason)
+                }
+            default:
+                fail("pair_fail", "bad_proof")
             }
 
+        // ---- Client ----
         case (.client, .awaitingHello, "hello"):
             guard acceptHello(msg) else { return }
             if let expected = expectedPeerId, expected != peerId {
@@ -271,26 +425,38 @@ nonisolated final class Session: @unchecked Sendable {
                 return
             }
             let hostKnowsUs = msg.bool("paired") ?? false
-            if let secret = pairSecret {
-                let k = Proto.deriveKey(secret: secret, clientId: Identity.id, hostId: peerId)
-                sessionKey = k
-                let proof = Proto.pairProof(k, cNonce: localNonce, hNonce: remoteNonce, clientId: Identity.id)
-                send(["t": "pair", "proof": proof.base64EncodedString()])
+            switch pairing {
+            case .qr(let secret):
+                let k = Proto.qrKey(secret: secret, clientId: Identity.id, hostId: peerId)
+                pairKey = k
+                send(["t": "pair", "mode": "qr", "proof": Proto.pairProof(k, transcript).base64EncodedString()])
                 state = .awaitingPairResult
-            } else if let k = PeerStore.shared.key(peerId), hostKnowsUs {
-                sessionKey = k
-                let mac = Proto.authMac(k, cNonce: localNonce, hNonce: remoteNonce, clientId: Identity.id)
-                send(["t": "auth", "mac": mac.base64EncodedString()])
-                state = .awaitingAuthResult
-            } else {
-                // The host forgot us (or we never paired): our key is useless now.
-                PeerStore.shared.delete(peerId)
-                finishClient(.needsPairing)
+            case .confirm:
+                send(["t": "pair_start", "mode": "confirm"])
+                state = .awaitingUserConfirm
+                confirmStarted = ProcessInfo.processInfo.systemUptime
+                if Pairing.debugAutoAccept {
+                    sendConfirmProof()
+                } else if let digits = kx?.confirmDigits {
+                    showPrompt(PairPrompt(id: UUID().uuidString, incoming: false, peerName: peerName,
+                                          peerPlat: peerPlat, digits: digits,
+                                          expires: Date().addingTimeInterval(Proto.confirmTimeout)))
+                }
+            case nil:
+                if let k = PeerStore.shared.key(peerId), hostKnowsUs {
+                    pairKey = k
+                    send(["t": "auth", "mac": Proto.authMac(k, transcript).base64EncodedString()])
+                    state = .awaitingAuthResult
+                } else {
+                    // The host forgot us (or we never paired): our key is useless now.
+                    PeerStore.shared.delete(peerId)
+                    finishClient(.needsPairing)
+                }
             }
 
         case (.client, .awaitingAuthResult, "auth_ok"):
-            guard let k = sessionKey, let mac = msg.str("mac").flatMap({ Data(base64Encoded: $0) }),
-                  Proto.constantTimeEqual(mac, Proto.authAckMac(k, cNonce: localNonce, hNonce: remoteNonce, hostId: peerId)) else {
+            guard let k = pairKey, let mac = msg.str("mac").flatMap({ Data(base64Encoded: $0) }),
+                  Proto.constantTimeEqual(mac, Proto.authAckMac(k, transcript)) else {
                 finishClient(.badHost("Host failed authentication"))
                 return
             }
@@ -298,8 +464,8 @@ nonisolated final class Session: @unchecked Sendable {
             becomeReady()
 
         case (.client, .awaitingPairResult, "pair_ok"):
-            guard let k = sessionKey, let proof = msg.str("proof").flatMap({ Data(base64Encoded: $0) }),
-                  Proto.constantTimeEqual(proof, Proto.pairAckProof(k, cNonce: localNonce, hNonce: remoteNonce, hostId: peerId)) else {
+            guard let k = pairKey, let proof = msg.str("proof").flatMap({ Data(base64Encoded: $0) }),
+                  Proto.constantTimeEqual(proof, Proto.pairAckProof(k, transcript)) else {
                 finishClient(.badHost("Host failed pairing verification"))
                 return
             }
@@ -318,10 +484,67 @@ nonisolated final class Session: @unchecked Sendable {
             }
 
         case (.client, _, "pair_fail"):
-            finishClient(.pairFailed(msg.str("reason") ?? "bad_code"))
+            finishClient(.pairFailed(msg.str("reason") ?? "bad_proof"))
 
         default:
             break // Rule 5: nothing else before ready.
         }
+    }
+
+    // MARK: Mode confirm
+
+    /// Host: `pair_start` — check policy, then show the digits (or auto-accept under the test hook).
+    private func startConfirm() {
+        if let reason = Pairing.shared.refusal() { fail("pair_fail", reason); return }
+        guard let manager, manager.incomingPromptCount < PeerManager.maxIncomingPrompts else {
+            fail("pair_fail", "locked"); return
+        }
+        guard let digits = kx?.confirmDigits else { closing = true; ws.close(); return }
+        state = .confirming
+        confirmStarted = ProcessInfo.processInfo.systemUptime
+        if Pairing.debugAutoAccept {
+            NSLog("AirBridge: AIRBRIDGE_DEBUG_AUTO_ACCEPT — accepting \(peerName) (\(digits))")
+            userAccepted = true
+        } else {
+            showPrompt(PairPrompt(id: UUID().uuidString, incoming: true, peerName: peerName, peerPlat: peerPlat,
+                                  digits: digits, expires: Date().addingTimeInterval(Proto.confirmTimeout)))
+        }
+    }
+
+    /// Host: `pair_ok` once both the user accepted and the client's proof verified.
+    private func finishConfirmIfPossible() {
+        guard state == .confirming, userAccepted, let k = verifiedKey else { return }
+        completePairing(k)
+    }
+
+    private func completePairing(_ k: Data) {
+        PeerStore.shared.save(id: peerId, key: k, name: peerName, plat: peerPlat)
+        Pairing.shared.succeeded()
+        send(["t": "pair_ok", "proof": Proto.pairAckProof(k, transcript).base64EncodedString()])
+        becomeReady()
+    }
+
+    /// Client: our user confirmed the digits.
+    private func sendConfirmProof() {
+        guard state == .awaitingUserConfirm, let k = kx?.confirmKey else { return }
+        pairKey = k
+        send(["t": "pair", "mode": "confirm", "proof": Proto.pairProof(k, transcript).base64EncodedString()])
+        state = .awaitingPairResult
+        if var p = prompt {
+            p.waiting = true
+            prompt = p
+            manager?.pairPromptChanged(p)
+        }
+    }
+
+    private func showPrompt(_ p: PairPrompt) {
+        prompt = p
+        manager?.pairPromptChanged(p)
+    }
+
+    private func endPrompt() {
+        guard let p = prompt else { return }
+        prompt = nil
+        manager?.pairPromptEnded(p.id)
     }
 }

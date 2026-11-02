@@ -118,12 +118,12 @@ nonisolated final class PeerStore: @unchecked Sendable {
     }
 }
 
-/// Host-side pairing secrets (§2.4, §3.3): rotating QR secret and 6-digit code, with attempt limiting.
+/// Host-side pairing policy (§2.4, §3.3): the rotating QR secret, the "allow new pairings" switch, and
+/// the failed-proof lockout shared by both pairing modes.
 nonisolated final class Pairing: @unchecked Sendable {
     static let shared = Pairing()
 
     struct Snapshot: Equatable, Sendable {
-        var code: String
         var secret: Data
         var allowPairing: Bool
         var lockedUntil: Date?
@@ -131,14 +131,15 @@ nonisolated final class Pairing: @unchecked Sendable {
 
     enum Verdict { case ok(Data), fail(String) }
 
-    private static let codeLifetime: TimeInterval = 5 * 60
+    /// Test hook: `AIRBRIDGE_DEBUG_AUTO_ACCEPT=1` auto-accepts mode-`confirm` pairings on both sides
+    /// (host Accept and client Confirm) without showing a prompt. Never set in normal use.
+    static let debugAutoAccept = ProcessInfo.processInfo.environment["AIRBRIDGE_DEBUG_AUTO_ACCEPT"] == "1"
+
     private static let secretLifetime: TimeInterval = 10 * 60
     private static let maxFailures = 5
     private static let lockout: TimeInterval = 60
 
     private let lock = NSLock()
-    private var code = ""
-    private var codeCreated = Date.distantPast
     private var secret = Data()
     private var secretCreated = Date.distantPast
     private var failures = 0
@@ -146,12 +147,12 @@ nonisolated final class Pairing: @unchecked Sendable {
     private var allow = UserDefaults.standard.object(forKey: "AirBridgeAllowPairing") as? Bool ?? true
     private var timer: DispatchSourceTimer?
 
-    /// Called (on an arbitrary queue) whenever the code, secret or lock state changes.
+    /// Called (on an arbitrary queue) whenever the secret or lock state changes.
     var onChange: ((Snapshot) -> Void)?
 
     func start() {
         lock.lock()
-        rotateCode(); rotateSecret()
+        rotateSecret()
         lock.unlock()
         let t = DispatchSource.makeTimerSource(queue: .global(qos: .utility))
         t.schedule(deadline: .now() + 5, repeating: 5)
@@ -163,7 +164,7 @@ nonisolated final class Pairing: @unchecked Sendable {
 
     var snapshot: Snapshot {
         lock.lock(); defer { lock.unlock() }
-        return Snapshot(code: code, secret: secret, allowPairing: allow, lockedUntil: lockedUntil)
+        return Snapshot(secret: secret, allowPairing: allow, lockedUntil: lockedUntil)
     }
 
     func setAllowPairing(_ on: Bool) {
@@ -174,64 +175,61 @@ nonisolated final class Pairing: @unchecked Sendable {
         publish()
     }
 
-    /// Verifies a `pair` proof against both current secrets.
-    func verify(clientId: String, cNonce: Data, hNonce: Data, proof: Data) -> Verdict {
+    /// `pair_fail` reason if a new pairing attempt must be refused right now (`not_pairing` / `locked`).
+    func refusal() -> String? {
+        lock.lock(); defer { lock.unlock() }
+        if !allow { return "not_pairing" }
+        if let until = lockedUntil, until > Date() { return "locked" }
+        return nil
+    }
+
+    /// Mode `qr`: derives K from the current QR secret and checks `proof = HMAC(K, "pair|" | T)`.
+    func verifyQR(clientId: String, transcript: Data, proof: Data) -> Verdict {
+        lock.lock()
+        let k = Proto.qrKey(secret: secret, clientId: clientId, hostId: Identity.id)
+        lock.unlock()
+        return verify(k: k, transcript: transcript, proof: proof)
+    }
+
+    /// Checks `proof = HMAC(K, "pair|" | T)` for an already derived K (mode `confirm`). Failures count
+    /// towards the lockout in both modes.
+    func verify(k: Data, transcript: Data, proof: Data) -> Verdict {
+        if let reason = refusal() { return .fail(reason) }
         lock.lock()
         let verdict: Verdict
-        if !allow {
-            verdict = .fail("not_pairing")
-        } else if let until = lockedUntil, until > Date() {
-            verdict = .fail("locked")
+        if Proto.constantTimeEqual(Proto.pairProof(k, transcript), proof) {
+            verdict = .ok(k)
         } else {
-            lockedUntil = nil
-            var match: Data?
-            for s in [secret, Data(code.utf8)] {
-                let k = Proto.deriveKey(secret: s, clientId: clientId, hostId: Identity.id)
-                if Proto.constantTimeEqual(Proto.pairProof(k, cNonce: cNonce, hNonce: hNonce, clientId: clientId), proof) {
-                    match = k
-                }
-            }
-            if let k = match {
+            failures += 1
+            if failures >= Pairing.maxFailures {
                 failures = 0
-                rotateCode(); rotateSecret()
-                verdict = .ok(k)
-            } else {
-                failures += 1
-                if failures >= Pairing.maxFailures {
-                    failures = 0
-                    lockedUntil = Date().addingTimeInterval(Pairing.lockout)
-                    rotateCode()
-                }
-                verdict = .fail("bad_code")
+                lockedUntil = Date().addingTimeInterval(Pairing.lockout)
+                rotateSecret()
             }
+            verdict = .fail("bad_proof")
         }
         lock.unlock()
         publish()
         return verdict
     }
 
+    /// A pairing completed: reset the failure count and rotate the QR secret (§2.4).
+    func succeeded() {
+        lock.lock()
+        failures = 0
+        rotateSecret()
+        lock.unlock()
+        publish()
+    }
+
     private func tick() {
         lock.lock()
         var changed = false
         let now = Date()
-        if now.timeIntervalSince(codeCreated) >= Pairing.codeLifetime { rotateCode(); changed = true }
         if now.timeIntervalSince(secretCreated) >= Pairing.secretLifetime { rotateSecret(); changed = true }
         if let until = lockedUntil, until <= now { lockedUntil = nil; changed = true }
         lock.unlock()
         if changed { publish() }
-    }
-
-    private func rotateCode() {
-        // Test hook: a fixed code when launched with AIRBRIDGE_DEBUG_PAIR_CODE=nnnnnn (never set in normal use).
-        if let fixed = ProcessInfo.processInfo.environment["AIRBRIDGE_DEBUG_PAIR_CODE"], fixed.count == 6, fixed.allSatisfy(\.isNumber) {
-            code = fixed; codeCreated = Date(); return
-        }
-        var n: UInt32 = 0
-        repeat {
-            withUnsafeMutableBytes(of: &n) { _ = SecRandomCopyBytes(kSecRandomDefault, 4, $0.baseAddress!) }
-        } while n >= 4_294_000_000 // rejection sampling: uniform over 0..<1_000_000
-        code = String(format: "%06u", n % 1_000_000)
-        codeCreated = Date()
     }
 
     private func rotateSecret() {
