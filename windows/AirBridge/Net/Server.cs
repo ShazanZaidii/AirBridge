@@ -100,6 +100,7 @@ namespace AirBridge.Net
         {
             string remote = "?";
             int remotePort = 0;
+            IPAddress? local = null;
             try
             {
                 if (client.Client.RemoteEndPoint is IPEndPoint ep)
@@ -108,6 +109,8 @@ namespace AirBridge.Net
                     remote = addr.ToString();
                     remotePort = ep.Port;
                 }
+                if (client.Client.LocalEndPoint is IPEndPoint lep)
+                    local = lep.Address.IsIPv4MappedToIPv6 ? lep.Address.MapToIPv4() : lep.Address;
                 client.NoDelay = true;
                 var stream = client.GetStream();
 
@@ -175,7 +178,7 @@ namespace AirBridge.Net
                         KeepAliveInterval = TimeSpan.FromSeconds(30),
                     });
                     handedOff = true;
-                    _svc.RunInbound(ws, remote, remotePort, client);
+                    _svc.RunInbound(ws, remote, remotePort, client, local);
                 }
                 finally
                 {

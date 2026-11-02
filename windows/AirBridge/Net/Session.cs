@@ -78,6 +78,7 @@ namespace AirBridge.Net
         private long _lastSent = Environment.TickCount64;
         private long _lastRecv = Environment.TickCount64;
         private long _queued;
+        private long _binaryBytes;     // inner binary bytes (file chunks, video) in + out: link idle detection (§10.1)
         private int _closing;
 
         // host-side confirm pairing
@@ -88,6 +89,10 @@ namespace AirBridge.Net
         public SessionRole Role { get; }
         public string RemoteAddress { get; }
         public int RemotePort { get; }
+        /// <summary>Inbound: the local address the peer connected to (identifies a dial over the Wi-Fi Direct adapter).</summary>
+        public System.Net.IPAddress? LocalAddress { get; }
+        /// <summary>Inner binary bytes (file chunks and video) sent + received after ready.</summary>
+        public long BinaryBytes => Interlocked.Read(ref _binaryBytes);
         public string? PeerId { get; private set; }
         public string PeerName { get; private set; } = "";
         public string PeerPlat { get; private set; } = "";
@@ -106,9 +111,9 @@ namespace AirBridge.Net
         public FileTransferSession Files { get; }
 
         public Session(WebSocket ws, SessionRole role, PeerService svc, string remoteAddress, int remotePort,
-                       OutboundIntent? intent = null, IDisposable? owner = null)
+                       OutboundIntent? intent = null, IDisposable? owner = null, System.Net.IPAddress? localAddress = null)
         {
-            _ws = ws; Role = role; _svc = svc; RemoteAddress = remoteAddress; RemotePort = remotePort;
+            _ws = ws; Role = role; _svc = svc; RemoteAddress = remoteAddress; RemotePort = remotePort; LocalAddress = localAddress;
             _intent = intent; _owner = owner;
             _myPk = HandshakeCrypto.EncodePublicKey(_eph);
             _deadline = Environment.TickCount64 + (long)Protocol.HandshakeTimeout.TotalMilliseconds;
@@ -265,6 +270,7 @@ namespace AirBridge.Net
                         {
                             sealedBuf = pool.Rent(f.Length + SecureChannel.Overhead);
                             int n = _channel!.Seal(f.Inner, new ReadOnlySpan<byte>(f.Data, 0, f.Length), sealedBuf);
+                            if (f.Inner == SecureChannel.InnerBinary) Interlocked.Add(ref _binaryBytes, f.Length);
                             await _ws.SendAsync(new ReadOnlyMemory<byte>(sealedBuf, 0, n), WebSocketMessageType.Binary, true, ct).ConfigureAwait(false);
                         }
                         Interlocked.Exchange(ref _lastSent, Environment.TickCount64);
@@ -385,6 +391,7 @@ namespace AirBridge.Net
                 }
                 else if (inner == SecureChannel.InnerBinary && plen >= 1)
                 {
+                    Interlocked.Add(ref _binaryBytes, plen);
                     byte ik = data[p];
                     if (ik == Protocol.KindFileChunk)
                     {
@@ -790,6 +797,8 @@ namespace AirBridge.Net
                 return;
             }
             if (t.StartsWith("xfer_", StringComparison.Ordinal)) { Files.OnText(t, o); return; }
+            // Link upgrades (§10.1) belong to the network half's LinkManager, never to the input half.
+            if (Link.LinkWire.IsLinkType(t)) { _svc.Links.OnMessage(this, t, o); return; }
 
             switch (t)
             {

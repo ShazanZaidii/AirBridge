@@ -37,6 +37,9 @@ namespace AirBridge.Net
 
         public FileTransferSession(Session session, PeerService svc) { _session = session; _svc = svc; }
 
+        /// <summary>Any transfer (either direction) still running on this session.</summary>
+        public bool HasActiveTransfers => !_incoming.IsEmpty || !_outgoing.IsEmpty;
+
         // ================================================================== receiving
 
         private sealed class InFile

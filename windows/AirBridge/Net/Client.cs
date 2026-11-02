@@ -101,7 +101,9 @@ namespace AirBridge.Net
                     if (rec == null || !rec.Dial) return;
 
                     // One session per peer: if any ready session exists (inbound or outbound), just wait.
-                    if (loop.Suspended || _svc.HasReadySession(loop.PeerId))
+                    // Exception (§10.1): while a link to this peer is closing, dial the LAN anyway so the new LAN session
+                    // replaces the link session (make-before-break back).
+                    if (loop.Suspended || (_svc.HasReadySession(loop.PeerId) && !_svc.Links.AllowDialWhileReady(loop.PeerId)))
                     {
                         await loop.Wake.WaitAsync(TimeSpan.FromSeconds(10), ct).ConfigureAwait(false);
                         continue;
@@ -155,7 +157,9 @@ namespace AirBridge.Net
                 _svc.ForgetLocally(loop.PeerId, $"{s.PeerName} no longer recognises this PC. Pair again from the tray.");
                 return false;
             }
-            if (s.ByeReason == "replaced") loop.Suspended = true;
+            // §3.4 pause after bye replaced — except when the replacement is a link upgrade (§10.1): that session must be
+            // redialled when the link ends. LinkManager also clears the pause on teardown (PeerService.ResumeDialing).
+            if (s.ByeReason == "replaced" && !_svc.Links.SuppressReplacedPause(loop.PeerId)) loop.Suspended = true;
             return true;
         }
 
