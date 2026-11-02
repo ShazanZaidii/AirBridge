@@ -23,6 +23,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.shazan.airbridge.AirBridgeService
 import com.shazan.airbridge.R
+import com.shazan.airbridge.net.link.LinkManager
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -124,9 +125,38 @@ class FileTransfer(private val s: Session) {
 
     // ================= sending =================
 
-    fun send(uris: List<Uri>) {
+    /** [fast] = the user asked for "Send fast": upgrade to a Wi-Fi Direct link first if the peer can host one. */
+    fun send(uris: List<Uri>, fast: Boolean = false) {
         if (uris.isEmpty()) return
-        senders.execute { runSend(uris) }
+        senders.execute { prepareAndSend(uris, fast) }
+    }
+
+    /** True while any transfer runs on this session (keeps a link from going idle). */
+    fun isBusy(): Boolean = outgoing.isNotEmpty() || incoming.isNotEmpty()
+
+    /**
+     * Describe the files, then (§10.1) hold the `xfer_offer` until an upgraded link session is ready
+     * if [LinkPolicy] says so, and send on whichever session [LinkManager.prepareSend] returns.
+     */
+    private fun prepareAndSend(uris: List<Uri>, fast: Boolean) {
+        val srcs = try { uris.map { describe(it) } } catch (e: Exception) {
+            Log.w(TAG, "describe failed: ${e.message}")
+            Hub.putTransfer(TransferUi("${s.peerId}:out:prep${System.nanoTime()}", false, peerName, "", 0, uris.size, 0, 0, 0,
+                result = "Failed: couldn't read file (${e.message})"))
+            return
+        }
+        val total = srcs.sumOf { it.size }
+        val holdKey = "${s.peerId}:out:link"
+        val target = try {
+            LinkManager.prepareSend(s, total, fast) {
+                Hub.putTransfer(TransferUi(holdKey, false, peerName, "Setting up a direct Wi-Fi link…", 0, srcs.size, 0, total, 0))
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "link upgrade", e); s
+        } finally {
+            Hub.removeTransfer(holdKey)
+        }
+        target.xfer.runSend(srcs)
     }
 
     private class Src(val uri: Uri, val tmp: File?, val name: String, val size: Long, val mime: String?)
@@ -143,16 +173,14 @@ class FileTransfer(private val s: Session) {
         fun update(block: Outgoing.() -> Unit) = synchronized(lock) { block(); lock.notifyAll() }
     }
 
-    private fun runSend(uris: List<Uri>) {
+    private fun runSend(srcs: List<Src>) {
         val notifId = notifIds.incrementAndGet()
         val id = nextId.getAndIncrement()
         val key = "${s.peerId}:out:$id"
         val o = Outgoing(id)
         outgoing[id] = o
         TransferLocks.acquire(ctx)
-        var srcs: List<Src> = emptyList()
         try {
-            srcs = uris.map { describe(it) }
             val total = srcs.sumOf { it.size }
             val files = JSONArray()
             srcs.forEachIndexed { i, f ->

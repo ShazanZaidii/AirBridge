@@ -25,6 +25,7 @@ import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -81,6 +82,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -173,7 +175,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private enum class Screen { DEVICES, ADD, SCANNER, SETTINGS }
+private enum class Screen { DEVICES, ADD, SCANNER, SETTINGS, LINK_DEBUG }
 
 /** A finished pairing attempt that failed, shown until dismissed. */
 private data class PairError(val message: String)
@@ -344,7 +346,12 @@ private fun AirBridgeRoot() {
             },
         )
 
-        Screen.SETTINGS -> SettingsScreen(onBack = { screen = if (paired.isEmpty()) Screen.ADD else Screen.DEVICES })
+        Screen.SETTINGS -> SettingsScreen(
+            onBack = { screen = if (paired.isEmpty()) Screen.ADD else Screen.DEVICES },
+            onOpenLinkDebug = { screen = Screen.LINK_DEBUG },
+        )
+
+        Screen.LINK_DEBUG -> LinkDebugScreen(onBack = { screen = Screen.SETTINGS })
 
         Screen.ADD -> AddDeviceScreen(
             pairedIds = paired.map { it.id }.toSet(),
@@ -798,7 +805,7 @@ private fun CameraScannerScreen(onCancel: () -> Unit, onScanned: (String) -> Boo
 // ---- Settings ----
 
 @Composable
-private fun SettingsScreen(onBack: () -> Unit) {
+private fun SettingsScreen(onBack: () -> Unit, onOpenLinkDebug: () -> Unit) {
     BackHandler(onBack = onBack)
     val ctx = LocalContext.current
     val prefs = remember { ctx.getSharedPreferences("AirBridgePrefs", Context.MODE_PRIVATE) }
@@ -847,7 +854,8 @@ private fun SettingsScreen(onBack: () -> Unit) {
         )
     }
 
-    AbScaffold(title = "Settings", onBack = onBack) {
+    // Long-press the title: hidden Wi-Fi Direct test screen (device tests S-W2/S-W3/S-W4).
+    AbScaffold(title = "Settings", onBack = onBack, onTitleLongPress = onOpenLinkDebug) {
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
             SectionHeader("This phone")
             AbCard {
@@ -916,7 +924,8 @@ private fun SettingsScreen(onBack: () -> Unit) {
 
             SectionHeader("About")
             AbCard {
-                InfoRow(title = "AirBridge ${BuildConfig.VERSION_NAME}", subtitle = "Protocol v2 · encrypted end to end")
+                InfoRow(title = "AirBridge ${BuildConfig.VERSION_NAME}", subtitle = "Protocol v2 · encrypted end to end",
+                    modifier = Modifier.pointerInput(Unit) { detectTapGestures(onLongPress = { onOpenLinkDebug() }) })
             }
             Spacer(Modifier.height(Dimens.xl))
         }
