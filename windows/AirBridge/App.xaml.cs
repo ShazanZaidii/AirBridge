@@ -1,253 +1,196 @@
-﻿using System;
+using System;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
-using System.Net.NetworkInformation;
+using System.Windows.Threading;
+using AirBridge.Net;
+using Hardcodet.Wpf.TaskbarNotification;
 
 namespace AirBridge
 {
     public partial class App : Application
     {
-        private static Mutex _singleInstanceMutex;
+        private static Mutex? _singleInstanceMutex;
 
-        public static SyncClient Client { get; private set; }
-        public static SyncServer Server { get; private set; }
-        public static InputInterceptor Interceptor { get; private set; }
-        public static ClipboardManager ClipboardSync { get; private set; }
-        public static FileTransferManager FileTransfer { get; private set; }
+        /// <summary>The network half (sessions, pairing, discovery, clipboard, files).</summary>
+        public static PeerService? Peers { get; private set; }
+        public static InputInterceptor? Interceptor { get; private set; }
+        public static ClipboardManager? ClipboardMonitor { get; private set; }
 
-        private Hardcodet.Wpf.TaskbarNotification.TaskbarIcon _trayIcon;
-        private Window _hiddenClipboardWindow;
+        private TaskbarIcon? _trayIcon;
+        private Window? _hiddenClipboardWindow;
+        private readonly CancellationTokenSource _ipcCts = new();
 
-        protected override async void OnStartup(StartupEventArgs e)
+        protected override void OnStartup(StartupEventArgs e)
         {
             base.OnStartup(e);
-
-            // 1. Intercept Windows 11 Share Target Activation
-            var activationArgs = global::Windows.ApplicationModel.AppInstance.GetActivatedEventArgs();
-
-            if (activationArgs != null && activationArgs.Kind == global::Windows.ApplicationModel.Activation.ActivationKind.ShareTarget)
+            InstallExceptionHandlers();
+            try
             {
-                var shareArgs = activationArgs as global::Windows.ApplicationModel.Activation.ShareTargetActivatedEventArgs;
-                if (shareArgs != null)
+                if (TryHandleShareActivation()) return;
+
+                string[] files = e.Args.Where(a => !string.IsNullOrWhiteSpace(a)).ToArray();
+                _singleInstanceMutex = new Mutex(true, IpcManager.MutexName, out bool createdNew);
+                if (!createdNew)
                 {
-                    var shareOperation = shareArgs.ShareOperation;
-
-                    // Instantly tell Windows "I have it" so it drops the UI loading spinner
-                    shareOperation.ReportStarted();
-
-                    // Push the heavy file brokering to a background thread
-                    Task.Run(async () =>
-                    {
-                        try
-                        {
-                            if (shareOperation.Data.Contains(global::Windows.ApplicationModel.DataTransfer.StandardDataFormats.StorageItems))
-                            {
-                                var items = await shareOperation.Data.GetStorageItemsAsync();
-
-                                // HARD LIMIT: Cap at 100 to prevent network choking
-                                int limit = Math.Min(items.Count, 100);
-                                string[] filePaths = new string[limit];
-
-                                for (int i = 0; i < limit; i++)
-                                {
-                                    filePaths[i] = items[i].Path;
-                                }
-
-                                string droppedFiles = string.Join("|", filePaths);
-                                IpcManager.TrySendToBackgroundInstance(droppedFiles);
-                            }
-                        }
-                        finally
-                        {
-                            // Cleanly terminate the Share Pane and kill the proxy app
-                            shareOperation.ReportCompleted();
-                            System.Environment.Exit(0);
-                        }
-                    });
-                }
-
-                // CRITICAL: Stop standard WPF initialization for this temporary instance
-                return;
-            }
-
-            // 2. Standard Single Instance logic for Right-Click Context Menus
-            if (e.Args.Length > 0)
-            {
-                var filesToSend = e.Args;
-
-                if (filesToSend.Length > 100)
-                {
-                    MessageBox.Show("AirBridge limits transfers to 100 files per batch to maintain network stability. Only the first 100 files will be sent.", "Transfer Limit Reached", MessageBoxButton.OK, MessageBoxImage.Warning);
-                    filesToSend = filesToSend.Take(100).ToArray();
-                }
-
-                string droppedFiles = string.Join("|", filesToSend);
-                if (IpcManager.TrySendToBackgroundInstance(droppedFiles))
-                {
-                    System.Environment.Exit(0);
+                    _singleInstanceMutex.Dispose();
+                    _singleInstanceMutex = null;
+                    if (files.Length > 0) IpcManager.HandOffLaunchingIfNeeded(files);
+                    Shutdown();
                     return;
                 }
+                StartMainInstance(files);
             }
-
-            _singleInstanceMutex = new Mutex(true, "AirBridge_Single_Instance_Mutex", out bool createdNew);
-            if (!createdNew)
+            catch (Exception ex)
             {
-                System.Environment.Exit(0);
-                return;
+                Log.Error("Startup failed", ex);
+                MessageBox.Show($"AirBridge failed to start:\n{ex.Message}", "AirBridge", MessageBoxButton.OK, MessageBoxImage.Error);
+                Shutdown();
             }
+        }
 
-            // 3. Start the continuous Background Pipe listener
-            _ = IpcManager.StartServerAsync();
+        private void StartMainInstance(string[] pendingFiles)
+        {
+            Log.Info($"AirBridge {Protocol.AppVersion} starting (packaged: {Win32.IsPackaged})");
 
-            FileTransfer = new FileTransferManager();
+            // 1. Local services first: IPC, clipboard hook, tray. Nothing here touches the network.
+            IpcManager.StartServer(_ipcCts.Token);
+            Peers = new PeerService();
 
-            //Testing:
-            // These fire instantly the millisecond your Wi-Fi or Hotspot drops
-            NetworkChange.NetworkAvailabilityChanged += (s, ev) => Application.Current.Dispatcher.Invoke(() => Interceptor?.ForceReturnToWindows());
-            NetworkChange.NetworkAddressChanged += (s, ev) => Application.Current.Dispatcher.Invoke(() => Interceptor?.ForceReturnToWindows());
-
-
-            Client = new SyncClient();
-            Client.OnCommandReceived += HandleIncomingCommand;
-            Client.OnBinaryReceived += FileTransfer.HandleBinaryChunk;
-            Client.OnDisconnected += () => Application.Current.Dispatcher.Invoke(() => Interceptor?.ForceReturnToWindows());
-            await Client.DiscoverAndConnectAsync();
-
-            // 4. Initialize Backend First
-            Server = new SyncServer();
-            Server.OnCommandReceived += HandleIncomingCommand;
-            Server.OnBinaryReceived += FileTransfer.HandleBinaryChunk;
-            
-            Server.OnClientDisconnected += () => Application.Current.Dispatcher.Invoke(() => Interceptor?.ForceReturnToWindows());
-            await Server.StartAsync(8080);
-
-            Interceptor = new InputInterceptor();
-            Interceptor.Start();
-
-            // 5. Initialize Clipboard hooks
             _hiddenClipboardWindow = new Window
             {
-                Width = 0,
-                Height = 0,
-                WindowStyle = WindowStyle.None,
-                ShowInTaskbar = false,
-                ShowActivated = false
+                Width = 0, Height = 0, WindowStyle = WindowStyle.None, ShowInTaskbar = false, ShowActivated = false,
             };
-            _hiddenClipboardWindow.Show();
-            _hiddenClipboardWindow.Hide();
+            ClipboardMonitor = new ClipboardManager();
+            ClipboardMonitor.LocalTextChanged += text => Peers?.Clipboard.OnLocalText(text);
+            ClipboardMonitor.Start(_hiddenClipboardWindow);
 
-            ClipboardSync = new ClipboardManager();
-            ClipboardSync.Start(_hiddenClipboardWindow);
-
-            // 6. Register Classic Context Menus
-            RegisterContextMenu();
-
-            // 7. Build the UI Second
-            _trayIcon = new Hardcodet.Wpf.TaskbarNotification.TaskbarIcon();
-            _trayIcon.Icon = System.Drawing.Icon.ExtractAssociatedIcon(System.Reflection.Assembly.GetExecutingAssembly().Location);
-            _trayIcon.ToolTipText = "AirBridge";
-            _trayIcon.PopupActivation = Hardcodet.Wpf.TaskbarNotification.PopupActivationMode.LeftOrRightClick;
-
+            _trayIcon = new TaskbarIcon
+            {
+                ToolTipText = "AirBridge",
+                PopupActivation = PopupActivationMode.LeftOrRightClick,
+            };
+            try
+            {
+                if (Environment.ProcessPath is string exe) _trayIcon.Icon = System.Drawing.Icon.ExtractAssociatedIcon(exe);
+            }
+            catch (Exception ex) { Log.Warn($"Tray icon load failed: {ex.Message}"); }
             _trayIcon.TrayPopup = new TrayPopupControl();
+
+            // 2. Input half.
+            try
+            {
+                Interceptor = new InputInterceptor();
+                Interceptor.Start();
+            }
+            catch (Exception ex) { Log.Error("Input interceptor failed to start", ex); }
+
+            // 3. Shell integration and network: off the UI thread, never blocking startup.
+            Task.Run(() =>
+            {
+                try { ShellIntegration.RegisterIfUnpackaged(); }
+                catch (Exception ex) { Log.Error("Shell integration failed", ex); }
+            });
+            Task.Run(() =>
+            {
+                try { Peers.Start(); }
+                catch (Exception ex)
+                {
+                    Log.Error("Network start failed", ex);
+                    Notify("AirBridge", "Networking failed to start. See %LOCALAPPDATA%\\AirBridge\\airbridge.log");
+                }
+            });
+
+            if (pendingFiles.Length > 0) ShowSendWindow(pendingFiles);
+        }
+
+        /// <summary>Packaged share-target activation: hand the files to the main instance and exit.</summary>
+        private bool TryHandleShareActivation()
+        {
+            if (!Win32.IsPackaged) return false;
+            global::Windows.ApplicationModel.Activation.IActivatedEventArgs? args;
+            try { args = global::Windows.ApplicationModel.AppInstance.GetActivatedEventArgs(); }
+            catch (Exception ex) { Log.Warn($"GetActivatedEventArgs failed: {ex.Message}"); return false; }
+
+            if (args?.Kind != global::Windows.ApplicationModel.Activation.ActivationKind.ShareTarget ||
+                args is not global::Windows.ApplicationModel.Activation.ShareTargetActivatedEventArgs share)
+                return false;
+
+            var op = share.ShareOperation;
+            op.ReportStarted();
+            Task.Run(async () =>
+            {
+                try
+                {
+                    if (op.Data.Contains(global::Windows.ApplicationModel.DataTransfer.StandardDataFormats.StorageItems))
+                    {
+                        var items = await op.Data.GetStorageItemsAsync();
+                        var paths = items.Select(i => i.Path).Where(p => !string.IsNullOrEmpty(p)).ToArray();
+                        if (paths.Length > 0 && !IpcManager.HandOffLaunchingIfNeeded(paths))
+                            Log.Warn("Share target could not deliver files to the main instance");
+                    }
+                }
+                catch (Exception ex) { Log.Error("Share target failed", ex); }
+                finally
+                {
+                    try { op.ReportCompleted(); } catch { }
+                    Environment.Exit(0);
+                }
+            });
+            return true;
+        }
+
+        private void InstallExceptionHandlers()
+        {
+            DispatcherUnhandledException += (_, e) =>
+            {
+                Log.Error("Unhandled UI exception", e.Exception);
+                e.Handled = true; // a tray app should survive a bad click
+            };
+            AppDomain.CurrentDomain.UnhandledException += (_, e) =>
+                Log.Error($"Unhandled exception (terminating: {e.IsTerminating})", e.ExceptionObject as Exception);
+            TaskScheduler.UnobservedTaskException += (_, e) =>
+            {
+                Log.Error("Unobserved task exception", e.Exception);
+                e.SetObserved();
+            };
         }
 
         protected override void OnExit(ExitEventArgs e)
         {
-            Interceptor?.Stop();
-            ClipboardSync?.Stop();
+            try { Peers?.Dispose(); } catch (Exception ex) { Log.Error("Network shutdown failed", ex); }
+            try { Interceptor?.Stop(); } catch (Exception ex) { Log.Error("Interceptor stop failed", ex); }
+            ClipboardMonitor?.Stop();
+            _ipcCts.Cancel();
             _hiddenClipboardWindow?.Close();
             _trayIcon?.Dispose();
-            _singleInstanceMutex?.ReleaseMutex();
+            _singleInstanceMutex?.Dispose();
             base.OnExit(e);
         }
 
-        private void RegisterContextMenu()
+        // ------------------------------------------------------------------ helpers usable from any thread
+
+        /// <summary>Shows a tray balloon (any thread).</summary>
+        public static void Notify(string title, string message)
         {
-            try
+            Log.Info($"Notify: {title} — {message}");
+            var app = Current as App;
+            app?.Dispatcher.BeginInvoke(new Action(() =>
             {
-                string exePath = Environment.ProcessPath;
-                bool registryUpdated = false;
-
-                // Construct the absolute path to the MSIX App Execution Alias
-                string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-                string aliasPath = System.IO.Path.Combine(localAppData, "Microsoft", "WindowsApps", "AirBridgeRun.exe");
-
-                // Register for Files
-                using (var key = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(@"Software\Classes\*\shell\AirBridge"))
-                {
-                    key.SetValue("", "Send via AirBridge");
-                    key.SetValue("Icon", $"\"{exePath}\"");
-                    key.SetValue("MultiSelectModel", "Player");
-
-                    using (var commandKey = key.CreateSubKey("command"))
-                    {
-                        // Write the absolute path to the Alias
-                        commandKey.SetValue("", $"\"{aliasPath}\" \"%1\"");
-                    }
-                    registryUpdated = true;
-                }
-
-                // Register for Folders
-                using (var key = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(@"Software\Classes\Directory\shell\AirBridge"))
-                {
-                    key.SetValue("", "Send via AirBridge");
-                    key.SetValue("Icon", $"\"{exePath}\",0");
-                    key.SetValue("MultiSelectModel", "Player");
-
-                    using (var commandKey = key.CreateSubKey("command"))
-                    {
-                        // Write the absolute path to the Alias
-                        commandKey.SetValue("", $"\"{aliasPath}\" \"%1\"");
-                    }
-                    registryUpdated = true;
-                }
-
-                // SendTo Shortcut creation (Keep using exePath for shortcuts)
-                string sendToPath = Environment.GetFolderPath(Environment.SpecialFolder.SendTo);
-                string shortcutPath = System.IO.Path.Combine(sendToPath, "AirBridge.lnk");
-
-                if (!System.IO.File.Exists(shortcutPath))
-                {
-                    string psCommand = $"$s=(New-Object -COM WScript.Shell).CreateShortcut('{shortcutPath}');$s.TargetPath='{exePath}';$s.Save()";
-                    var processInfo = new System.Diagnostics.ProcessStartInfo("powershell.exe", $"-NoProfile -WindowStyle Hidden -Command \"{psCommand}\"")
-                    {
-                        CreateNoWindow = true,
-                        UseShellExecute = false
-                    };
-                    System.Diagnostics.Process.Start(processInfo);
-                }
-
-                if (registryUpdated)
-                {
-                    NativeMethods.SHChangeNotify(0x08000000, 0x0000, IntPtr.Zero, IntPtr.Zero);
-                }
-            }
-            catch (System.Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"Failed to register menus: {ex.Message}");
-            }
+                try { app._trayIcon?.ShowBalloonTip(title, message, BalloonIcon.Info); } catch { }
+            }));
         }
 
-        private void HandleIncomingCommand(string command)
+        /// <summary>Opens the target picker for files (any thread).</summary>
+        public static void ShowSendWindow(string[] files)
         {
-            if (command.StartsWith("BATCH_START:") || command.StartsWith("START_FILE:") || command.StartsWith("END_FILE:"))
+            Current?.Dispatcher.BeginInvoke(new Action(() =>
             {
-                FileTransfer.HandleCommand(command);
-            }
-            else if (command.StartsWith("INP:"))
-            {
-                // Actually release the cursor back to Windows!
-                if (command == "INP:TRANSITION:MAC")
-                {
-                    Application.Current.Dispatcher.Invoke(() => Interceptor?.ForceReturnToWindows());
-                }
-            }
-            else
-            {
-                ClipboardSync?.SetClipboardFromNetwork(command);
-            }
+                var w = new SendWindow(files);
+                w.Show();
+                w.Activate();
+            }));
         }
     }
 }

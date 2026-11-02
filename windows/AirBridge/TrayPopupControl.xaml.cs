@@ -1,221 +1,180 @@
-﻿using System;
+using System;
 using System.IO;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using AirBridge.Net;
 using QRCoder;
 
 namespace AirBridge
 {
     public partial class TrayPopupControl : UserControl
     {
-        private bool _eventsWired = false;
+        private static readonly Brush Green = new SolidColorBrush(Color.FromRgb(0x4A, 0xDE, 0x80));
+        private static readonly Brush Grey = new SolidColorBrush(Color.FromRgb(0x70, 0x70, 0x75));
+        private string? _qrData;
+        private bool _refreshQueued;
 
         public TrayPopupControl()
         {
             InitializeComponent();
-            IsVisibleChanged += OnIsVisibleChanged;
-
-            string wsUrl = $"ws://{GetLocalIPAddress()}:{App.Server?.Port ?? 8080}?name={Uri.EscapeDataString(Environment.MachineName)}";
-            GenerateQrCode(wsUrl);
-
-            Loaded += OnLoaded;
-        }
-
-        private void OnLoaded(object sender, RoutedEventArgs e)
-        {
-            if (System.ComponentModel.DesignerProperties.GetIsInDesignMode(this)) return;
-
-            if (!_eventsWired)
+            IsVisibleChanged += (_, e) =>
             {
-                // Wire up true realtime network events
-                if (App.Server != null)
+                if ((bool)e.NewValue)
                 {
-                    App.Server.OnClientConnected += (ip) => Dispatcher.Invoke(RefreshUIState);
-                    App.Server.OnClientDisconnected += () => Dispatcher.Invoke(RefreshUIState);
+                    App.Peers?.Secrets.OnQrShown();
+                    App.Peers?.Discovery.Query();
+                    Refresh();
                 }
-
-                if (App.Client != null)
-                {
-                    App.Client.OnConnected += (url) => Dispatcher.Invoke(RefreshUIState);
-                    App.Client.OnDisconnected += () => Dispatcher.Invoke(RefreshUIState);
-                }
-
-                _eventsWired = true;
-            }
-
-            // Force an initial paint
-            RefreshUIState();
-        }
-
-        private void OnIsVisibleChanged(object sender, DependencyPropertyChangedEventArgs e)
-        {
-            if ((bool)e.NewValue == true)
-            {
-                RefreshUIState();
-            }
-        }
-
-        private void RefreshUIState()
-        {
-            int deviceCount = 0;
-            DevicePopupPanel.Children.Clear();
-
-            // Check Android (Server)
-            if (App.Server != null && App.Server.HasActiveClient)
-            {
-                deviceCount++;
-                var phoneBtn = CreateDeviceButton($"📱 Disconnect Android ({App.Server.ActiveClientIp})");
-                phoneBtn.Click += (s, ev) => { App.Server.DisconnectClient(); DevicePopup.IsOpen = false; RefreshUIState(); };
-                DevicePopupPanel.Children.Add(phoneBtn);
-            }
-
-            // Check Mac (Client)
-            if (App.Client != null && App.Client.IsConnected)
-            {
-                deviceCount++;
-                var macBtn = CreateDeviceButton("💻 Disconnect Mac");
-                macBtn.Click += (s, ev) => { App.Client.Disconnect(); DevicePopup.IsOpen = false; RefreshUIState(); };
-                DevicePopupPanel.Children.Add(macBtn);
-            }
-
-            if (deviceCount > 0)
-            {
-                DeviceDropdownText.Text = $"{deviceCount} Device(s) Connected";
-                DeviceDropdownText.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#4ADE80"));
-                DeviceDropdownChevron.Visibility = Visibility.Visible;
-                DeviceDropdownBorder.Cursor = Cursors.Hand;
-                ScanPromptText.Text = "Scan to add more devices";
-            }
-            else
-            {
-                DeviceDropdownText.Text = "Waiting for connection...";
-                DeviceDropdownText.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#FF9F0A"));
-                DeviceDropdownChevron.Visibility = Visibility.Collapsed;
-                DeviceDropdownBorder.Cursor = Cursors.Arrow;
-                ScanPromptText.Text = "Scan to add device";
-            }
-        }
-
-        private Button CreateDeviceButton(string text)
-        {
-            return new Button
-            {
-                Content = text,
-                Background = Brushes.Transparent,
-                Foreground = Brushes.White,
-                BorderThickness = new Thickness(0),
-                HorizontalAlignment = HorizontalAlignment.Stretch,
-                HorizontalContentAlignment = HorizontalAlignment.Left,
-                Padding = new Thickness(10, 8, 10, 8),
-                Cursor = Cursors.Hand
             };
+            if (App.Peers != null) App.Peers.StateChanged += QueueRefresh;
+            Loaded += (_, _) => Refresh();
         }
 
-        private void DeviceDropdown_Click(object sender, MouseButtonEventArgs e)
+        private void QueueRefresh()
         {
-            if (DevicePopupPanel.Children.Count > 0)
-            {
-                DevicePopup.IsOpen = true;
-            }
+            if (_refreshQueued) return;
+            _refreshQueued = true;
+            Dispatcher.BeginInvoke(new Action(() => { _refreshQueued = false; Refresh(); }));
         }
 
-        private void GenerateQrCode(string data)
+        private void Refresh()
         {
-            using (var generator = new QRCodeGenerator())
-            {
-                var qrData = generator.CreateQrCode(data, QRCodeGenerator.ECCLevel.Q);
-                var qrCode = new PngByteQRCode(qrData);
-                byte[] bytes = qrCode.GetGraphic(20);
+            var peers = App.Peers;
+            if (peers == null) return;
 
-                var image = new BitmapImage();
-                using (var stream = new MemoryStream(bytes))
-                {
-                    image.BeginInit();
-                    image.CacheOption = BitmapCacheOption.OnLoad;
-                    image.StreamSource = stream;
-                    image.EndInit();
-                }
-                QrCodeImage.Source = image;
+            DeviceNameText.Text = peers.Identity.Name;
+            string? uri = peers.PairingUri;
+            if (uri == null)
+            {
+                QrCodeImage.Source = null;
+                _qrData = null;
+                QrPlaceholder.Text = peers.Port == 0 ? "Starting…" : "No network connection";
+                QrPlaceholder.Visibility = Visibility.Visible;
             }
+            else if (uri != _qrData)
+            {
+                _qrData = uri;
+                QrCodeImage.Source = RenderQr(uri);
+                QrPlaceholder.Visibility = Visibility.Collapsed;
+            }
+
+            string code = peers.PairingCode;
+            CodeText.Text = peers.PairingLocked ? "locked" : $"{code[..3]} {code[3..]}";
+            AddressText.Text = peers.BestAddress != null && peers.Port != 0 ? $"{peers.BestAddress}:{peers.Port}" : "";
+
+            PeersPanel.Children.Clear();
+            var paired = peers.PairedPeers();
+            if (paired.Count == 0)
+            {
+                PeersPanel.Children.Add(new TextBlock { Text = "No paired devices yet", Foreground = Grey, FontSize = 12 });
+            }
+            foreach (var p in paired) PeersPanel.Children.Add(BuildPeerRow(p));
         }
 
-        private string GetLocalIPAddress()
+        private UIElement BuildPeerRow(PairedPeerView p)
         {
-            var host = System.Net.Dns.GetHostEntry(System.Net.Dns.GetHostName());
-            foreach (var ip in host.AddressList)
+            var grid = new Grid { Margin = new Thickness(0, 2, 0, 2) };
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var dot = new System.Windows.Shapes.Ellipse
             {
-                if (ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork && !ip.ToString().EndsWith(".1"))
-                    return ip.ToString();
+                Width = 8, Height = 8, Fill = p.Connected ? Green : Grey,
+                VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0),
+            };
+            Grid.SetColumn(dot, 0);
+            grid.Children.Add(dot);
+
+            string icon = p.Plat switch { "android" or "ios" => "📱", "macos" => "💻", _ => "🖥️" };
+            string state = p.Connected ? "Connected" : p.IsHost ? "Offline · click to retry" : "Offline";
+            var text = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+            text.Children.Add(new TextBlock { Text = $"{icon} {p.Name}", Foreground = Brushes.White, FontSize = 13, TextTrimming = TextTrimming.CharacterEllipsis });
+            text.Children.Add(new TextBlock { Text = state, Foreground = p.Connected ? Green : Grey, FontSize = 10 });
+            Grid.SetColumn(text, 1);
+            grid.Children.Add(text);
+            if (!p.Connected && p.IsHost)
+            {
+                text.Cursor = Cursors.Hand;
+                text.MouseLeftButtonUp += (_, _) => App.Peers?.ConnectNow(p.Id);
             }
-            return "127.0.0.1";
+
+            var forget = new Button
+            {
+                Content = "Forget", FontSize = 11, Height = 22, Padding = new Thickness(8, 0, 8, 0), Margin = new Thickness(6, 0, 0, 0),
+                Style = (Style)FindResource("FlatButton"), ToolTip = "Unpair this device",
+            };
+            forget.Click += (_, _) =>
+            {
+                if (MessageBox.Show($"Forget {p.Name}? You will need to pair again.", "AirBridge",
+                        MessageBoxButton.OKCancel, MessageBoxImage.Question) == MessageBoxResult.OK)
+                    App.Peers?.Forget(p.Id);
+            };
+            Grid.SetColumn(forget, 2);
+            grid.Children.Add(forget);
+            return grid;
+        }
+
+        private static BitmapImage RenderQr(string data)
+        {
+            using var generator = new QRCodeGenerator();
+            using var qrData = generator.CreateQrCode(data, QRCodeGenerator.ECCLevel.M);
+            var png = new PngByteQRCode(qrData).GetGraphic(10);
+            var image = new BitmapImage();
+            using var stream = new MemoryStream(png);
+            image.BeginInit();
+            image.CacheOption = BitmapCacheOption.OnLoad;
+            image.StreamSource = stream;
+            image.EndInit();
+            image.Freeze();
+            return image;
+        }
+
+        private void ClosePopup()
+        {
+            if (VisualTreeHelper.GetParent(this) is Popup popup) popup.IsOpen = false;
+            if (Parent is Popup p2) p2.IsOpen = false;
+        }
+
+        private static void ShowSingle<T>(Func<T> create) where T : Window
+        {
+            Application.Current.Dispatcher.BeginInvoke(new Action(() =>
+            {
+                var existing = Application.Current.Windows.OfType<T>().FirstOrDefault();
+                if (existing != null) { existing.Activate(); return; }
+                create().Show();
+            }));
         }
 
         private void OpenHostDiscovery_Click(object sender, RoutedEventArgs e)
         {
-            var popup = VisualTreeHelper.GetParent(this) as System.Windows.Controls.Primitives.Popup;
-            if (popup != null) popup.IsOpen = false;
-
-            Application.Current.Dispatcher.BeginInvoke(new Action(() =>
-            {
-                foreach (Window window in Application.Current.Windows)
-                {
-                    if (window is HostDiscoveryWindow) { window.Activate(); return; }
-                }
-                new HostDiscoveryWindow().Show();
-            }));
+            ClosePopup();
+            ShowSingle(() => new HostDiscoveryWindow());
         }
 
         private void OpenArrangement_Click(object sender, RoutedEventArgs e)
         {
-            var popup = VisualTreeHelper.GetParent(this) as System.Windows.Controls.Primitives.Popup;
-            if (popup != null) popup.IsOpen = false;
-
-            Application.Current.Dispatcher.BeginInvoke(new Action(() =>
-            {
-                foreach (Window window in Application.Current.Windows)
-                {
-                    if (window is DisplayArrangementWindow) { window.Activate(); return; }
-                }
-                new DisplayArrangementWindow().Show();
-            }));
+            ClosePopup();
+            ShowSingle(() => new DisplayArrangementWindow());
         }
 
         private void OpenFilters_Click(object sender, RoutedEventArgs e)
         {
-            var popup = VisualTreeHelper.GetParent(this) as System.Windows.Controls.Primitives.Popup;
-            if (popup != null) popup.IsOpen = false;
-
-            Application.Current.Dispatcher.BeginInvoke(new Action(() =>
-            {
-                foreach (Window window in Application.Current.Windows)
-                {
-                    if (window is ClipboardFiltersWindow) { window.Activate(); return; }
-                }
-                new ClipboardFiltersWindow().Show();
-            }));
+            ClosePopup();
+            ShowSingle(() => new ClipboardFiltersWindow());
         }
 
         private void Border_Drop(object sender, DragEventArgs e)
         {
-            if (e.Data.GetDataPresent(DataFormats.FileDrop))
+            if (e.Data.GetDataPresent(DataFormats.FileDrop) && e.Data.GetData(DataFormats.FileDrop) is string[] files && files.Length > 0)
             {
-                string[] files = (string[])e.Data.GetData(DataFormats.FileDrop);
-                if (files != null && files.Length > 0)
-                {
-                    if (files.Length > 100)
-                    {
-                        MessageBox.Show("AirBridge limits transfers to 100 files per batch to maintain network stability. Only the first 100 files will be sent.", "Transfer Limit Reached", MessageBoxButton.OK, MessageBoxImage.Warning);
-                        files = files.Take(100).ToArray();
-                    }
-
-                    var sendWindow = new SendWindow(files);
-                    sendWindow.Show();
-                    sendWindow.Activate();
-                }
+                ClosePopup();
+                App.ShowSendWindow(files);
             }
         }
 
