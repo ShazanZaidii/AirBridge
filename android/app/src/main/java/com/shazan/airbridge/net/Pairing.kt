@@ -31,7 +31,7 @@ data class PairLink(
             if (uri.scheme != "airbridge" || uri.host != "pair") null
             else if (uri.getQueryParameter("v") != "2") null
             else {
-                val id = uri.getQueryParameter("id")?.lowercase()
+                val id = uri.getQueryParameter("id")
                 val k = Protocol.unb64url(uri.getQueryParameter("k"))
                 if (id.isNullOrBlank() || k == null || k.size < 16) null
                 else PairLink(

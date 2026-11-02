@@ -186,7 +186,7 @@ object Discovery {
         val attrs = si.attributes ?: return
         fun txt(k: String) = attrs[k]?.toString(Charsets.UTF_8)
         if (txt("v") != "2") return
-        val id = txt("id")?.lowercase()?.takeIf { it.isNotBlank() } ?: return
+        val id = txt("id")?.takeIf { it.isNotBlank() } ?: return
         if (id == Identity.id) return
         val addr = pickAddress(si) ?: return
         val port = si.port.takeIf { it in 1..65535 } ?: return
