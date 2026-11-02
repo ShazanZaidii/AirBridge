@@ -125,7 +125,7 @@ object WsClient {
                 Log.d(TAG, "no address for ${d.peerId}; waiting for mDNS")
                 return
             }
-            val s = open(addr.first, addr.second, d.peerId, null) { s, outcome -> onEnded(d, s, outcome) }
+            val s = open(addr.first, addr.second, d.peerId, PairMode.None) { s, outcome -> onEnded(d, s, outcome) }
             d.session = s.takeUnless { it.isClosed } // closed synchronously on a malformed address
         }
         Hub.recomputeStatus()
@@ -156,30 +156,35 @@ object WsClient {
     }
 
     /**
-     * Pair with a host (QR or 6-digit code). Cancels any in-flight attempt for that id first.
-     * The result arrives as [NetEvent.PairResult].
+     * Pair with a host: mode `qr` (scanned secret, no prompt) or `confirm` (both screens show the
+     * same 6 digits, both users confirm). Cancels any in-flight attempt for that id first. Progress
+     * is in [Hub.pairing]; the result arrives as [NetEvent.PairResult].
      */
-    fun pair(host: String, port: Int, expectedId: String?, secret: ByteArray) {
+    fun pair(host: String, port: Int, expectedId: String?, mode: PairMode, name: String, plat: String) {
+        val modeName = if (mode is PairMode.Qr) "qr" else "confirm"
         val d = expectedId?.let { dialers.getOrPut(it) { Dialer(it) } }
         if (d == null) {
-            open(host, port, null, secret) { _, _ -> }
+            val s = open(host, port, null, mode) { _, _ -> }
+            Hub.beginPairing(s, name, plat, modeName)
             return
         }
-        synchronized(d) {
+        val s = synchronized(d) {
             d.retry?.cancel(false); d.retry = null
             d.session?.close(Outcome.Ended("re-pairing"), "replaced")
             d.paused = false
             d.pausedByReplace = false
             d.backoffMs = 1000L
-            val s = open(host, port, expectedId, secret) { s, outcome -> onEnded(d, s, outcome) }
+            val s = open(host, port, expectedId, mode) { s, outcome -> onEnded(d, s, outcome) }
             d.session = s.takeUnless { it.isClosed }
+            s
         }
+        Hub.beginPairing(s, name, plat, modeName)
     }
 
-    private fun open(host: String, port: Int, expectedId: String?, secret: ByteArray?, onEnd: (Session, Outcome) -> Unit): Session {
+    private fun open(host: String, port: Int, expectedId: String?, mode: PairMode, onEnd: (Session, Outcome) -> Unit): Session {
         val hostLiteral = if (host.contains(':')) "[$host]" else host
         val link = WsLink(host, port, "$hostLiteral:$port")
-        val session = Session(Role.CLIENT, link, expectedId, secret, onEnd)
+        val session = Session(Role.CLIENT, link, expectedId, mode, onEnd)
         link.session = session
         val req = try {
             Request.Builder().url("http://$hostLiteral:$port${Protocol.WS_PATH}").build()
@@ -220,7 +225,7 @@ object WsClient {
         }
         override fun onMessage(webSocket: WebSocket, text: String) = session.onText(text)
         override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
-            if (bytes.size <= Protocol.MAX_BINARY_FRAME) session.onBinary(bytes.toByteArray())
+            if (bytes.size <= Protocol.MAX_WIRE_FRAME) session.onBinary(bytes.toByteArray())
         }
         override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
             webSocket.close(1000, null)

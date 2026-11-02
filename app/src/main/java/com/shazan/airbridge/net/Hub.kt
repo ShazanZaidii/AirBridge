@@ -22,6 +22,19 @@ import java.util.concurrent.TimeUnit
 
 enum class PeerStatus { CONNECTED, CONNECTING, RECONNECTING, OFFLINE }
 
+/** Where an interactive (LAN) pairing attempt is, for the pairing sheet. */
+enum class PairStage { CONNECTING, CONFIRM, WAITING_PEER }
+
+data class PairProgress(
+    val peerName: String,
+    val plat: String,
+    /** "qr" or "confirm". */
+    val mode: String,
+    val stage: PairStage,
+    /** Mode `confirm`: the 6 digits both screens must show. */
+    val digits: String? = null,
+)
+
 /** One-shot UI notifications from the network layer. */
 sealed class NetEvent {
     data class PairResult(val ok: Boolean, val peerName: String, val reason: String = "") : NetEvent()
@@ -67,6 +80,13 @@ object Hub : PeerBus.Transport {
     val events: SharedFlow<NetEvent> = _events
     private val _transfers = MutableStateFlow<Map<String, TransferUi>>(emptyMap())
     val transfers: StateFlow<Map<String, TransferUi>> = _transfers
+    private val _pairing = MutableStateFlow<PairProgress?>(null)
+    /** The interactive pairing in progress (QR or confirm), or null. */
+    val pairing: StateFlow<PairProgress?> = _pairing
+    @Volatile private var pairingSession: Session? = null
+    private val _controlledBy = MutableStateFlow<String?>(null)
+    /** Peer id that most recently sent pointer/key/action input to this phone (for "Controlling you"). */
+    val lastInputPeer: StateFlow<String?> = _controlledBy
 
     @Volatile var running = false
         private set
@@ -147,12 +167,14 @@ object Hub : PeerBus.Transport {
         if (s.isClosed) { ready.remove(id, s); return } // finished between becomeReady and here
         if (old != null && old !== s) old.close(Outcome.Ended("replaced"), "replaced") // §3.4
         PairStore.updateMeta(id, name = s.peerName, plat = s.peerPlat)
+        if (pairingSession === s) { pairingSession = null; _pairing.value = null }
         if (s.isPairing) _events.tryEmit(NetEvent.PairResult(true, s.peerName))
         peersChanged()
     }
 
     fun onClosed(s: Session, outcome: Outcome) {
         sessions.remove(s)
+        if (pairingSession === s) { pairingSession = null; _pairing.value = null }
         val id = s.peerId
         val wasReady = id != null && ready.remove(id, s)
         when (outcome) {
@@ -173,6 +195,43 @@ object Hub : PeerBus.Transport {
             }
         }
         if (wasReady) peersChanged() else recomputeStatus()
+    }
+
+    // ---- interactive pairing (§3.3) ----
+
+    /** A LAN pairing attempt was dialled; [s] becomes the one the pairing sheet follows. */
+    fun beginPairing(s: Session, name: String, plat: String, mode: String) {
+        pairingSession?.takeIf { it !== s }?.close(Outcome.Ended("superseded"), "user")
+        if (s.isClosed) return
+        pairingSession = s
+        _pairing.value = PairProgress(name, plat, mode, PairStage.CONNECTING)
+    }
+
+    /** Session callback: digits are known, or the user's confirmation went out. */
+    fun onPairPrompt(s: Session) {
+        if (pairingSession !== s) return
+        val cur = _pairing.value ?: return
+        _pairing.value = cur.copy(
+            peerName = s.peerName.ifBlank { cur.peerName },
+            plat = s.peerPlat.ifBlank { cur.plat },
+            stage = if (s.userConfirmed) PairStage.WAITING_PEER else PairStage.CONFIRM,
+            digits = s.confirmDigits,
+        )
+    }
+
+    /** User tapped Confirm (true) or Cancel (false) on the digits. */
+    fun confirmPairing(accept: Boolean) {
+        val s = pairingSession
+        if (s == null) { _pairing.value = null; return }
+        s.userConfirm(accept)
+    }
+
+    /** User dismissed the pairing sheet at any stage. */
+    fun cancelPairing() {
+        val s = pairingSession
+        pairingSession = null
+        _pairing.value = null
+        s?.close(Outcome.PairFailed("cancelled"), "user")
     }
 
     fun onPeerRenamed(s: Session) {
@@ -196,12 +255,23 @@ object Hub : PeerBus.Transport {
         }
     }
 
+    /** Input that takes a control lease on a target (§8.6), as opposed to state/mirror/busy messages. */
+    private val LEASE_INPUT = setOf("ctl_enter", "ptr_move", "ptr_scroll", "ptr_btn", "ptr_click", "ptr_abs", "key", "action")
+
+    /**
+     * Ready-session messages not handled by [Session] itself. Clipboard and file transfer stay here;
+     * every control type — and any type this half doesn't know (future input/mirror messages) —
+     * goes to the input half, which ignores what it doesn't understand (rule 1).
+     */
     fun route(s: Session, t: String, m: JSONObject) {
         val id = s.peerId ?: return
         when {
-            t in PeerBus.CONTROL_TYPES -> {
+            t == "clip" -> ClipboardSync.onRemote(s, m)
+            t.startsWith("xfer_") -> s.xfer.onControl(t, m)
+            else -> {
+                if (t in LEASE_INPUT && _controlledBy.value != id) _controlledBy.value = id
                 if (PeerBus.controlHandler == null) {
-                    if (!accessibilityToastShown) {
+                    if (t in PeerBus.CONTROL_TYPES && !accessibilityToastShown) {
                         accessibilityToastShown = true
                         toast("Enable Accessibility Service in Android Settings to simulate Mouse (or from the App)", long = true)
                     }
@@ -209,9 +279,6 @@ object Hub : PeerBus.Transport {
                     try { PeerBus.dispatchControl(id, m) } catch (e: Exception) { Log.w(TAG, "controlHandler", e) }
                 }
             }
-            t == "clip" -> ClipboardSync.onRemote(s, m)
-            t.startsWith("xfer_") -> s.xfer.onControl(t, m)
-            else -> Unit // unknown: ignore (rule 1)
         }
     }
 

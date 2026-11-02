@@ -12,6 +12,8 @@ import com.google.android.gms.nearby.Nearby
 import com.google.android.gms.nearby.connection.AdvertisingOptions
 import com.google.android.gms.nearby.connection.ConnectionInfo
 import com.google.android.gms.nearby.connection.ConnectionLifecycleCallback
+import com.google.android.gms.nearby.connection.ConnectionOptions
+import com.google.android.gms.nearby.connection.ConnectionType
 import com.google.android.gms.nearby.connection.ConnectionResolution
 import com.google.android.gms.nearby.connection.ConnectionsClient
 import com.google.android.gms.nearby.connection.DiscoveredEndpointInfo
@@ -40,17 +42,22 @@ import java.util.concurrent.atomic.AtomicLong
  *
  * BYTES payloads are capped at 32 KiB, so each direction uses ONE long-lived STREAM payload as an
  * ordered byte channel framed as `u8 kind | u32 len | payload`. The requester is the protocol
- * client, the advertiser that accepted is the host.
+ * client, the advertiser that accepted is the host. After `ready` every frame is a `0x02`
+ * envelope (§3.6) — Session does that, this class only moves bytes.
+ *
+ * Strategy `P2P_STAR` with disruptive connection upgrades: Nearby starts on Bluetooth and then
+ * moves the link to Wi-Fi Direct / a soft-AP hotspot (or the shared LAN if there is one) by
+ * itself, so no common Wi-Fi network is needed (§10). Wi-Fi only has to be switched on.
  *
  * Only endpoints whose advertised id is already paired are auto-accepted. Anything else is shown
- * to the user with Nearby's authentication digits; once confirmed on a side, those digits are the
- * pairing secret S for that side.
+ * to the user with Nearby's authentication digits; once both users accepted, the protocol pairs in
+ * mode `confirm` with auto-accept on both sides (§3.3) — no second prompt.
  */
 object NearbyTransport {
     private const val TAG = "AirBridge.Nearby"
     const val SERVICE_ID = "com.shazan.airbridge.p2p"
     const val PREF_VISIBLE = "P2P_VISIBLE"
-    private val STRATEGY = Strategy.P2P_CLUSTER
+    private val STRATEGY = Strategy.P2P_STAR
 
     data class Found(val endpointId: String, val name: String, val peerId: String?)
     data class Pending(val endpointId: String, val name: String, val digits: String, val incoming: Boolean)
@@ -149,7 +156,11 @@ object NearbyTransport {
     private fun startAdvertising() {
         if (advertising) return
         advertising = true
-        client.startAdvertising(endpointName(), SERVICE_ID, lifecycle, AdvertisingOptions.Builder().setStrategy(STRATEGY).build())
+        val opts = AdvertisingOptions.Builder()
+            .setStrategy(STRATEGY)
+            .setConnectionType(ConnectionType.DISRUPTIVE) // allow Wi-Fi Direct / hotspot upgrades
+            .build()
+        client.startAdvertising(endpointName(), SERVICE_ID, lifecycle, opts)
             .addOnFailureListener { e ->
                 Log.w(TAG, "advertising failed: ${e.message}")
                 synchronized(this) { advertising = false }
@@ -180,7 +191,8 @@ object NearbyTransport {
     // ---- UI actions ----
 
     fun requestConnection(endpointId: String) {
-        client.requestConnection(endpointName(), endpointId, lifecycle)
+        val opts = ConnectionOptions.Builder().setConnectionType(ConnectionType.DISRUPTIVE).build()
+        client.requestConnection(endpointName(), endpointId, lifecycle, opts)
             .addOnFailureListener { e ->
                 Log.w(TAG, "requestConnection failed: ${e.message}")
                 _found.value.firstOrNull { it.endpointId == endpointId }?.peerId?.let { scheduleRetry(it) }
@@ -295,11 +307,13 @@ object NearbyTransport {
     }
 
     private fun open(ep: Endpoint) {
+        // The advertiser (accepted an incoming request) is the protocol host (§10).
         val role = if (ep.incoming) Role.HOST else Role.CLIENT
-        val secret = if (ep.confirmed && ep.digits.isNotEmpty()) ep.digits.toByteArray(Charsets.UTF_8) else null
-        val expected = if (role == Role.CLIENT && secret == null) ep.peerIdHint else null
+        // Users compared Nearby's digits on both phones: pair in mode `confirm`, auto-accepted.
+        val mode: PairMode = if (ep.confirmed) PairMode.Confirm(auto = true) else PairMode.None
+        val expected = if (role == Role.CLIENT && mode == PairMode.None) ep.peerIdHint else null
         val link = NearbyLink(ep.id)
-        val session = Session(role, link, expected, secret) { s, outcome -> onSessionEnd(ep, s, outcome) }
+        val session = Session(role, link, expected, mode) { s, outcome -> onSessionEnd(ep, s, outcome) }
         link.session = session
         ep.link = link
         try {
@@ -408,7 +422,7 @@ object NearbyTransport {
                             val kind = din.read()
                             if (kind < 0) break
                             val len = din.readInt()
-                            if (len < 0 || len > Protocol.MAX_BINARY_FRAME) throw IOException("frame too large: $len")
+                            if (len < 0 || len > Protocol.MAX_WIRE_FRAME) throw IOException("frame too large: $len")
                             val buf = ByteArray(len)
                             din.readFully(buf)
                             when (kind) {

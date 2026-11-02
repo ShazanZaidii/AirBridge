@@ -237,7 +237,7 @@ private fun AirBridgeRoot() {
     fun startPair(name: String, host: String, port: Int, id: String?, secret: ByteArray) {
         AirBridgeService.start(ctx)
         pairing = PairingUi(name)
-        WsClient.pair(host, port, id, secret)
+        WsClient.pair(host, port, id, com.shazan.airbridge.net.PairMode.Qr(secret), name, "")
     }
 
     if (showVpnWarning) {
