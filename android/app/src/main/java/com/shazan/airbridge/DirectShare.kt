@@ -4,7 +4,6 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Canvas
-import android.graphics.Color
 import android.graphics.Paint
 import android.util.Log
 import androidx.annotation.DrawableRes
@@ -14,6 +13,7 @@ import androidx.core.content.pm.ShortcutInfoCompat
 import androidx.core.content.pm.ShortcutManagerCompat
 import androidx.core.graphics.drawable.IconCompat
 import com.shazan.airbridge.net.PairedPeer
+import com.shazan.airbridge.ui.theme.Palette
 
 /**
  * Direct Share targets, one long-lived dynamic shortcut per paired peer, matched to the
@@ -72,7 +72,7 @@ object DirectShare {
         val size = 192
         val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bmp)
-        canvas.drawCircle(size / 2f, size / 2f, size / 2f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#2C2C2C") })
+        canvas.drawCircle(size / 2f, size / 2f, size / 2f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Palette.argb(Palette.SURFACE_HIGH) })
         ContextCompat.getDrawable(ctx, res)?.let {
             val pad = size / 4
             it.setBounds(pad, pad, size - pad, size - pad)
