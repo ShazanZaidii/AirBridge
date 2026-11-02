@@ -22,10 +22,26 @@ object LinkPolicy {
     const val TTL_EXTEND_MS = 60_000L
     const val IDLE_MS = 20_000L
     const val TICK_MS = 1_000L
-    /** Teardown with the home Wi-Fi kept: how long to wait for the LAN session before dropping the link anyway. */
-    const val BACK_DIAL_WAIT_MS = 5_000L
+    /** After `link_done`: how long the link session stays open while the LAN is redialled (§10.1: up to 3 s). */
+    const val BACK_DIAL_WAIT_MS = 3_000L
     /** §2.2 first port, used if an offer carries none. */
     const val DEFAULT_PORT = 47632
+
+    /** User-facing text for a §10.1 `link_fail` reason. */
+    fun failText(reason: String): String = when (reason) {
+        "no_go_support" -> "This PC can't host a Wi-Fi Direct link"
+        "hotspot_active" -> "Turn off Mobile Hotspot on the PC to use a direct link"
+        "radio_off" -> "Turn on Wi-Fi to use a direct link"
+        "join_failed" -> "Couldn't join the PC's direct Wi-Fi"
+        "no_ip" -> "The direct Wi-Fi link got no address"
+        "approval_denied" -> "The Wi-Fi connection request was declined"
+        "vpn" -> "A VPN is blocking the direct link"
+        "api_level" -> "This phone can't join Wi-Fi Direct links (Android 10 or later needed)"
+        "timeout" -> "The direct link took too long to set up"
+        "busy" -> "Another direct link is already being set up"
+        "user" -> "Direct link cancelled"
+        else -> "Direct link unavailable"
+    }
 
     /** Peer cap: can host a Wi-Fi Direct legacy group (Windows). */
     const val CAP_HOST = "wfd_host"

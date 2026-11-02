@@ -35,6 +35,7 @@ class LinkMachineTest {
         var bytes = 0L
         var xferBusy = false
         val logs = mutableListOf<String>()
+        val failures = mutableListOf<Triple<String, Boolean, Boolean>>()
 
         override fun now() = clock
         override fun schedule(delayMs: Long, task: () -> Unit): Cancellable {
@@ -59,6 +60,7 @@ class LinkMachineTest {
         override fun traffic(peerId: String) = bytes
         override fun busy(peerId: String) = xferBusy
         override fun log(line: String) { logs += line }
+        override fun failed(peerId: String, reason: String, byPeer: Boolean, local: Boolean) { failures += Triple(reason, byPeer, local) }
 
         fun advance(ms: Long) {
             val end = clock + ms
@@ -294,6 +296,37 @@ class LinkMachineTest {
 
     // ---- teardown and the replaced-session redial ----
 
+    @Test fun peerDoneWithStaKeptRedialsWhileLinkOpen() {
+        bringUp(sta = "kept")
+        m.onMessage(peer, LinkMsg.Done(7, "idle"))
+        assertEquals(listOf(true), env.resumes)
+        assertFalse(env.sent.any { it is LinkMsg.Done })
+        // The peer closes the link session with bye replaced before our LAN dial lands: nothing breaks.
+        env.link = false
+        m.onLinkSessionEnded(peer)
+        env.advance(LinkPolicy.BACK_DIAL_WAIT_MS)
+        assertEquals(1, env.released)
+        assertEquals(listOf(true, false), env.resumes)
+        assertEquals(LinkState.IDLE, m.state(peer))
+    }
+
+    @Test fun unsolicitedDesktopOfferWithHighLid() {
+        val lid = 0x40000000 // desktops pick lids from 2^30 (§10.1)
+        m.onMessage(peer, offer(lid = lid))
+        assertEquals(LinkState.JOINING, m.state(peer))
+        env.joins.single().second(joined())
+        assertEquals(lid, (env.sent.single() as LinkMsg.Ready).lid)
+    }
+
+    @Test fun failureReportedForLocalRequestsOnly() {
+        m.request(peer, "xfer", 734_003_200)
+        m.onMessage(peer, LinkMsg.Fail((env.sent.single() as LinkMsg.Request).lid, "no_go_support"))
+        m.onMessage(peer, offer(lid = 0x40000001))
+        env.joins.single().second(JoinOutcome.Failed("join_failed"))
+        assertEquals(listOf(Triple("no_go_support", true, true), Triple("join_failed", false, false)), env.failures)
+        assertEquals("This PC can't host a Wi-Fi Direct link", LinkPolicy.failText("no_go_support"))
+    }
+
     @Test fun peerDoneRedialsReplacedLanSession() {
         bringUp()
         m.onMessage(peer, LinkMsg.Done(7, "user"))
@@ -307,14 +340,16 @@ class LinkMachineTest {
         bringUp(sta = "kept")
         env.advance(LinkPolicy.IDLE_MS + 1_000)
         assertEquals(LinkState.TEARDOWN, m.state(peer))
+        // §10.1 (amended): link_done first, on the still-open link session, then redial the LAN over it.
+        assertEquals(LinkMsg.Done(7, "idle"), env.sent.last())
+        assertEquals("link", env.sentOn.last())
         assertEquals(listOf(true), env.resumes) // LAN dial allowed while the link session is ready
         assertEquals(0, env.released)
-        assertFalse(env.sent.any { it is LinkMsg.Done })
-        // LAN session ready → Hub retires the link session; link_done goes over the LAN.
+        assertEquals(0, env.linkSessionClosed)
+        // LAN session ready → Hub retires the link session (bye replaced); then the network is released.
         env.lan = true
         m.onLanReady(peer)
-        assertEquals(LinkMsg.Done(7, "idle"), env.sent.last())
-        assertEquals("lan", env.sentOn.last())
+        assertEquals(1, env.sent.count { it is LinkMsg.Done })
         assertEquals(1, env.released)
         assertEquals(listOf(true, false), env.resumes)
         assertEquals(LinkState.IDLE, m.state(peer))
@@ -323,9 +358,12 @@ class LinkMachineTest {
     @Test fun staKeptButLanSilentGivesUpAfterWait() {
         bringUp(sta = "kept")
         m.end(peer, "user")
-        env.advance(LinkPolicy.BACK_DIAL_WAIT_MS)
         assertEquals(LinkMsg.Done(7, "user"), env.sent.last())
         assertEquals("link", env.sentOn.last())
+        env.advance(LinkPolicy.BACK_DIAL_WAIT_MS - 1)
+        assertEquals(0, env.released)
+        env.advance(1) // 3 s window over: close the link session (bye replaced) and release
+        assertEquals(1, env.linkSessionClosed)
         assertEquals(1, env.released)
         assertEquals(LinkState.IDLE, m.state(peer))
     }
