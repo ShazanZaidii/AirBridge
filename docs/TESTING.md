@@ -42,24 +42,41 @@ second identity. The second connection to the same host should authenticate with
 2. Quit the old AirBridge first (same bundle id). Launch the new one; grant **Local Network**,
    **Accessibility** and **Notifications** when prompted. Accessibility no longer needs a relaunch — the tap
    installs within ~2 s of granting.
-3. Menu bar → you should see the status line ("Controlled by…"/"Controlling…"), paired devices, a QR code and
-   "pair from your phone/PC", "Connect to host…", "Display Arrangement…", "Clipboard Filters…".
+3. Menu bar → you should see ip:port, Devices, "Pair a new device" (QR), "Connect to host…",
+   "Display Arrangement…", "Clipboard Filters…".
 
 **Checks**
-- Pair the probe client (confirm mode: both show the same 6 digits → Accept on the Mac); send `clip` and a file; the file lands in
-  `~/Downloads/AirBridge Transfers` and is on the pasteboard. Reconnect the probe without a code.
-- Reject on the Mac → the client sees `rejected`; a tampered proof → `bad_proof`; five failures → locked 60 s.
+- (rev 2) Pair a client by numeric comparison: a floating panel "<name> (<platform>) wants to pair — 483 920 —
+  Accept / Reject" appears without stealing focus (also listed in the menu). Accept only if the client shows the
+  same digits; Reject → client gets `pair_fail rejected`; no answer for 60 s → `timeout`. Send `clip` and a file;
+  the file lands in `~/Downloads/AirBridge Transfers` and is on the pasteboard. Reconnect without pairing again.
+- QR pairing (`mode:"qr"`) still works; five failed proofs → locked for 60 s and the QR secret rotates.
+- Connect to host… → Pair on a Windows host → both screens show the same 6 digits → Confirm on the Mac, Accept
+  on the PC.
+- Everything after `auth_ok`/`pair_ok` is inside `0x02` envelopes (check with Wireshark: only `hello` and the
+  handshake are readable).
+- Control status: while controlling/controlled, the menu shows a green banner ("Controlling Pixel 9 · …").
+- "Allow screen mirroring…" appears until Screen Recording is granted; relaunch afterwards — `hello.caps` then
+  includes `mirror_source`.
 - Finder → Share → AirBridgeShare → pick a device (needs the signed build).
 - Display Arrangement shows every display; drag the peer tile to an edge.
-- Universal control to the phone (once Android is installed): **push through** the edge (keep pushing ~100 pt within half a second; the edge indicator charges) — merely touching the edge must not capture; type with
+- Universal control to the phone (once Android is installed): push the cursor through the edge; type with
   Shift/Cmd; scroll; volume keys; push back through the phone's edge; also **triple-Esc** or
   **Ctrl+Option+Cmd+Esc** recalls the cursor; disconnecting the phone recalls it.
 - Hold Shift while crossing and release it on the phone — nothing stuck on either side.
 - Phone trackpad: tap, double-tap, two-finger tap (right click), drag, scroll, three-finger swipes
-  (Mission Control / App Exposé / desktops), keyboard incl. sticky modifiers and the Caps Lock LED/chip.
-- Screen mode on the phone: live Mac screen, tap/drag/scroll land where you touch; check latency feels < 100 ms on LAN.
-- Two controllers: start controlling the phone from the Mac while Windows also tries → the second one sees "Being used by…" (`ctl_busy`); pushing a cursor in from the other desktop takes over.
-- Dev hook: `open --env AIRBRIDGE_DEBUG_PAIR_CODE=246810 AirBridge.app` fixes the code for scripted tests.
+  (Mission Control / App Exposé / desktops), keyboard incl. sticky modifiers and the Caps Lock LED.
+- Dev hook (tests only, never in normal use): `open --env AIRBRIDGE_DEBUG_AUTO_ACCEPT=1 AirBridge.app` auto-accepts
+  confirm-mode pairings on both sides (host Accept and client Confirm) without any prompt.
+
+- Universal control to the phone: **push through** the edge (keep pushing ~100 pt within half a second; the
+  4 pt edge indicator charges and flashes on capture) — merely touching the edge must not capture; Easy/Normal/Firm
+  and "also hold ⌥" live in Display Arrangement. Triple-Esc or Ctrl+Option+Cmd+Esc recalls the cursor.
+- Screen mode on the phone: live Mac screen (needs Screen Recording granted + relaunch), tap/drag/scroll land where
+  you touch; judge latency (< 100 ms on LAN is the goal).
+- Two controllers: control the phone from the Mac while Windows also tries → the second sees "Being used by…"
+  (`ctl_busy`); pushing a cursor in from the other desktop takes over; a second phone trackpadding the Mac gets
+  `ctl_busy` while the first one is active.
 
 **Not yet verified on macOS 26**: Mission Control / App Exposé via the Mission Control binary,
 `lock` (private `SACLockScreenImmediate`, falls back to Ctrl+Cmd+Q), `keyboard_toggle`, cursor hiding from a
@@ -107,9 +124,18 @@ Allow the Defender firewall prompt for **private** networks. Logs: `%LOCALAPPDAT
 identity/peers in `%LOCALAPPDATA%\AirBridge\`; layout in `layout.json` there.
 
 **Checks**
-- Tray shows a QR + code; `netstat -ano | findstr 47632` shows it listening. Pair the phone (QR) and the probe.
+- Tray shows the device list, a QR ("Pair from your phone") and the address; `netstat -ano | findstr 47632`
+  shows it listening. Pair the phone by QR (no prompt on the PC). Pair the phone from its discovery list
+  (mode `confirm`): the PC shows a topmost "<name> (Android) wants to pair — 483 920 — Accept / Reject" plus a
+  balloon; the phone shows the same digits. Reject → phone sees "declined"; ignore for 60 s → `timeout`.
+- Log line `Session ready (encrypted)` for every session; no `ECDH known-answer test FAILED` /
+  `little-endian` warning at startup (if the latter appears, it is compensated, but report it).
 - Clipboard both ways; drop files on the tray popup → phone; phone → `Downloads\AirBridge Transfers`.
-- "Connect to a Mac / PC…" → pick the Mac → both show the same digits → Confirm/Accept. Restart the Mac app; Windows reconnects.
+- "Connect to a Mac or PC…" → pick the Mac → both screens show the same 6 digits → "Codes match" on the PC,
+  Accept on the Mac. Restart the Mac app; Windows reconnects (auth, no prompt). Pasting the Mac's
+  `airbridge://pair?...` link into the address box pairs in mode `qr`.
+- While controlling / being controlled, the tray popup shows the status line set by the input half
+  (`App.SetControlStatus`), and the controlled peer's row has a "Control" badge.
 - Wi-Fi off/on: the QR address updates and connections come back.
 - Universal control: Display Arrangement shows real monitors; push the cursor off the configured edge;
   **Ctrl+Alt+Esc** recalls it; keys aren't stuck after crossing with Shift held; `taskkill /f` while
@@ -119,7 +145,12 @@ identity/peers in `%LOCALAPPDATA%\AirBridge\`; layout in `layout.json` there.
 - Packaged (MSIX): Share target works with the app closed. The Explorer context menu is **not** available
   packaged yet (needs an `IExplorerCommand` COM DLL; see `docs/` notes in the Windows repo).
 
-**Known-unverified Win32 pieces**: hook thread + watchdog, `INPUT` struct marshalling, swapped-mouse-button
+**Test hook**: `set AIRBRIDGE_DEBUG_AUTO_ACCEPT=1` before launching makes the Windows *host* accept every
+`confirm` pairing without showing the prompt (logged as a warning). Never ship with it set. Combine with
+`AIRBRIDGE_DATA_DIR=<dir>` to run a second, isolated instance.
+
+**Known-unverified Win32 pieces**: CNG `DeriveRawSecretAgreement` byte order (guarded by a startup
+known-answer test), hook thread + watchdog, `INPUT` struct marshalling, swapped-mouse-button
 compensation, touch-keyboard toggle, DPAPI store, QR rendering, `ToUnicodeEx` dead-key handling.
 
 ---
