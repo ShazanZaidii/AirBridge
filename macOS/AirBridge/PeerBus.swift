@@ -10,22 +10,26 @@ nonisolated struct PeerInfo: Identifiable, Equatable, Sendable {
     var screenH: Int = 0
 }
 
-/// Meeting point between the network half (discovery, sessions, pairing, clipboard, file transfer)
-/// and the input half (event tap, cursor routing, input injection, display arrangement).
-/// See docs/protocol.md §12.
+/// Meeting point between the network half (discovery, sessions, pairing, encryption, clipboard, file
+/// transfer) and the input half (event tap, cursor routing, input injection, display arrangement,
+/// screen-mirror source). See docs/protocol.md §12.
 ///
-/// Network half: assigns `transport`; calls `dispatchControl` for control-type messages and
-/// `notifyPeers` whenever the set of ready peers changes.
+/// Network half: assigns `transport`; calls `dispatchControl` for control-type messages, `dispatchBinary`
+/// for inner binary frames of kind 0x03 (video), and `notifyPeers` whenever the set of ready peers changes.
+/// Everything the input half sees is already decrypted.
 ///
-/// Input half: sets `controlHandler` and `peersHandler`; calls `send` / `broadcast` / `peers`.
+/// Input half: sets `controlHandler` / `binaryHandler` / `peersHandler`; calls `send` / `broadcast` /
+/// `sendBinary` / `peers`.
 ///
-/// Threading: `controlHandler` is invoked on a network queue. The input half hops to the main
-/// thread itself where needed. `send` / `broadcast` are safe from any thread and never block.
+/// Threading: handlers are invoked on a network queue. The input half hops to the main thread itself
+/// where needed. Sends are safe from any thread and never block.
 nonisolated protocol PeerTransport: AnyObject {
     /// Send to one peer. Returns false if that peer has no ready session.
     @discardableResult func send(to peerId: String, _ msg: [String: Any]) -> Bool
     /// Send to every ready peer.
     func broadcast(_ msg: [String: Any])
+    /// Send an inner binary frame (already starting with its kind byte, e.g. 0x03) to one peer.
+    @discardableResult func sendBinary(to peerId: String, _ frame: Data) -> Bool
     /// Snapshot of ready peers.
     func peers() -> [PeerInfo]
 }
@@ -35,14 +39,19 @@ nonisolated final class PeerBus: @unchecked Sendable {
 
     /// Message types that belong to the input half (routed through `controlHandler`).
     static let controlTypes: Set<String> = [
-        "ctl_enter", "ctl_leave",
-        "ptr_move", "ptr_scroll", "ptr_btn", "ptr_click",
+        "ctl_enter", "ctl_leave", "ctl_busy",
+        "ptr_move", "ptr_scroll", "ptr_btn", "ptr_click", "ptr_abs",
         "key", "key_state", "action",
+        "mirror_start", "mirror_info", "mirror_key", "mirror_ack", "mirror_stop",
     ]
+
+    /// Inner binary frame kinds routed to the input half (first byte of the inner frame).
+    static let binaryKindVideo: UInt8 = 0x03
 
     private let lock = NSLock()
     private weak var _transport: PeerTransport?
     private var _controlHandler: ((_ peerId: String, _ msg: [String: Any]) -> Void)?
+    private var _binaryHandler: ((_ peerId: String, _ frame: Data) -> Void)?
     private var _peersHandler: ((_ peers: [PeerInfo]) -> Void)?
 
     var transport: PeerTransport? {
@@ -53,6 +62,10 @@ nonisolated final class PeerBus: @unchecked Sendable {
         get { lock.lock(); defer { lock.unlock() }; return _controlHandler }
         set { lock.lock(); _controlHandler = newValue; lock.unlock() }
     }
+    var binaryHandler: ((_ peerId: String, _ frame: Data) -> Void)? {
+        get { lock.lock(); defer { lock.unlock() }; return _binaryHandler }
+        set { lock.lock(); _binaryHandler = newValue; lock.unlock() }
+    }
     var peersHandler: ((_ peers: [PeerInfo]) -> Void)? {
         get { lock.lock(); defer { lock.unlock() }; return _peersHandler }
         set { lock.lock(); _peersHandler = newValue; lock.unlock() }
@@ -61,8 +74,11 @@ nonisolated final class PeerBus: @unchecked Sendable {
     @discardableResult
     func send(to peerId: String, _ msg: [String: Any]) -> Bool { transport?.send(to: peerId, msg) ?? false }
     func broadcast(_ msg: [String: Any]) { transport?.broadcast(msg) }
+    @discardableResult
+    func sendBinary(to peerId: String, _ frame: Data) -> Bool { transport?.sendBinary(to: peerId, frame) ?? false }
     func peers() -> [PeerInfo] { transport?.peers() ?? [] }
 
     func dispatchControl(from peerId: String, _ msg: [String: Any]) { controlHandler?(peerId, msg) }
+    func dispatchBinary(from peerId: String, _ frame: Data) { binaryHandler?(peerId, frame) }
     func notifyPeers(_ peers: [PeerInfo]) { peersHandler?(peers) }
 }

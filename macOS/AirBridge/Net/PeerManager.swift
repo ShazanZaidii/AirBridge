@@ -100,6 +100,16 @@ nonisolated final class PeerManager: PeerTransport, @unchecked Sendable {
         queue.async { [self] in for s in ready.values { s.sendText(data) } }
     }
 
+    @discardableResult
+    func sendBinary(to peerId: String, _ frame: Data) -> Bool {
+        snapLock.lock()
+        let isReady = snapshot.contains { $0.id == peerId }
+        snapLock.unlock()
+        guard isReady else { return false }
+        queue.async { [self] in ready[peerId]?.sendBinary(frame) { _ in } }
+        return true
+    }
+
     func peers() -> [PeerInfo] {
         snapLock.lock(); defer { snapLock.unlock() }
         return snapshot

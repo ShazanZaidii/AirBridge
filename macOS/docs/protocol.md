@@ -35,7 +35,8 @@ v2 is **not** backward compatible with the old colon-delimited v1 protocol. All 
 3. **Clipboard text is never confused with commands**: it only ever travels inside `{"t":"clip"}`.
 4. State is **per session**. Two peers sending files at the same time must not interfere.
 5. **No authentication, no commands.** Nothing but `hello`/`auth`/`pair*` is accepted before a session is
-   `ready`.
+   `ready`, and **everything after `ready` is encrypted** (§3.6). A plaintext frame after `ready` is a
+   protocol error → close.
 6. Key codes are **USB HID usage IDs** (page 0x07) — never platform virtual-key codes (§8.4).
 7. Numbers may be floats where noted. Text is UTF-8. Base64 is standard (RFC 4648, with padding).
 
@@ -92,8 +93,10 @@ airbridge://pair?v=2&id=<hostId>&name=<urlencoded name>&plat=<plat>&addr=<ip>&po
   most 10 minutes; the host also rotates it the next time the QR is shown after a successful pairing.
 - `addr`/`port` are hints; the client still prefers the mDNS address for `id` if available.
 
-Hosts also display a **6-digit pairing code** (regenerated after every successful pairing and every 5 minutes)
-for the discovery flow where the client cannot scan (e.g. Windows pairing with a Mac).
+When the client cannot scan (e.g. Windows pairing with a Mac, or a phone that picked the host from the
+discovery list), pairing uses **numeric comparison** (§3.3, mode `confirm`): both devices display the same
+6 digits derived from the key exchange and both users confirm. Nothing is typed, and a sniffer cannot
+brute-force anything offline.
 
 ---
 
@@ -124,6 +127,7 @@ Client                                   Host
 {"t":"hello","v":2,"id":"<uuid>","name":"Shazan's Mac","plat":"macos","app":"2.0.0",
  "caps":["clip","xfer","ctl_source","ctl_target","trackpad"],
  "nonce":"<base64 16 random bytes>",
+ "pk":"<base64 65-byte uncompressed P-256 public key>",
  "screen":{"w":1080,"h":2400},
  "paired":true}
 ```
@@ -135,7 +139,12 @@ Client                                   Host
   - `ctl_source` – can control others (has a physical pointer that can leave the screen)
   - `ctl_target` – can be controlled (shows a virtual cursor, injects input)
   - `trackpad` – can act as a direct input device (phone trackpad/keyboard mode)
+  - `mirror_source` – can stream its screen (§8.7)
+  - `mirror_sink` – can display a streamed screen and send absolute input (§8.7)
 - `nonce` – fresh per connection, used in auth/pair MACs.
+- `pk` – a fresh **ephemeral** NIST P-256 (secp256r1) public key, X9.63 uncompressed (`0x04‖X‖Y`, 65 bytes),
+  generated per connection and never reused. It feeds the session keys (§3.6). Reject a `hello` without a
+  valid point.
 - `screen` – optional, pixel size of the primary display.
 - `paired` – **host only**: `true` if the host has a stored key for the client's `id`.
 
@@ -144,50 +153,63 @@ The client sends `hello` first. The host replies with its own `hello`.
 ### 3.2 `auth` / `auth_ok` / `auth_fail` (already paired)
 
 Let `K` be the stored 32-byte shared key for this peer (§3.3). `cNonce`/`hNonce` are the raw bytes from the
-two `hello` messages. `HMAC` = HMAC-SHA256. `|` = byte concatenation of the UTF-8 strings/bytes shown.
+two `hello` messages, `cPk`/`hPk` the raw 65-byte public keys. `HMAC` = HMAC-SHA256. `|` = byte
+concatenation of the UTF-8 strings/bytes shown. Define the **transcript**:
+
+```
+T = cNonce | "|" | hNonce | "|" | clientId | "|" | hostId | "|" | cPk | "|" | hPk
+```
 
 ```json
-C→H  {"t":"auth","mac":"<base64 HMAC(K, "auth|" | cNonce | "|" | hNonce | "|" | clientId)>"}
-H→C  {"t":"auth_ok","mac":"<base64 HMAC(K, "auth_ack|" | hNonce | "|" | cNonce | "|" | hostId)>"}
+C→H  {"t":"auth","mac":"<base64 HMAC(K, "auth|" | T)>"}
+H→C  {"t":"auth_ok","mac":"<base64 HMAC(K, "auth_ack|" | T)>"}
 H→C  {"t":"auth_fail","reason":"unpaired|bad_mac|version|busy"}
 ```
+
+Because `T` contains both ephemeral public keys, a MITM that substitutes keys fails authentication.
 
 The client **must verify** `auth_ok.mac` (mutual authentication) and close if it is wrong.
 On `auth_fail` with `unpaired` or `bad_mac`, the client forgets its stored key for that host and shows
 "Pair again". The host closes the socket after sending any `auth_fail` or `pair_fail`.
 
-### 3.3 `pair` / `pair_ok` / `pair_fail` (first contact)
+### 3.3 `pair_start` / `pair` / `pair_ok` / `pair_fail` (first contact)
 
-The client has a **pairing secret** `S` from one of two sources:
+Both sides first compute the ECDH shared secret `Z` = x-coordinate of ECDH(own ephemeral private key,
+peer `pk`) (32 bytes). There are two pairing modes:
 
-| Flow | `S` |
-|------|-----|
-| QR scan | the 32 raw bytes decoded from `k` |
-| Code entry (user types the 6 digits shown on the host) | the UTF-8 bytes of the 6-digit string, e.g. `"483920"` |
+| Mode | How the long-term key `K` is derived | User action |
+|------|--------------------------------------|-------------|
+| `qr` | `K = HMAC-SHA256(key = S, data = "airbridge/v2/pair|" \| clientId \| "|" \| hostId)` where `S` = the 32 raw bytes from the QR's `k` | scanning the QR is consent; no prompt on the host |
+| `confirm` | `K = HKDF-SHA256(ikm = Z, salt = cNonce \| hNonce, info = "airbridge/v2/pairkey|" \| clientId \| "|" \| hostId, 32 bytes)` | both devices show the same 6 digits; both users confirm |
 
-Both sides derive the long-term key:
+The confirmation digits for mode `confirm`:
 
 ```
-K = HMAC-SHA256(key = S, data = "airbridge/v2/pair|" | clientId | "|" | hostId)
+confirm = decimal( first 4 bytes of HMAC-SHA256(key = Z, data = "airbridge/v2/confirm|" | T) as u32 big-endian ) mod 1_000_000, zero-padded to 6 digits
 ```
+
+An active MITM yields different `Z` on the two sides, hence different digits, which the users notice. A passive
+sniffer learns nothing. No code is ever typed.
 
 ```json
-C→H  {"t":"pair","proof":"<base64 HMAC(K, "pair|" | cNonce | "|" | hNonce | "|" | clientId)>"}
-H→C  {"t":"pair_ok","proof":"<base64 HMAC(K, "pair_ack|" | hNonce | "|" | cNonce | "|" | hostId)>"}
-H→C  {"t":"pair_fail","reason":"bad_code|locked|not_pairing"}
+C→H  {"t":"pair_start","mode":"confirm"}                 // host now shows "<client name> wants to pair · 483920 · Accept / Reject"
+C→H  {"t":"pair","mode":"qr|confirm","proof":"<base64 HMAC(K, "pair|" | T)>"}     // confirm: sent after the client's user tapped Confirm
+H→C  {"t":"pair_ok","proof":"<base64 HMAC(K, "pair_ack|" | T)>"}                  // confirm: sent after the host's user tapped Accept and the proof verified
+H→C  {"t":"pair_fail","reason":"bad_proof|rejected|locked|not_pairing|timeout"}
 ```
 
-Host rules:
-- The host derives `K` for **both** its current QR secret and its current 6-digit code and accepts the
-  proof if either matches.
+Rules:
+- `pair_start` is only needed for `confirm` (it lets the host show the digits early). The whole pairing must
+  finish within **60 s** of `pair_start` (`timeout`).
 - On success both sides persist `K` under the peer's `id` (Keychain on macOS, DPAPI/`ProtectedData` on
-  Windows, app-private storage on Android) together with `name` and `plat`.
-- After **5 failed** `pair` attempts from any source the host refuses pairing (`locked`) for 60 seconds and
-  rotates the code.
+  Windows, Keystore-wrapped app-private storage on Android) together with `name` and `plat`.
+- Hosts may disable pairing entirely (`not_pairing`). After **5 failed** `pair` proofs the host refuses pairing
+  (`locked`) for 60 s and rotates its QR secret.
 - The client must verify `pair_ok.proof`.
+- Android↔Android over Nearby Connections: Nearby's own authenticated link already had its digits confirmed by
+  both users, so both sides treat mode `confirm` as auto-accepted (no second prompt).
 
-Pairing secrets never travel over the network; only HMACs do. The QR flow is strong; the 6-digit code flow is
-brute-forceable offline by a LAN sniffer and exists for convenience (TLS is a planned follow-up).
+Pairing secrets never travel over the network; only HMACs do.
 
 ### 3.4 Duplicate sessions
 
@@ -200,6 +222,39 @@ change or an explicit user action; a device never dials a peer it already has a 
 
 `{"t":"unpair"}` — the sender has deleted its key; the receiver deletes its key and closes. "Forget device"
 in any UI sends this if connected, then deletes locally.
+
+### 3.6 Secure channel (mandatory after `ready`)
+
+Once `auth_ok`/`pair_ok` has been exchanged, both sides derive session keys with forward secrecy:
+
+```
+keys  = HKDF-SHA256(ikm = Z, salt = cNonce | hNonce, info = "airbridge/v2/session|" | T, length = 64)
+k_c2h = keys[0..32)     // client → host
+k_h2c = keys[32..64)    // host → client
+```
+
+(`Z`, `T` as in §3.2/§3.3. HKDF = RFC 5869 extract-then-expand; implement with HMAC-SHA256 where the
+platform lacks it.) The ephemeral private keys are destroyed after derivation.
+
+**Every** subsequent message, in both directions, is one WebSocket **binary** frame:
+
+```
+byte 0        : 0x02  (kind = encrypted envelope)
+bytes 1..8    : u64 big-endian  seq   (per direction, starts at 0, strictly +1 per frame)
+bytes 9..     : AES-256-GCM( key = direction key, nonce = 0x00000000 ‖ seq (12 bytes), aad = bytes 0..8,
+                             plaintext = u8 innerKind | payload )   // ciphertext ‖ 16-byte tag
+```
+
+- `innerKind` 0 = a JSON text message (payload = UTF-8 JSON), 1 = a binary frame as defined elsewhere
+  (payload starts with its own kind byte, e.g. `0x01` file chunk, `0x03` video frame).
+- A receiver rejects a frame whose `seq` is not exactly the next expected value (replay/reorder) and closes.
+- A plaintext text frame or an unencrypted `0x01`/`0x03` frame after `ready` → close with `bye error`.
+- WebSocket-level ping/pong frames stay unencrypted (they carry no data). `ping`/`pong` messages are encrypted
+  like everything else.
+- Over transports that already encrypt (Nearby Connections) the envelope is still applied; it is cheap.
+
+Threat model after this section: a LAN sniffer sees only device ids/names/platform in `hello` and ciphertext.
+An active attacker cannot pair (confirm digits mismatch) nor hijack an existing pairing (no `K`).
 
 ---
 
@@ -236,6 +291,9 @@ in any UI sends this if connected, then deletes locally.
 - Android: because Android 10+ only allows clipboard reads from the focused app, the Android app sends `clip`
   when the user triggers a push (tile, bubble, share) and **automatically** after a `copy` action requested by
   a controller (§8.5) and when the app comes to the foreground with changed content.
+- Android floating bubble: it exists only for manual pushes. It is **hidden** while the phone is under a control
+  lease (§8.6) or while the trackpad/mirror screen is open (copies are automatic there), and comes back when
+  that ends.
 
 ---
 
@@ -369,6 +427,19 @@ nothing is exchanged. A controller may assign at most one peer per edge.
 - `ptr_click.n` is the click count **of this click** (like macOS `clickState`): a double tap arrives as `n:1`
   followed by `n:2` within the double-click interval. Targets inject one click per message and must not
   synthesise extra clicks.
+- `{"t":"ptr_abs","x":0.52,"y":0.31}` — absolute position, normalised to the target's primary display (or the
+  mirrored display in §8.7), 0..1. Used by mirror sinks and any absolute pointing device. Targets move the
+  cursor there without gain.
+
+#### Capture intent (controller behaviour)
+
+Reaching a screen edge is not a request to cross. A controller captures the cursor only on a **deliberate
+push-through**: the cursor is at an outer edge inside the peer's span **and** the user keeps pushing outward
+so that the accumulated outward delta while pinned at the edge reaches **≥ 100 units within 500 ms**. Any
+inward movement, a pause > 500 ms, a button held down, or leaving the span resets the accumulator. After a
+return from a peer, that edge ignores pushes for 700 ms (no bounce). Implementations may add a "hold a
+modifier to cross" or "corner-only" option, and should show a subtle edge indicator while the accumulator is
+charging. Edges with no assigned or offline peer never capture.
 - Controllers may coalesce moves to ≤ 120 messages/s.
 
 ### 8.3 Keyboard
@@ -435,11 +506,65 @@ Platform mapping (each implementation owns a complete table):
 | `swipe_up` `swipe_down` `swipe_left` `swipe_right` | gesture at the current cursor position |
 | `copy` `paste` | clipboard action in the focused app. On Android, `copy` is followed by an automatic `clip` push (§5). |
 
+### 8.6 Control arbitration — who controls whom
+
+**Which device gets controlled** is decided on the controller: each outer edge of its screen layout has at most
+one assigned peer (Display Arrangement), each peer sits on at most one edge, and the controller's UI always
+shows the mapping ("Right edge → Pixel 9"). Pushing through an edge controls exactly that peer. Trackpad and
+mirror modes target the peer the user picked on the phone (a chooser appears when more than one desktop is
+connected; the last choice is remembered and shown on screen).
+
+**What a target does with competing input** — a target holds at most one **control lease**:
+
+| Event | Effect |
+|-------|--------|
+| `ctl_enter` from peer A | A takes the lease immediately (a person physically pushing a cursor always wins). If B held it, B receives `ctl_leave` (entry edge + current `rel`) and the target releases B's held keys/buttons. |
+| `ptr_*`/`key`/`action` from peer A while nobody holds a lease | A takes an **implicit** lease (trackpad/mirror use). It expires after **1500 ms** without input from A. |
+| Input from peer B while A holds the lease | Dropped. B receives `{"t":"ctl_busy","holder":"<A's name>"}` at most once per 2 s and shows "Being controlled by A". Exception: `ctl_enter` from B pre-empts as above. |
+| `ctl_leave` from the holder, holder disconnects, or implicit lease expires | Lease released; held keys/buttons released. |
+
+Targets show their state ("Controlled by Shazan's MacBook"); controllers show theirs ("Controlling Pixel 9 ·
+press Ctrl+Opt+Cmd+Esc to return"). `key_state`, `clip` and file transfers are never affected by leases.
+
+### 8.7 Screen mirror ("touchscreen" mode)
+
+A `mirror_sink` (phone) shows a `mirror_source`'s (Mac/PC) screen live and sends absolute input. Latency is
+the design goal: encoder in real-time mode, no B-frames, decode straight to a surface, drop late frames.
+
+```json
+sink→source   {"t":"mirror_start","codecs":["hevc","h264"],"maxW":1600,"maxH":1000,"fps":60,"bitrate":8000000}
+source→sink   {"t":"mirror_info","codec":"h264","w":1512,"h":982,"fps":60,"display":{"w":3024,"h":1964}}
+sink→source   {"t":"mirror_key"}                // please send a keyframe now (after loss/decoder reset)
+sink→source   {"t":"mirror_ack","pts":123456}   // every 10 frames: flow control
+either        {"t":"mirror_stop"}
+```
+
+Video frames travel inside the encrypted envelope as inner binary frames:
+
+```
+byte 0        : 0x03  (kind = video frame)
+bytes 1..8    : u64 big-endian  pts in microseconds (source clock)
+byte 9        : flags  bit0 = keyframe, bit1 = contains parameter sets (SPS/PPS/VPS)
+bytes 10..    : Annex-B elementary stream (start-code prefixed NAL units) for the negotiated codec
+```
+
+Rules:
+- Source: scale to fit `maxW×maxH` keeping aspect, `fps` ≤ requested, keyframe at most every 2 s and on
+  `mirror_key`, parameter sets repeated with every keyframe, bitrate adaptive from `mirror_ack` lag; never
+  queue more than 2 unacknowledged frames beyond the ack window (drop, don't buffer). Stop on `mirror_stop`,
+  on sink disconnect, and when the sink stops acking for 3 s.
+- Sink: render the newest frame, discard older undecoded frames, keep the decoder in low-latency mode.
+  Touch → `ptr_abs` (normalised to the mirrored display) + `ptr_click`/`ptr_btn`; two fingers → `ptr_scroll
+  px:true`; the on-screen keyboard sends `key`. Mirror input uses the normal lease rules (§8.6).
+- A source needs the OS screen-recording permission; it advertises `mirror_source` only when granted.
+
 ---
 
 ## 9. Limits and encoding
 
-- Text frame ≤ 1 MiB; binary frame ≤ 1 MiB + 17 header bytes.
+- Text frame ≤ 1 MiB; binary frame ≤ 1 MiB + 17 header bytes (+ 9 + 16 bytes of envelope overhead).
+- Binary kinds: `0x01` file chunk (§6.2), `0x02` encrypted envelope (§3.6, outermost), `0x03` video frame
+  (§8.7). Others reserved.
 - JSON: no comments, no NaN/Infinity. Floats are IEEE doubles formatted plainly (`-0.5`, not `-5E-1`);
   senders round to at most 4 decimals so stock JSON encoders never fall back to exponent notation.
 - Field names are exactly as written here (short, lowercase).
@@ -462,8 +587,11 @@ Services   (clipboard, xfer, control)                  →   stateless w.r.t. tr
 For transports without native text/binary framing, frame each message as
 `u8 kind (0 = text, 1 = binary) | u32 big-endian length | payload`.
 
-Nearby Connections (Android↔Android): each message is one BYTES payload with the framing above; the
-handshake is identical (both sides already have a `K` from pairing or pair via the displayed code).
+Nearby Connections (Android↔Android): one long-lived STREAM payload per direction carries the framed
+messages (BYTES payloads are capped at 32 KiB). Strategy `P2P_STAR` with disruptive bandwidth upgrades
+allowed, so Nearby brings up Wi-Fi Direct / hotspot links on its own — **no shared network is needed** and
+transfers run at Wi-Fi speeds. The handshake is identical (§3), with mode `confirm` auto-accepted after
+Nearby's own digit confirmation.
 
 ---
 
@@ -503,7 +631,13 @@ so the halves can be developed in parallel. The exact shapes are in each repo's 
 - macOS: `AirBridge/PeerBus.swift`
 - Windows: `AirBridge/PeerBus.cs`
 
-The network half **implements** `send/broadcast/peers` and **calls** the registered handlers; the input half
-**registers** the handlers and **calls** `send/broadcast`. Control-type messages routed to the input half are
-exactly: `ctl_enter`, `ctl_leave`, `ptr_move`, `ptr_scroll`, `ptr_btn`, `ptr_click`, `key`, `key_state`,
-`action`. Everything else stays in the network half.
+The network half **implements** `send/broadcast/sendBinary/peers` and **calls** the registered handlers; the
+input half **registers** the handlers and **calls** `send/broadcast/sendBinary`. Control-type messages routed
+to the input half are exactly: `ctl_enter`, `ctl_leave`, `ctl_busy`, `ptr_move`, `ptr_scroll`, `ptr_btn`,
+`ptr_click`, `ptr_abs`, `key`, `key_state`, `action`, `mirror_start`, `mirror_info`, `mirror_key`,
+`mirror_ack`, `mirror_stop`. Inner binary frames of kind `0x03` (video) are routed to the input half's binary
+handler; kind `0x01` (file chunks) stays in the network half. Encryption/decryption (§3.6) is entirely the
+network half's job — the input half only ever sees plaintext messages.
+
+(The example in §11 shows messages in the clear for readability; on the wire every message after `auth_ok`
+is inside a `0x02` envelope.)
