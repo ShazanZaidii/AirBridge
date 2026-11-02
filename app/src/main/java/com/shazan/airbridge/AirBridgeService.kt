@@ -1,6 +1,5 @@
 package com.shazan.airbridge
 
-import android.annotation.SuppressLint
 import android.app.Notification
 import android.app.PendingIntent
 import android.app.Service
@@ -67,24 +66,7 @@ class AirBridgeService : Service() {
         fun stopIfIdle(ctx: Context) {
             if (!shouldRun(ctx)) ctx.stopService(Intent(ctx, AirBridgeService::class.java))
         }
-
-        // ---- v1 compatibility shims for the input half; deleted at merge ----
-        @Deprecated("v1 API. Use PeerBus.")
-        @SuppressLint("StaticFieldLeak")
-        @Volatile var instance: AirBridgeService? = null
-            private set
-
-        @Deprecated("v1 API: no-op. Use PeerBus.broadcast with a v2 message.")
-        @Suppress("UNUSED_PARAMETER")
-        fun broadcastCommand(command: String) {}
-
-        @Deprecated("v1 API: always empty. Use PeerBus.peers().")
-        fun getActiveUrls(): Set<String> = emptySet()
     }
-
-    @Deprecated("v1 API: no-op. Use PeerBus.broadcast with a v2 message.")
-    @Suppress("UNUSED_PARAMETER")
-    fun broadcastToMac(text: String) {}
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var bubble: FloatingBubble? = null
@@ -96,7 +78,6 @@ class AirBridgeService : Service() {
             stopSelf()
             return
         }
-        instance = this
         isRunning = true
         Hub.start()
         ClipboardSync.startListening()
@@ -198,7 +179,6 @@ class AirBridgeService : Service() {
             ClipboardSync.stopListening()
             Hub.stop()
         }
-        instance = null
         isRunning = false
         super.onDestroy()
     }

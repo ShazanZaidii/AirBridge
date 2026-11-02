@@ -2,6 +2,9 @@ package com.shazan.airbridge
 
 import android.app.Application
 import android.content.Context
+import com.shazan.airbridge.input.InputRouter
+import com.shazan.airbridge.input.NetHooks
+import com.shazan.airbridge.net.ClipboardSync
 import com.shazan.airbridge.net.Hub
 import com.shazan.airbridge.net.Identity
 import com.shazan.airbridge.net.Notifs
@@ -15,6 +18,9 @@ class AirBridgeApp : Application() {
         PairStore.init(this)
         Notifs.init(this)
         Hub.init(this)
+        // Input half: routes control messages from PeerBus even before the accessibility service is on.
+        InputRouter.install(this)
+        NetHooks.clipboardPush = { reason -> ClipboardSync.pushNow(reason) }
         // v1 pinned ws:// URLs are meaningless in v2 (peers are found by id).
         getSharedPreferences("AirBridgePrefs", Context.MODE_PRIVATE).edit().remove("WS_URLS").apply()
         Thread({ Saver.cleanupStalePending(this) }, "airbridge-cleanup").start()
