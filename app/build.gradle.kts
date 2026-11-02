@@ -13,7 +13,7 @@ android {
 
     defaultConfig {
         applicationId = "com.shazan.airbridge"
-        minSdk = 24
+        minSdk = 26
         targetSdk = 36
         versionCode = 2
         versionName = "2.1"
@@ -65,7 +65,7 @@ dependencies {
     // Nearby share api for P2P between 2 android:
     implementation("com.google.android.gms:play-services-nearby:19.0.0")
 
-    implementation("com.github.ShazanZaidii:DriftUI-kt:v3.8.2")
+    implementation("androidx.compose.material:material-icons-extended")
 
 
     testImplementation(libs.junit)
