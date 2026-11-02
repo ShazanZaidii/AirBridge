@@ -611,6 +611,52 @@ Nearby's own digit confirmation.
 
 ---
 
+### 10.1 Link upgrades (Wi-Fi Direct, Android ↔ Windows)
+
+A second, faster link between two peers that already have a ready session (LAN, or later BLE). Normative for the
+`wfd_*` types; other `type` values (`hotspot` for the Mac path) are still proposals (docs/PROXIMITY_DESIGN.md §4.2).
+
+New `hello` caps: `wfd_host` (this device can host a Wi-Fi Direct legacy group; Windows after at least one
+successful start), `wfd_join` (can join one; Android API ≥ 29).
+
+```json
+{"t":"link_request","lid":7,"why":"xfer|mirror|user","bytes":734003200,"types":["wfd_legacy","wfd_go"]}
+{"t":"link_offer","lid":7,"type":"wfd_legacy","cred":"derived","gen":0,"ssid":"DIRECT-AB-7KQ2M9XA","sec":"wpa2",
+ "band":"2.4|5|unknown","addr":["192.168.137.1"],"port":47632,"ttl":120}
+{"t":"link_ready","lid":7,"addr":"192.168.137.23","freq":5180,"sta":"kept|dropped|none"}
+{"t":"link_fail","lid":7,"reason":"no_go_support|hotspot_active|radio_off|join_failed|no_ip|approval_denied|vpn|api_level|timeout|busy|user"}
+{"t":"link_done","lid":7,"reason":"idle|ttl|user|lost"}
+```
+
+- `lid` is chosen by the requester and is unique per session. All `link_*` messages travel inside §3.6 envelopes.
+- `wfd_legacy` (T1): the **Windows** side hosts a Wi-Fi Direct legacy group and the phone joins it as a normal Wi-Fi
+  client; the Windows side is the WebSocket host (`addr`/`port` in `link_offer`). `wfd_go` (T2): the **phone** is the
+  group owner and Windows joins as a Wi-Fi client; the phone sends `link_offer` with no `addr`, and after
+  `link_ready{addr}` the Windows side is still the WebSocket host (it sends the address of its own new interface).
+- `cred:"derived"`: no password is sent. Both sides compute the credentials from the pairing key `K` (below).
+  `cred:"inline"` with a `psk` field is allowed for a pre-existing network.
+- `addr` is a list of candidates (IPv4 first, then IPv6 link-local); `port` is the port actually bound (§2.2).
+- Timing: the whole link must be ready within **30 s** of `link_request`; `ttl` (default 120 s) is extended while
+  bytes flow; either side sends `link_done` after 20 s idle or at `ttl`. A `link_fail` or no `link_ready` within
+  20 s stops the host side and the requester falls back to the existing link.
+- The `xfer_offer` that triggered the upgrade is **held** by the sender until the new session is `ready`, then sent
+  on it. Migration is make-before-break: dial the new link, handshake (§3), send `bye replaced` on the old
+  session. **Exception to §3.4:** a device may dial the `addr` of an active `lid` even though it already has a
+  ready session with that peer, and the "do not redial after `bye replaced`" rule does not apply to the session
+  that was replaced by a link upgrade (it must be redialled when the link ends, so LAN/BLE comes back).
+
+**Credential derivation** (fixed per pairing, never rotated by time: Android caches its per-app join approval by
+SSID + security type, so a changing SSID would bring the approval dialog back every time):
+
+```
+wk   = HKDF-SHA256(ikm = K, salt = "airbridge/v2/wfd", info = hostId | "|" | clientId | "|" | u8(gen), 32 bytes)
+ssid = "DIRECT-AB-" + base32(HMAC-SHA256(wk, "ssid")[0..5))      // RFC 4648 base32, 8 chars, no padding
+psk  = base64url(HMAC-SHA256(wk, "psk")[0..24))                  // 32 ASCII chars
+```
+
+`gen` starts at 0; a "rotate Wi-Fi key" action bumps it and costs one more approval dialog. A re-pair changes `K`.
+`hostId` is the WebSocket host's device id and `clientId` the dialing peer's id (as in §3.3).
+
 ## 11. Example session
 
 ```
