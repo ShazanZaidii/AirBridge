@@ -628,7 +628,10 @@ successful start), `wfd_join` (can join one; Android API ≥ 29).
 {"t":"link_done","lid":7,"reason":"idle|ttl|user|lost"}
 ```
 
-- `lid` is chosen by the requester and is unique per session. All `link_*` messages travel inside §3.6 envelopes.
+- `lid` is chosen by whoever starts the link and is unique per session; desktops choose lids from 2^30 upwards and
+  phones from 1, so they never collide. A host may send `link_offer` unsolicited (host-initiated link, e.g. "Send
+  fast" on the PC); a `link_offer` without a prior `link_request` is valid. All `link_*` messages travel inside §3.6
+  envelopes.
 - `wfd_legacy` (T1): the **Windows** side hosts a Wi-Fi Direct legacy group and the phone joins it as a normal Wi-Fi
   client; the Windows side is the WebSocket host (`addr`/`port` in `link_offer`). `wfd_go` (T2): the **phone** is the
   group owner and Windows joins as a Wi-Fi client; the phone sends `link_offer` with no `addr`, and after
@@ -643,7 +646,9 @@ successful start), `wfd_join` (can join one; Android API ≥ 29).
   on it. Migration is make-before-break: dial the new link, handshake (§3), send `bye replaced` on the old
   session. **Exception to §3.4:** a device may dial the `addr` of an active `lid` even though it already has a
   ready session with that peer, and the "do not redial after `bye replaced`" rule does not apply to the session
-  that was replaced by a link upgrade (it must be redialled when the link ends, so LAN/BLE comes back).
+  that was replaced by a link upgrade (it must be redialled when the link ends, so LAN/BLE comes back). Either side
+  may redial the previously replaced path as soon as `link_done` has been sent or received, while the link session
+  is still open (up to 3 s); the link session is then closed with `bye replaced`.
 
 **Credential derivation** (fixed per pairing, never rotated by time: Android caches its per-app join approval by
 SSID + security type, so a changing SSID would bring the approval dialog back every time):
