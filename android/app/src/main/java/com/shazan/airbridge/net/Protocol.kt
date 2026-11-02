@@ -15,10 +15,19 @@ object Protocol {
     const val WS_PATH = "/v2"
     const val PLATFORM = "android"
     val APP_VERSION: String = BuildConfig.VERSION_NAME
-    /** §3.1 caps. `mirror_sink` (input half, §8.7) only if the device can decode H.264. */
+    /**
+     * §3.1 caps. `mirror_sink` (input half, §8.7) only if the device can decode H.264; `wfd_join`
+     * (§10.1) only on API ≥ 29 with Wi-Fi hardware.
+     */
     val CAPS: List<String> by lazy {
-        listOf("clip", "xfer", "ctl_target", "trackpad") + (if (hasH264Decoder()) listOf("mirror_sink") else emptyList())
+        listOf("clip", "xfer", "ctl_target", "trackpad") +
+            (if (hasH264Decoder()) listOf("mirror_sink") else emptyList()) +
+            (if (canJoinWfd()) listOf(com.shazan.airbridge.net.link.LinkPolicy.CAP_JOIN) else emptyList())
     }
+
+    private fun canJoinWfd(): Boolean = try {
+        com.shazan.airbridge.net.link.WfdJoiner.supported(Hub.app)
+    } catch (_: Throwable) { false }
 
     private fun hasH264Decoder(): Boolean = try {
         android.media.MediaCodecList(android.media.MediaCodecList.REGULAR_CODECS).codecInfos.any { info ->
