@@ -199,12 +199,16 @@ H→C  {"t":"pair_fail","reason":"bad_proof|rejected|locked|not_pairing|timeout"
 ```
 
 Rules:
-- `pair_start` is only needed for `confirm` (it lets the host show the digits early). The whole pairing must
-  finish within **60 s** of `pair_start` (`timeout`).
+- `pair_start` is only needed for `confirm` (it lets the host show the digits early); a `pair {mode:"confirm"}`
+  without it counts as an implicit start. A `pair` without `mode` means `qr`. `pair_start` replaces the 10 s
+  handshake timeout with **60 s** on both sides (`timeout`). A client that cancels simply closes the socket.
+- A `hello` without a valid on-curve `pk` is closed without reply (hosts may send `auth_fail` with reason
+  `bad_hello` first).
 - On success both sides persist `K` under the peer's `id` (Keychain on macOS, DPAPI/`ProtectedData` on
   Windows, Keystore-wrapped app-private storage on Android) together with `name` and `plat`.
-- Hosts may disable pairing entirely (`not_pairing`). After **5 failed** `pair` proofs the host refuses pairing
-  (`locked`) for 60 s and rotates its QR secret.
+- Hosts may disable pairing entirely (`not_pairing`). After **5 failed** `pair` proofs in either mode the host
+  refuses pairing (`locked`) for 60 s and rotates its QR secret. A host showing more than 3 simultaneous
+  confirm prompts answers further ones with `locked`.
 - The client must verify `pair_ok.proof`.
 - Android↔Android over Nearby Connections: Nearby's own authenticated link already had its digits confirmed by
   both users, so both sides treat mode `confirm` as auto-accepted (no second prompt).
@@ -248,7 +252,9 @@ bytes 9..     : AES-256-GCM( key = direction key, nonce = 0x00000000 ‖ seq (12
 - `innerKind` 0 = a JSON text message (payload = UTF-8 JSON), 1 = a binary frame as defined elsewhere
   (payload starts with its own kind byte, e.g. `0x01` file chunk, `0x03` video frame).
 - A receiver rejects a frame whose `seq` is not exactly the next expected value (replay/reorder) and closes.
-- A plaintext text frame or an unencrypted `0x01`/`0x03` frame after `ready` → close with `bye error`.
+- A plaintext text frame or an unencrypted `0x01`/`0x03` frame after `ready` → close with `bye error` (the
+  `bye` itself travels inside the envelope). Unknown outer kinds other than those are ignored. The first
+  encrypted frame may follow `auth_ok`/`pair_ok` immediately.
 - WebSocket-level ping/pong frames stay unencrypted (they carry no data). `ping`/`pong` messages are encrypted
   like everything else.
 - Over transports that already encrypt (Nearby Connections) the envelope is still applied; it is cheap.
@@ -571,7 +577,8 @@ Rules:
 
 ## 9. Limits and encoding
 
-- Text frame ≤ 1 MiB; binary frame ≤ 1 MiB + 17 header bytes (+ 9 + 16 bytes of envelope overhead).
+- Text frame ≤ 1 MiB; binary frame ≤ 1 MiB + 17 header bytes (+ 26 bytes of envelope overhead: 9 header,
+  1 inner kind, 16 tag).
 - Binary kinds: `0x01` file chunk (§6.2), `0x02` encrypted envelope (§3.6, outermost), `0x03` video frame
   (§8.7). Others reserved.
 - JSON: no comments, no NaN/Infinity. Floats are IEEE doubles formatted plainly (`-0.5`, not `-5E-1`);
@@ -607,8 +614,8 @@ Nearby's own digit confirmation.
 ## 11. Example session
 
 ```
-C→H  {"t":"hello","v":2,"id":"a1…","name":"Pixel 9","plat":"android","app":"2.0.0","caps":["clip","xfer","ctl_target","trackpad"],"nonce":"…","screen":{"w":1080,"h":2400}}
-H→C  {"t":"hello","v":2,"id":"b2…","name":"Shazan's MacBook Pro","plat":"macos","app":"2.0.0","caps":["clip","xfer","ctl_source","ctl_target"],"nonce":"…","paired":true}
+C→H  {"t":"hello","v":2,"id":"a1…","name":"Pixel 9","plat":"android","app":"2.0.0","caps":["clip","xfer","ctl_target","trackpad","mirror_sink"],"nonce":"…","pk":"BA…","screen":{"w":1080,"h":2400}}
+H→C  {"t":"hello","v":2,"id":"b2…","name":"Shazan's MacBook Pro","plat":"macos","app":"2.0.0","caps":["clip","xfer","ctl_source","ctl_target","mirror_source"],"nonce":"…","pk":"BA…","paired":true}
 C→H  {"t":"auth","mac":"…"}
 H→C  {"t":"auth_ok","mac":"…"}
 H→C  {"t":"key_state","caps":false}
