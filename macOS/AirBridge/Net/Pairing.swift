@@ -222,6 +222,10 @@ nonisolated final class Pairing: @unchecked Sendable {
     }
 
     private func rotateCode() {
+        // Test hook: a fixed code when launched with AIRBRIDGE_DEBUG_PAIR_CODE=nnnnnn (never set in normal use).
+        if let fixed = ProcessInfo.processInfo.environment["AIRBRIDGE_DEBUG_PAIR_CODE"], fixed.count == 6, fixed.allSatisfy(\.isNumber) {
+            code = fixed; codeCreated = Date(); return
+        }
         var n: UInt32 = 0
         repeat {
             withUnsafeMutableBytes(of: &n) { _ = SecRandomCopyBytes(kSecRandomDefault, 4, $0.baseAddress!) }
