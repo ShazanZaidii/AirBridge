@@ -128,6 +128,40 @@ object Protocol {
     }
 }
 
+/** A number that serialises plainly (no exponent) through org.json, which calls toString(). */
+private class PlainNumber(private val v: java.math.BigDecimal) : Number() {
+    override fun toDouble() = v.toDouble()
+    override fun toFloat() = v.toFloat()
+    override fun toLong() = v.toLong()
+    override fun toInt() = v.toInt()
+    override fun toShort() = v.toShort()
+    override fun toByte() = v.toByte()
+    override fun toString(): String = v.toPlainString()
+    override fun equals(other: Any?) = other is PlainNumber && other.v == v
+    override fun hashCode() = v.hashCode()
+}
+
+/**
+ * Round every float in [o] (recursively) to ≤ 4 decimals so it is written as `0.0001`, never
+ * `1.0E-4` (§9). Mutates and returns [o]; idempotent.
+ */
+fun normalizeNumbers(o: JSONObject): JSONObject {
+    for (k in o.keys().asSequence().toList()) o.put(k, normalizeValue(o.opt(k)))
+    return o
+}
+
+private fun normalizeValue(v: Any?): Any? = when (v) {
+    is Double, is Float -> {
+        val d = (v as Number).toDouble()
+        if (d.isNaN() || d.isInfinite()) 0
+        else java.math.BigDecimal(d).setScale(4, java.math.RoundingMode.HALF_UP).stripTrailingZeros()
+            .let { if (it.signum() == 0) 0 else PlainNumber(it) }
+    }
+    is JSONObject -> normalizeNumbers(v)
+    is JSONArray -> { for (i in 0 until v.length()) v.put(i, normalizeValue(v.opt(i))); v }
+    else -> v
+}
+
 /** Defensive JSON accessors: never throw on malformed input. */
 fun parseJson(text: String): JSONObject? = try { JSONObject(text) } catch (_: Exception) { null }
 fun JSONObject.str(k: String): String? = if (has(k) && !isNull(k)) optString(k) else null

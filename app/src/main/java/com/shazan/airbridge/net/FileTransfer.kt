@@ -80,11 +80,12 @@ class FileTransfer(private val s: Session) {
                 if (r > acked) { acked = r; lastProgressAt = System.currentTimeMillis() }
             }
             "xfer_complete" -> outgoing[id]?.update { complete = m }
-            // §6.1 ids are chosen by each sender, so a cancel id may match a transfer in either direction.
+            // `dir` is from the canceller's view: its "out" is our incoming. Missing → match either.
             "xfer_cancel" -> {
                 val reason = m.str("reason") ?: "user"
-                outgoing[id]?.update { cancelled = reason }
-                incoming[id]?.cancel(reason, tellPeer = false)
+                val dir = m.str("dir")
+                if (dir != "out") outgoing[id]?.update { cancelled = reason }
+                if (dir != "in") incoming[id]?.cancel(reason, tellPeer = false)
             }
         }
     }
@@ -105,9 +106,12 @@ class FileTransfer(private val s: Session) {
         if (isIncoming) incoming[id]?.cancel("user", tellPeer = true)
         else outgoing[id]?.let { o ->
             o.update { cancelled = "user" }
-            s.send(Protocol.withReason("xfer_cancel", "user").put("id", id))
+            s.send(cancelMsg(id, "out", "user"))
         }
     }
+
+    private fun cancelMsg(id: Int, dir: String, reason: String) =
+        Protocol.withReason("xfer_cancel", reason).put("id", id).put("dir", dir)
 
     private fun cancelAction(id: Int, isIncoming: Boolean): NotificationCompat.Action {
         val i = Intent(ctx, AirBridgeService::class.java).setAction(AirBridgeService.ACTION_CANCEL_XFER)
@@ -212,7 +216,7 @@ class FileTransfer(private val s: Session) {
                 }
                 o.complete!!
             }
-            if (!complete.optBoolean("ok", false)) throw XferError("$peerName could not save the files")
+            if (!complete.optBoolean("ok", true)) throw XferError("$peerName could not save the files")
             val label = if (srcs.size == 1) srcs[0].name else "${srcs.size} files"
             Hub.putTransfer(TransferUi(key, false, peerName, label, srcs.size, srcs.size, total, total, 0, result = "Sent"))
             resultNotification(notifId, "Sent to $peerName", label, null)
@@ -224,7 +228,7 @@ class FileTransfer(private val s: Session) {
             }
             Log.w(TAG, "send $id to $peerName failed: $why")
             val cancelledBy = synchronized(o.lock) { o.cancelled }
-            if (cancelledBy == null && !s.isClosed) s.send(Protocol.withReason("xfer_cancel", "error").put("id", id))
+            if (cancelledBy == null && !s.isClosed) s.send(cancelMsg(id, "out", "error"))
             val text = if (cancelledBy == "user") "Cancelled" else "Failed: $why"
             Hub.putTransfer(TransferUi(key, false, peerName, srcs.firstOrNull()?.name ?: "", 0, srcs.size, 0, 0, 0, result = text))
             resultNotification(notifId, "Send to $peerName failed", text, null)
@@ -235,7 +239,9 @@ class FileTransfer(private val s: Session) {
     }
 
     private fun checkAlive(o: Outgoing) {
-        o.cancelled?.let { throw XferError(if (it == "user") "cancelled" else "cancelled ($it)") }
+        o.cancelled?.let {
+            throw XferError(when (it) { "user" -> "cancelled"; "error" -> "$peerName couldn't save the files"; else -> "cancelled ($it)" })
+        }
         if (s.isClosed) throw XferError("disconnected")
     }
 
@@ -348,7 +354,7 @@ class FileTransfer(private val s: Session) {
         fun cancel(reason: String, tellPeer: Boolean) {
             if (cancelled != null) return
             cancelled = reason
-            if (tellPeer) s.send(Protocol.withReason("xfer_cancel", reason).put("id", id))
+            if (tellPeer) s.send(cancelMsg(id, "in", reason))
             queue.clear()
             queue.offer(CANCEL)
         }
@@ -357,7 +363,6 @@ class FileTransfer(private val s: Session) {
             var ok = false
             try {
                 advanceZeroSize()
-                if (cur == files.size) { ok = true; finishAll(); return }
                 while (cancelled == null) {
                     val item = queue.poll(1, TimeUnit.SECONDS) ?: continue
                     when (item) {
@@ -365,19 +370,18 @@ class FileTransfer(private val s: Session) {
                         DONE -> {
                             // Ordered channel: every chunk precedes xfer_done, so anything missing now is lost.
                             if (cur < files.size) throw XferError("transfer ended early")
+                            ok = true
+                            finishAll() // §6.1: xfer_complete only after xfer_done with everything written
+                            return
                         }
-                        is Protocol.Chunk -> {
-                            write(item)
-                            if (cur == files.size) { ok = true; finishAll(); return }
-                        }
+                        is Protocol.Chunk -> write(item)
                     }
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "receive $id from $peerName failed: ${e.message}")
                 if (cancelled == null) {
                     cancelled = "error"
-                    if (e is XferError) s.send(Protocol.msg("xfer_complete").put("id", id).put("ok", false).put("saved", JSONArray(saved)))
-                    else s.send(Protocol.withReason("xfer_cancel", "error").put("id", id))
+                    s.send(cancelMsg(id, "in", "error"))
                 }
             } finally {
                 if (!ok) {
@@ -498,10 +502,10 @@ internal object Saver {
 
     fun sanitize(raw: String): String {
         var n = raw.substringAfterLast('/').substringAfterLast('\\')
-        n = n.filter { it != '\u0000' && it >= ' ' && it != '\u007f' && !(it in '\u0080'..'\u009f') }
-        n = n.trimStart('.', ' ').trimEnd()
+        n = n.filter { it >= ' ' && it != '\u007f' && it !in '\u0080'..'\u009f' && it !in "<>:\"|?*" }
+        n = n.trim('.', ' ')
         if (n.substringBefore('.').trimEnd().uppercase(Locale.ROOT) in RESERVED) n = "_$n"
-        n = truncateUtf8(n, 200)
+        n = truncateUtf8(n, 200).trimEnd('.', ' ')
         return n.ifEmpty { "file" }
     }
 

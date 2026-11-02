@@ -121,7 +121,7 @@ object Hub : PeerBus.Transport {
                 netDebounce = scheduler.schedule({
                     Log.i(TAG, "network changed: re-resolving")
                     Discovery.restart()
-                    WsClient.retryAllNow()
+                    WsClient.retryAllNow(networkChanged = true)
                 }, 1500, TimeUnit.MILLISECONDS)
             }
         }
@@ -217,7 +217,10 @@ object Hub : PeerBus.Transport {
     // ---- PeerBus.Transport ----
 
     override fun send(peerId: String, msg: JSONObject): Boolean = ready[peerId]?.send(msg) ?: false
-    override fun broadcast(msg: JSONObject) { ready.values.forEach { it.send(msg) } }
+    override fun broadcast(msg: JSONObject) {
+        normalizeNumbers(msg) // once, before fan-out across threads
+        ready.values.forEach { it.send(msg) }
+    }
     override fun peers(): List<PeerInfo> = ready.values.map { it.info() }
 
     fun readySession(peerId: String): Session? = ready[peerId]

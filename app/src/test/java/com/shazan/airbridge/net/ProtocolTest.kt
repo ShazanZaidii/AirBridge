@@ -52,6 +52,10 @@ class ProtocolTest {
         assertEquals("_con.txt", Saver.sanitize("con.txt"))
         assertEquals("file", Saver.sanitize("\u0000\u0001"))
         assertEquals("ab.jpg", Saver.sanitize("a\nb.jpg"))
+        assertEquals("ab.txt", Saver.sanitize("a<b>:\"|?*.txt"))
+        assertEquals("name", Saver.sanitize(" name. . "))
+        assertEquals("_LPT1", Saver.sanitize("LPT1"))
+        assertEquals("_nul.tar.gz", Saver.sanitize("nul.tar.gz"))
         val long = "é".repeat(300) + ".jpeg"
         val out = Saver.sanitize(long)
         assert(out.toByteArray().size <= 200 && out.endsWith(".jpeg"))

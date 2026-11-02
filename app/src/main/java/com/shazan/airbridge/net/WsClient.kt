@@ -41,6 +41,8 @@ object WsClient {
         var retry: ScheduledFuture<*>? = null
         /** Set after bye user/replaced etc.; cleared by explicit user action or app foreground. */
         var paused = false
+        /** Pause came from `bye replaced`: a network change also clears it (§3.4). */
+        var pausedByReplace = false
     }
 
     private val dialers = ConcurrentHashMap<String, Dialer>()
@@ -81,12 +83,12 @@ object WsClient {
      * Connect (or retry immediately) every paired LAN peer. [unpause] = user-initiated (app opened,
      * service started): also connects when auto-reconnect is off and clears a bye-induced pause.
      */
-    fun retryAllNow(unpause: Boolean = false) {
+    fun retryAllNow(unpause: Boolean = false, networkChanged: Boolean = false) {
         if (!running) return
         PairStore.all().filter { it.via == "lan" }.forEach { p ->
             val d = dialers.getOrPut(p.id) { Dialer(p.id) }
             synchronized(d) {
-                if (unpause) d.paused = false
+                if (unpause || (networkChanged && d.pausedByReplace)) { d.paused = false; d.pausedByReplace = false }
                 d.backoffMs = 1000L
             }
             ensure(d, now = true, manual = unpause)
@@ -111,6 +113,7 @@ object WsClient {
     private fun ensure(d: Dialer, now: Boolean, manual: Boolean = false) {
         synchronized(d) {
             if (!running || d.paused || (!manual && !autoConnect) || d.session != null) return
+            if (Hub.readySession(d.peerId) != null) return // never dial a peer we already have
             if (now) { d.retry?.cancel(false); d.retry = null } else if (d.retry != null) return
             val addr = Discovery.lookup(d.peerId)
                 ?: PairStore.get(d.peerId)?.let { p -> p.lastHost?.let { h -> h to p.lastPort } }
@@ -130,7 +133,11 @@ object WsClient {
             d.session = null
             when {
                 outcome is Outcome.Unpaired || PairStore.get(d.peerId) == null -> { dialers.remove(d.peerId, d); return }
-                !outcome.reconnect -> { d.paused = true; return }
+                !outcome.reconnect -> {
+                    d.paused = true
+                    d.pausedByReplace = outcome is Outcome.Ended && outcome.why == "bye replaced"
+                    return
+                }
                 !running || dialers[d.peerId] !== d -> return
             }
             if (s.everReady) d.backoffMs = 1000L
@@ -158,6 +165,7 @@ object WsClient {
             d.retry?.cancel(false); d.retry = null
             d.session?.close(Outcome.Ended("re-pairing"), "replaced")
             d.paused = false
+            d.pausedByReplace = false
             d.backoffMs = 1000L
             val s = open(host, port, expectedId, secret) { s, outcome -> onEnded(d, s, outcome) }
             d.session = s.takeUnless { it.isClosed }
