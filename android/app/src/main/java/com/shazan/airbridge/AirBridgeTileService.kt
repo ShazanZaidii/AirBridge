@@ -2,29 +2,24 @@ package com.shazan.airbridge
 
 import android.annotation.SuppressLint
 import android.app.PendingIntent
-import android.content.Context
 import android.content.Intent
-import android.net.Uri
 import android.os.Build
 import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
+import com.shazan.airbridge.net.ClipboardSync
+import com.shazan.airbridge.net.Hub
 
+/** Quick Settings tile: push the clipboard to every connected device. */
 class AirBridgeTileService : TileService() {
 
     @SuppressLint("StartActivityAndCollapseDeprecated")
     override fun onClick() {
         super.onClick()
-
-        val intent = Intent(this, SyncActivity::class.java).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
-
+        val intent = Intent(this, SyncActivity::class.java)
+            .putExtra(ClipboardSync.EXTRA_REASON, "tile")
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION)
         if (Build.VERSION.SDK_INT >= 34) {
-            val pendingIntent = PendingIntent.getActivity(
-                this, 0, intent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-            )
-            startActivityAndCollapse(pendingIntent)
+            startActivityAndCollapse(PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
         } else {
             @Suppress("DEPRECATION")
             startActivityAndCollapse(intent)
@@ -33,23 +28,13 @@ class AirBridgeTileService : TileService() {
 
     override fun onStartListening() {
         super.onStartListening()
-
-        val prefs = getSharedPreferences("AirBridgePrefs", Context.MODE_PRIVATE)
-        val urls = prefs.getStringSet("WS_URLS", emptySet()) ?: emptySet()
-
-        if (urls.size == 1) {
-            val uri = Uri.parse(urls.first())
-            val DeviceName = uri.getQueryParameter("name") ?: "Mac"
-            qsTile?.label = "$DeviceName"
-            qsTile?.state = Tile.STATE_ACTIVE
-        } else if (urls.size > 1) {
-            qsTile?.label = "Sync ${urls.size} Macs"
-            qsTile?.state = Tile.STATE_ACTIVE
-        } else {
-            qsTile?.label = "AirBridge"
-            qsTile?.state = Tile.STATE_INACTIVE
+        val tile = qsTile ?: return
+        val peers = Hub.peers()
+        when (peers.size) {
+            0 -> { tile.label = "AirBridge"; tile.state = Tile.STATE_INACTIVE }
+            1 -> { tile.label = peers[0].name; tile.state = Tile.STATE_ACTIVE }
+            else -> { tile.label = "Sync ${peers.size} devices"; tile.state = Tile.STATE_ACTIVE }
         }
-
-        qsTile?.updateTile()
+        tile.updateTile()
     }
 }
