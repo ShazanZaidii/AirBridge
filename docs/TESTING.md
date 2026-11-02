@@ -16,11 +16,11 @@ not pushed).
 other platforms being around.
 
 ```bash
-# act as a host (what a Mac/PC is): shows a pairing code, accepts phones
-python3 tools/v2probe.py host --name "Probe Host" --code 123456
+# act as a host (what a Mac/PC is): accepts phones; prints the pairing digits, type `accept`
+python3 tools/v2probe.py host --name "Probe Host" [--auto-accept]
 
-# act as a client (what a phone is): dial a host, pair with its code, then type commands
-python3 tools/v2probe.py client ws://192.168.1.20:47632 --code 123456
+# act as a client (what a phone is): dial a host, pair (confirm digits shown on both), then type commands
+python3 tools/v2probe.py client ws://192.168.1.20:47632      # or an airbridge://pair?... QR url
 > clip hello            # push clipboard
 > send ~/some/file.zip  # send a file (flow-controlled)
 > enter left 0.5        # pretend the cursor entered the target's left edge
@@ -29,7 +29,7 @@ python3 tools/v2probe.py client ws://192.168.1.20:47632 --code 123456
 ```
 
 State (device id, peer keys) lives in `~/.airbridge-probe.json`; set `AIRBRIDGE_PROBE_STATE=path` to use a
-second identity. The second connection to the same host should authenticate without a code.
+second identity. The second connection to the same host should authenticate without a prompt. All traffic after the handshake is encrypted.
 
 ---
 
@@ -42,21 +42,23 @@ second identity. The second connection to the same host should authenticate with
 2. Quit the old AirBridge first (same bundle id). Launch the new one; grant **Local Network**,
    **Accessibility** and **Notifications** when prompted. Accessibility no longer needs a relaunch — the tap
    installs within ~2 s of granting.
-3. Menu bar → you should see ip:port, a QR code, a 6-digit code, "Paired devices", "Connect to host…",
-   "Display Arrangement…", "Clipboard Filters…".
+3. Menu bar → you should see the status line ("Controlled by…"/"Controlling…"), paired devices, a QR code and
+   "pair from your phone/PC", "Connect to host…", "Display Arrangement…", "Clipboard Filters…".
 
 **Checks**
-- Pair the probe client with the 6-digit code; send `clip` and a file; the file lands in
+- Pair the probe client (confirm mode: both show the same 6 digits → Accept on the Mac); send `clip` and a file; the file lands in
   `~/Downloads/AirBridge Transfers` and is on the pasteboard. Reconnect the probe without a code.
-- Wrong code → rejected; five wrong codes → locked for 60 s and the code rotates.
+- Reject on the Mac → the client sees `rejected`; a tampered proof → `bad_proof`; five failures → locked 60 s.
 - Finder → Share → AirBridgeShare → pick a device (needs the signed build).
 - Display Arrangement shows every display; drag the peer tile to an edge.
-- Universal control to the phone (once Android is installed): push the cursor through the edge; type with
+- Universal control to the phone (once Android is installed): **push through** the edge (keep pushing ~100 pt within half a second; the edge indicator charges) — merely touching the edge must not capture; type with
   Shift/Cmd; scroll; volume keys; push back through the phone's edge; also **triple-Esc** or
   **Ctrl+Option+Cmd+Esc** recalls the cursor; disconnecting the phone recalls it.
 - Hold Shift while crossing and release it on the phone — nothing stuck on either side.
 - Phone trackpad: tap, double-tap, two-finger tap (right click), drag, scroll, three-finger swipes
-  (Mission Control / App Exposé / desktops), keyboard incl. sticky modifiers and the Caps Lock LED.
+  (Mission Control / App Exposé / desktops), keyboard incl. sticky modifiers and the Caps Lock LED/chip.
+- Screen mode on the phone: live Mac screen, tap/drag/scroll land where you touch; check latency feels < 100 ms on LAN.
+- Two controllers: start controlling the phone from the Mac while Windows also tries → the second one sees "Being used by…" (`ctl_busy`); pushing a cursor in from the other desktop takes over.
 - Dev hook: `open --env AIRBRIDGE_DEBUG_PAIR_CODE=246810 AirBridge.app` fixes the code for scripted tests.
 
 **Not yet verified on macOS 26**: Mission Control / App Exposé via the Mission Control binary,
@@ -74,7 +76,7 @@ menu-bar app (private `SetsCursorInBackground`).
 3. Grant notifications, overlay, camera (for QR), and turn on the Accessibility service from the app.
 
 **Checks**
-- Pair by **QR** (scan the Mac/PC menu) and by **code** (pick the host from Discovery, type its code).
+- Pair by **QR** (scan the Mac/PC menu) and by **confirm** (pick the host from Discovery; both devices show the same 6 digits; Confirm on the phone, Accept on the host).
 - Kill and relaunch the Mac app: the phone reconnects by itself (it looks the Mac up by id, not by IP).
   Switch Wi-Fi networks: it reconnects without reopening the app.
 - Clipboard: copy on the Mac → phone clipboard updates. Phone → Mac via the tile/bubble, via Share, and
@@ -107,7 +109,7 @@ identity/peers in `%LOCALAPPDATA%\AirBridge\`; layout in `layout.json` there.
 **Checks**
 - Tray shows a QR + code; `netstat -ano | findstr 47632` shows it listening. Pair the phone (QR) and the probe.
 - Clipboard both ways; drop files on the tray popup → phone; phone → `Downloads\AirBridge Transfers`.
-- "Connect to a Mac / PC…" → pick the Mac → enter the Mac's code. Restart the Mac app; Windows reconnects.
+- "Connect to a Mac / PC…" → pick the Mac → both show the same digits → Confirm/Accept. Restart the Mac app; Windows reconnects.
 - Wi-Fi off/on: the QR address updates and connections come back.
 - Universal control: Display Arrangement shows real monitors; push the cursor off the configured edge;
   **Ctrl+Alt+Esc** recalls it; keys aren't stuck after crossing with Shift held; `taskkill /f` while
