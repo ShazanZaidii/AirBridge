@@ -161,6 +161,8 @@ nonisolated enum ShareInbox {
             guard !files.isEmpty else { return }
             let (batches, found) = (dirs, files)
             onMain {
+                // A picker closed without choosing leaves stale files behind; don't fold them into this share.
+                if AppDelegate.shared?.isTargetSelectionVisible != true { AppModel.shared.cancelPendingShare() }
                 AppModel.shared.addPendingShare(batches: batches, files: found)
                 AppDelegate.shared?.showTargetSelection()
             }

@@ -23,7 +23,9 @@ nonisolated final class TransferService: @unchecked Sendable {
     private let queue: DispatchQueue
     private var incoming: [UInt32: IncomingTransfer] = [:]
     private var outgoing: [UInt32: OutgoingTransfer] = [:]
-    private var nextId: UInt32 = 1
+    // Ids are per sender, so both directions can use the same number; starting high (but below 2^31
+    // for peers that parse ints as signed 32-bit) keeps our ids apart from a peer counting from 1.
+    private var nextId = UInt32.random(in: 0x4000_0000..<0x7000_0000)
 
     static let maxConcurrentIncoming = 8
 
@@ -50,8 +52,8 @@ nonisolated final class TransferService: @unchecked Sendable {
         case "xfer_done": incoming[id]?.senderDone()
         case "xfer_cancel":
             let why = "Cancelled by peer (\(msg.str("reason") ?? "user"))"
-            incoming[id]?.abort(notifyPeer: nil, message: why)
-            outgoing[id]?.finish(.failed(why), notifyPeer: nil)
+            if let out = outgoing[id] { out.finish(.failed(why), notifyPeer: nil) }
+            else { incoming[id]?.abort(notifyPeer: nil, message: why) }
         default: break
         }
     }

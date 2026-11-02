@@ -79,6 +79,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
 
     func closeTargetSelection() { targetWindowController?.window?.close() }
 
+    var isTargetSelectionVisible: Bool { targetWindowController?.window?.isVisible == true }
+
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
                                 withCompletionHandler completionHandler: @escaping () -> Void) {
         let paths = response.notification.request.content.userInfo["filePaths"] as? [String] ?? []

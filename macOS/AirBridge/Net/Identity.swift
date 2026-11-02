@@ -1,5 +1,6 @@
 import Foundation
 import CoreGraphics
+import SystemConfiguration
 
 /// This device's protocol identity (§2.1).
 nonisolated enum Identity {
@@ -16,7 +17,7 @@ nonisolated enum Identity {
     /// User override, otherwise the computer name.
     static var name: String {
         if let s = UserDefaults.standard.string(forKey: nameKey), !s.isEmpty { return s }
-        return Host.current().localizedName ?? "Mac"
+        return (SCDynamicStoreCopyComputerName(nil, nil) as String?) ?? "Mac"
     }
 
     static func setName(_ new: String) {
