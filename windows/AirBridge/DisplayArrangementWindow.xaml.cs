@@ -1,14 +1,18 @@
-﻿using System.Windows;
+using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Shapes;
 using AirBridge.Input;
 
 namespace AirBridge
 {
     /// <summary>
-    /// Shows the real monitor layout (physical pixels, scaled) and lets the user drop each controllable peer onto one
-    /// outer edge of the desktop's bounding box. Placements are persisted by peer id through <see cref="Layout"/>.
+    /// Shows the real monitor layout (physical pixels, scaled), lets the user drop each controllable peer onto one
+    /// outer edge of the desktop's bounding box, and makes the mapping explicit: per edge "→ peer", which peer is
+    /// being controlled / controlling this PC (§8.6), and the push-through capture settings (§8.2).
+    /// Placements are persisted by peer id through <see cref="Layout"/>.
     /// </summary>
     public partial class DisplayArrangementWindow : Window
     {
@@ -17,6 +21,7 @@ namespace AirBridge
         private const double Gap = 6;
 
         private static readonly Edge?[] EdgeChoices = { null, Edge.Left, Edge.Right, Edge.Top, Edge.Bottom };
+        private static readonly Edge[] AllEdges = { Edge.Left, Edge.Right, Edge.Top, Edge.Bottom };
 
         private double _boxL, _boxT, _boxW, _boxH;
         private bool _building;
@@ -35,13 +40,13 @@ namespace AirBridge
             Closed += OnClosed;
         }
 
+        private Brush Res(string key) => (Brush)FindResource(key);
+
         private void OnLoaded(object sender, RoutedEventArgs e)
         {
             PeerDirectory.Changed += OnExternalChange;
             Layout.Changed += OnExternalChange;
-            _building = true;
-            SwapCmdCtrl.IsChecked = Layout.Settings().SwapCmdCtrlForMac;
-            _building = false;
+            ControlState.Changed += OnExternalChange;
             Refresh();
         }
 
@@ -49,9 +54,10 @@ namespace AirBridge
         {
             PeerDirectory.Changed -= OnExternalChange;
             Layout.Changed -= OnExternalChange;
+            ControlState.Changed -= OnExternalChange;
         }
 
-        private void OnExternalChange() => Dispatcher.BeginInvoke(new Action(() => { if (_dragId == null) Refresh(); }));
+        private void OnExternalChange() => Dispatcher.BeginInvoke(new Action(() => { if (_dragId == null && IsLoaded) Refresh(); }));
 
         private void Window_MouseDown(object sender, MouseButtonEventArgs e)
         {
@@ -63,11 +69,39 @@ namespace AirBridge
 
         private void Close_Click(object sender, RoutedEventArgs e) => Close();
 
+        // ------------------------------------------------------------------ settings
+
         private void SwapCmdCtrl_Changed(object sender, RoutedEventArgs e)
         {
             if (_building) return;
             Layout.SetSwapCmdCtrlForMac(SwapCmdCtrl.IsChecked == true);
         }
+
+        private void RequireAlt_Changed(object sender, RoutedEventArgs e)
+        {
+            if (_building) return;
+            Layout.SetCaptureRequireAlt(RequireAlt.IsChecked == true);
+        }
+
+        private void Strength_Checked(object sender, RoutedEventArgs e)
+        {
+            if (_building || sender is not RadioButton { Tag: string strength }) return;
+            Layout.SetCaptureStrength(strength);
+        }
+
+        private void LoadSettings(LayoutData s)
+        {
+            SwapCmdCtrl.IsChecked = s.SwapCmdCtrlForMac;
+            RequireAlt.IsChecked = s.CaptureRequireAlt;
+            StrengthEasy.IsChecked = s.CaptureStrength == "easy";
+            StrengthNormal.IsChecked = s.CaptureStrength == "normal";
+            StrengthFirm.IsChecked = s.CaptureStrength == "firm";
+            double px = LayoutData.ThresholdFor(s.CaptureStrength);
+            StrengthHint.Text = $"Keep pushing about {px:0} px past the edge within half a second to cross." +
+                (s.CaptureRequireAlt ? " Hold Alt while pushing." : "");
+        }
+
+        // ------------------------------------------------------------------ data
 
         private List<Row> Rows()
         {
@@ -83,13 +117,21 @@ namespace AirBridge
             return rows;
         }
 
+        // ------------------------------------------------------------------ build
+
         private void Refresh()
         {
+            string? focusKey = (Keyboard.FocusedElement as DependencyObject) is { } f ? AutomationProperties.GetAutomationId(f) : null;
             _building = true;
             try
             {
+                var settings = Layout.Settings();
+                LoadSettings(settings);
+                RefreshLease();
+
                 LayoutCanvas.Children.Clear();
                 PeerRows.Children.Clear();
+                EdgeRows.Children.Clear();
 
                 var mons = Monitors.Enumerate();
                 var u = Monitors.Union(mons);
@@ -98,10 +140,10 @@ namespace AirBridge
                 _boxW = u.Width * scale; _boxH = u.Height * scale;
                 _boxL = (cw - _boxW) / 2; _boxT = (ch - _boxH) / 2;
 
-                var outline = new System.Windows.Shapes.Rectangle
+                var outline = new Rectangle
                 {
                     Width = _boxW + 2, Height = _boxH + 2,
-                    Stroke = new SolidColorBrush(Color.FromRgb(0x5A, 0x5A, 0x5E)),
+                    Stroke = Res("BorderBrush"),
                     StrokeDashArray = new DoubleCollection { 3, 3 }, StrokeThickness = 1,
                 };
                 Canvas.SetLeft(outline, _boxL - 1); Canvas.SetTop(outline, _boxT - 1);
@@ -114,12 +156,13 @@ namespace AirBridge
                     var mon = new Border
                     {
                         Width = Math.Max(4, b.Width * scale - 2), Height = Math.Max(4, b.Height * scale - 2),
-                        Background = new SolidColorBrush(m.Primary ? Color.FromRgb(0x42, 0x85, 0xF4) : Color.FromRgb(0x35, 0x5F, 0xB0)),
+                        Background = Res(m.Primary ? "Secondary" : "Muted"),
+                        BorderBrush = Res("BorderBrush"), BorderThickness = new Thickness(1),
                         CornerRadius = new CornerRadius(6),
                         Child = new TextBlock
                         {
                             Text = $"{n}{(m.Primary ? " · Primary" : "")}\n{b.Width}×{b.Height}",
-                            Foreground = Brushes.White, FontSize = 12, TextAlignment = TextAlignment.Center,
+                            Foreground = Res("Foreground"), FontSize = 12, TextAlignment = TextAlignment.Center,
                             HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
                         },
                         ToolTip = $"{m.Device}  {b.Width}×{b.Height} at ({b.Left},{b.Top}), {m.Scale * 100:0}%",
@@ -134,7 +177,7 @@ namespace AirBridge
                 foreach (var r in rows)
                 {
                     if (r.Placement is { } pl && EdgeExt.Parse(pl.Edge) is Edge e)
-                        LayoutCanvas.Children.Add(MakeTile(r, e, pl.Offset, pl.Size));
+                        LayoutCanvas.Children.Add(MakeTile(r, e, pl.Offset, pl.Size, settings.EdgeCaptureEnabled(e)));
                     PeerRows.Children.Add(MakeRow(r));
                 }
                 if (rows.Count == 0)
@@ -142,25 +185,121 @@ namespace AirBridge
                     PeerRows.Children.Add(new TextBlock
                     {
                         Text = "No controllable devices connected yet. Connect a phone or Mac to arrange it here.",
-                        Foreground = new SolidColorBrush(Color.FromRgb(0x8E, 0x8E, 0x93)), FontSize = 13,
+                        Style = (Style)FindResource("Hint"),
                     });
                 }
+                foreach (var edge in AllEdges) EdgeRows.Children.Add(MakeEdgeRow(edge, rows, settings));
             }
             finally { _building = false; }
+            if (focusKey is { Length: > 0 }) RestoreFocus(this, focusKey);
         }
 
-        private Border MakeTile(Row r, Edge e, double offset, double size)
+        private static bool RestoreFocus(DependencyObject root, string key)
         {
+            foreach (var child in LogicalTreeHelper.GetChildren(root).OfType<DependencyObject>())
+            {
+                if (child is UIElement el && AutomationProperties.GetAutomationId(child) == key && el.Focusable)
+                {
+                    Keyboard.Focus(el);
+                    return true;
+                }
+                if (RestoreFocus(child, key)) return true;
+            }
+            return false;
+        }
+
+        private void RefreshLease()
+        {
+            string? controlling = ControlState.ControllingId, controlledBy = ControlState.ControlledById;
+            if (controlling != null)
+            {
+                LeaseDot.Fill = Res("Accent");
+                LeaseText.Text = $"Controlling {ControlState.NameOf(controlling)} · Ctrl+Alt+Esc to return";
+            }
+            else if (controlledBy != null)
+            {
+                LeaseDot.Fill = Res("Accent");
+                LeaseText.Text = $"Controlled by {ControlState.NameOf(controlledBy)}" +
+                    (ControlState.ControlledExplicit ? " · its cursor is on this PC" : " · trackpad or touch input");
+            }
+            else
+            {
+                LeaseDot.Fill = Res("MutedForeground");
+                LeaseText.Text = "Not controlling or being controlled";
+            }
+        }
+
+        private UIElement MakeEdgeRow(Edge edge, List<Row> rows, LayoutData settings)
+        {
+            var assigned = rows.FirstOrDefault(r => EdgeExt.Parse(r.Placement?.Edge) == edge);
+            var grid = new Grid { Margin = new Thickness(0, 4, 0, 4) };
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var text = new StackPanel();
+            var line = new TextBlock { FontSize = 13, Foreground = Res("Foreground"), TextTrimming = TextTrimming.CharacterEllipsis };
+            line.Inlines.Add(new System.Windows.Documents.Run($"{edge} edge "));
+            line.Inlines.Add(new System.Windows.Documents.Run("→ ") { Foreground = Res("MutedForeground") });
+            line.Inlines.Add(new System.Windows.Documents.Run(assigned?.Name ?? "nothing")
+            {
+                Foreground = assigned == null ? Res("MutedForeground") : Res("Foreground"),
+                FontWeight = assigned == null ? FontWeights.Normal : FontWeights.SemiBold,
+            });
+            text.Children.Add(line);
+
+            string sub;
+            bool enabled = settings.EdgeCaptureEnabled(edge);
+            if (assigned == null) sub = "No device on this edge";
+            else if (ControlState.ControllingId == assigned.Id) sub = "Controlling now";
+            else if (!assigned.Online) sub = "Offline · this edge does nothing";
+            else if (!enabled) sub = "Crossing turned off";
+            else sub = "Online · push through to control";
+            text.Children.Add(new TextBlock
+            {
+                Text = sub, FontSize = 11, Margin = new Thickness(0, 2, 0, 0),
+                Foreground = ControlState.ControllingId == assigned?.Id && assigned != null ? Res("Accent") : Res("MutedForeground"),
+            });
+            grid.Children.Add(text);
+
+            var toggle = new CheckBox
+            {
+                Style = (Style)FindResource("Switch"),
+                IsChecked = enabled,
+                Tag = edge,
+                VerticalAlignment = VerticalAlignment.Center,
+                ToolTip = enabled ? $"Crossing through the {edge.ToString().ToLowerInvariant()} edge is on" : $"Crossing through the {edge.ToString().ToLowerInvariant()} edge is off",
+            };
+            AutomationProperties.SetName(toggle, $"Allow crossing through the {edge} edge");
+            AutomationProperties.SetAutomationId(toggle, $"edge:{edge}");
+            toggle.Checked += EdgeToggle_Changed;
+            toggle.Unchecked += EdgeToggle_Changed;
+            Grid.SetColumn(toggle, 1);
+            grid.Children.Add(toggle);
+            return grid;
+        }
+
+        private void EdgeToggle_Changed(object sender, RoutedEventArgs e)
+        {
+            if (_building || sender is not CheckBox { Tag: Edge edge } cb) return;
+            Layout.SetEdgeCaptureEnabled(edge, cb.IsChecked == true);
+        }
+
+        private Border MakeTile(Row r, Edge e, double offset, double size, bool edgeEnabled)
+        {
+            bool active = ControlState.ControllingId == r.Id;
+            bool lit = r.Online && edgeEnabled;
             var tile = new Border
             {
-                Background = new SolidColorBrush(r.Online ? Color.FromRgb(0x4A, 0xDE, 0x80) : Color.FromRgb(0x6B, 0x72, 0x80)),
+                Background = Res(lit ? "Accent" : "Secondary"),
+                BorderBrush = active ? Brushes.White : Res(lit ? "Accent" : "BorderBrush"),
+                BorderThickness = new Thickness(active ? 2 : 1),
                 CornerRadius = new CornerRadius(8),
                 Cursor = Cursors.SizeAll,
                 Tag = r,
-                ToolTip = r.Online ? r.Name : $"{r.Name} (offline)",
+                ToolTip = !r.Online ? $"{r.Name} (offline)" : !edgeEnabled ? $"{r.Name} (crossing off)" : active ? $"{r.Name} (controlling now)" : r.Name,
                 Child = new TextBlock
                 {
-                    Text = r.Name, Foreground = Brushes.White, FontSize = 11, FontWeight = FontWeights.Bold,
+                    Text = r.Name, Foreground = Res(lit ? "OnAccent" : "Foreground"), FontSize = 11, FontWeight = FontWeights.SemiBold,
                     TextWrapping = TextWrapping.Wrap, TextTrimming = TextTrimming.CharacterEllipsis, TextAlignment = TextAlignment.Center,
                     HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(3),
                 },
@@ -189,34 +328,58 @@ namespace AirBridge
 
         private UIElement MakeRow(Row r)
         {
-            var grid = new Grid { Margin = new Thickness(0, 3, 0, 3) };
+            var grid = new Grid { Margin = new Thickness(0, 4, 0, 4) };
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            var name = new TextBlock
+
+            var name = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+            name.Children.Add(new Ellipse
+            {
+                Width = 8, Height = 8, VerticalAlignment = VerticalAlignment.Center,
+                Fill = Res(r.Online ? "Accent" : "BorderBrush"),
+                ToolTip = r.Online ? "Online" : "Offline",
+            });
+            name.Children.Add(new TextBlock
             {
                 Text = r.Online ? r.Name : $"{r.Name}  (offline)",
-                Foreground = r.Online ? Brushes.White : new SolidColorBrush(Color.FromRgb(0x8E, 0x8E, 0x93)),
-                FontSize = 13, VerticalAlignment = VerticalAlignment.Center,
-            };
-            var combo = new ComboBox { Width = 140, Tag = r };
-            foreach (var c in EdgeChoices) combo.Items.Add(c == null ? "Not arranged" : $"{c} edge");
-            var current = EdgeExt.Parse(r.Placement?.Edge);
-            combo.SelectedIndex = Array.IndexOf(EdgeChoices, current);
-            combo.SelectionChanged += Combo_SelectionChanged;
-            Grid.SetColumn(combo, 1);
+                Foreground = Res(r.Online ? "Foreground" : "MutedForeground"),
+                FontSize = 13, Margin = new Thickness(10, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center,
+                TextTrimming = TextTrimming.CharacterEllipsis,
+            });
             grid.Children.Add(name);
-            grid.Children.Add(combo);
+
+            var seg = new StackPanel { Orientation = Orientation.Horizontal };
+            var current = EdgeExt.Parse(r.Placement?.Edge);
+            foreach (var c in EdgeChoices)
+            {
+                var rb = new RadioButton
+                {
+                    Style = (Style)FindResource("Segment"),
+                    GroupName = "edge:" + r.Id,
+                    Content = c == null ? "Off" : c.ToString(),
+                    IsChecked = c == current,
+                    Tag = (r, c),
+                };
+                AutomationProperties.SetName(rb, c == null ? $"{r.Name}: not arranged" : $"{r.Name}: {c} edge");
+                AutomationProperties.SetAutomationId(rb, $"peer:{r.Id}:{c?.ToWire() ?? "off"}");
+                rb.Checked += EdgeChoice_Checked;
+                seg.Children.Add(rb);
+            }
+            Grid.SetColumn(seg, 1);
+            grid.Children.Add(seg);
             return grid;
         }
 
-        private void Combo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        private void EdgeChoice_Checked(object sender, RoutedEventArgs e)
         {
-            if (_building || sender is not ComboBox { Tag: Row r } combo || combo.SelectedIndex < 0) return;
-            Edge? edge = EdgeChoices[combo.SelectedIndex];
+            if (_building || sender is not RadioButton { Tag: ValueTuple<Row, Edge?> tag }) return;
+            var (r, edge) = tag;
             double size = r.Placement?.Size ?? 0.5;
             double offset = r.Placement?.Edge != null ? r.Placement.Offset : (1 - size) / 2;
             Layout.Assign(r.Id, r.Name, edge, offset, size);
         }
+
+        // ------------------------------------------------------------------ drag to assign
 
         private void Tile_MouseDown(object sender, MouseButtonEventArgs e)
         {
