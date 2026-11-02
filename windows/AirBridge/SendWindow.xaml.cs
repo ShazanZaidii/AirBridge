@@ -57,7 +57,7 @@ namespace AirBridge
             {
                 DeviceList.Children.Add(new TextBlock
                 {
-                    Text = "No connected devices. Waiting…", Foreground = Brushes.Gray,
+                    Text = "No connected devices. Waiting…", Style = (Style)FindResource("AB.Text.Caption"),
                     HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 20, 0, 0),
                 });
                 SendButton.IsEnabled = false;
@@ -66,10 +66,12 @@ namespace AirBridge
 
             foreach (var p in targets)
             {
-                string icon = p.Platform switch { "android" or "ios" => "📱", "macos" => "💻", _ => "🖥️" };
+                var content = new StackPanel { Orientation = Orientation.Horizontal };
+                content.Children.Add(new TextBlock { Style = (Style)FindResource("AB.Glyph"), Text = (string)FindResource(HostDiscoveryWindow.PeerGlyphKey(p.Platform)), Margin = new Thickness(4, 0, 10, 0) });
+                content.Children.Add(new TextBlock { Text = p.Name, Style = (Style)FindResource("AB.Text"), FontSize = 14, VerticalAlignment = VerticalAlignment.Center });
                 var cb = new CheckBox
                 {
-                    Content = new TextBlock { Text = $"{icon}  {p.Name}", Foreground = Brushes.White, FontSize = 14 },
+                    Content = content, Foreground = (Brush)FindResource("AB.Foreground"), Cursor = Cursors.Hand,
                     IsChecked = checkedIds.Contains(p.Id) || targets.Count == 1,
                     Margin = new Thickness(4, 4, 4, 8), VerticalContentAlignment = VerticalAlignment.Center,
                     Tag = p,
@@ -94,9 +96,9 @@ namespace AirBridge
             var tasks = new List<Task<(PeerInfo Peer, TransferResult Result)>>();
             foreach (var p in selected)
             {
-                var label = new TextBlock { Text = p.Name, Foreground = Brushes.White, FontSize = 13 };
-                var bar = new ProgressBar { Height = 6, Maximum = 1, Margin = new Thickness(0, 4, 0, 2) };
-                var state = new TextBlock { Text = "Waiting for the device to accept…", Foreground = Brushes.Gray, FontSize = 11 };
+                var label = new TextBlock { Text = p.Name, Style = (Style)FindResource("AB.Text"), FontWeight = FontWeights.SemiBold };
+                var bar = new ProgressBar { Style = (Style)FindResource("AB.Progress"), Margin = new Thickness(0, 6, 0, 4) };
+                var state = new TextBlock { Text = "Waiting for the device to accept…", Style = (Style)FindResource("AB.Text.Caption") };
                 var row = new StackPanel { Margin = new Thickness(0, 0, 0, 12) };
                 row.Children.Add(label); row.Children.Add(bar); row.Children.Add(state);
                 DeviceList.Children.Add(row);
@@ -113,8 +115,9 @@ namespace AirBridge
                 }).ContinueWith(t =>
                 {
                     var (peer, res) = t.Result;
-                    state.Text = res.Ok ? "Sent ✓" : $"Failed: {res.Error}";
-                    state.Foreground = res.Ok ? new SolidColorBrush(Color.FromRgb(0x4A, 0xDE, 0x80)) : new SolidColorBrush(Color.FromRgb(0xFF, 0x45, 0x3A));
+                    state.Text = res.Ok ? "Sent" : $"Failed: {res.Error}";
+                    state.Foreground = (Brush)FindResource(res.Ok ? "AB.Accent" : "AB.Destructive");
+                    if (!res.Ok) bar.Foreground = (Brush)FindResource("AB.Destructive");
                     if (res.Ok) bar.Value = 1;
                     return (peer, res);
                 }, TaskScheduler.FromCurrentSynchronizationContext()));
@@ -126,7 +129,7 @@ namespace AirBridge
             if (results.All(r => r.Result.Ok))
             {
                 StatusText.Text = "Done.";
-                StatusText.Foreground = new SolidColorBrush(Color.FromRgb(0x4A, 0xDE, 0x80));
+                StatusText.Foreground = (Brush)FindResource("AB.Accent");
                 await Task.Delay(1500);
                 if (!_closed) Close();
             }
