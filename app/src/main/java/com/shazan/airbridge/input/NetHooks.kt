@@ -1,5 +1,7 @@
 package com.shazan.airbridge.input
 
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import java.lang.reflect.Method
 import java.lang.reflect.Modifier
@@ -32,6 +34,53 @@ object NetHooks {
         } catch (t: Throwable) {
             Log.w(TAG, "Clipboard push failed", t)
         }
+    }
+
+    // ------------------------------------------------------------------ bubble suppression (§5)
+
+    private const val BUBBLE_CLASS = "com.shazan.airbridge.BubbleController"
+    private val main by lazy { Handler(Looper.getMainLooper()) }
+    @Volatile private var bubbleResolved = false
+    private var bubbleMethod: Method? = null
+    private var bubbleReceiver: Any? = null
+    private val bubbleState = HashMap<String, Boolean>()
+
+    /**
+     * Hide/show the floating clipboard bubble for [reason] (`"lease"`, `"trackpad"`, `"mirror"`):
+     * `BubbleController.setSuppressed(reason, on)` from the network half, looked up reflectively.
+     * Deduplicated per reason, posted to the main thread, never throws.
+     */
+    fun setBubbleSuppressed(reason: String, on: Boolean) {
+        synchronized(bubbleState) {
+            if (bubbleState[reason] == on) return
+            bubbleState[reason] = on
+        }
+        main.post {
+            try {
+                resolveBubble()
+                val m = bubbleMethod ?: return@post
+                m.invoke(bubbleReceiver, reason, on)
+            } catch (t: Throwable) {
+                Log.w(TAG, "BubbleController.setSuppressed($reason, $on) failed", t)
+            }
+        }
+    }
+
+    @Synchronized
+    private fun resolveBubble() {
+        if (bubbleResolved) return
+        bubbleResolved = true
+        val cls = try { Class.forName(BUBBLE_CLASS) } catch (_: Throwable) {
+            Log.d(TAG, "No BubbleController; bubble suppression disabled"); return
+        }
+        val m = cls.methods.firstOrNull {
+            it.name == "setSuppressed" && it.parameterTypes.size == 2 &&
+                it.parameterTypes[0] == String::class.java &&
+                (it.parameterTypes[1] == java.lang.Boolean.TYPE || it.parameterTypes[1] == java.lang.Boolean::class.java)
+        } ?: return
+        bubbleReceiver = if (Modifier.isStatic(m.modifiers)) null
+        else try { cls.getField("INSTANCE").get(null) } catch (_: Throwable) { return }
+        bubbleMethod = m
     }
 
     @Synchronized
