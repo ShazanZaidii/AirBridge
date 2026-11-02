@@ -9,7 +9,7 @@ using System.Threading.Tasks;
 
 namespace AirBridge.Net
 {
-    /// <summary>Outbound side (§4.1): one reconnect loop per paired host id, plus first-time pairing by code.</summary>
+    /// <summary>Outbound side (§4.1): one reconnect loop per paired host id, plus first-time pairing.</summary>
     public sealed class Client
     {
         private static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(5);
@@ -159,16 +159,13 @@ namespace AirBridge.Net
             return true;
         }
 
-        /// <summary>First-time pairing with a host by its 6-digit code. Returns null on success, else a reason.</summary>
-        public async Task<string?> PairAsync(IPAddress ip, int port, string code, string? expectedId, CancellationToken ct)
+        /// <summary>First-time pairing with a host (mode confirm or qr per <paramref name="intent"/>).
+        /// Returns null on success, else a reason.</summary>
+        public async Task<string?> PairAsync(IPAddress ip, int port, OutboundIntent intent, CancellationToken ct)
         {
             var ws = await ConnectAsync(ip, port, ct).ConfigureAwait(false);
             if (ws == null) return "unreachable";
-            var session = new Session(ws, SessionRole.Outbound, _svc, ip.ToString(), port, new OutboundIntent
-            {
-                ExpectedPeerId = expectedId,
-                PairSecret = System.Text.Encoding.UTF8.GetBytes(code),
-            });
+            var session = new Session(ws, SessionRole.Outbound, _svc, ip.ToString(), port, intent);
             var run = _svc.RunSession(session);
             bool ok = await session.ReadyTask.ConfigureAwait(false);
             if (!ok)

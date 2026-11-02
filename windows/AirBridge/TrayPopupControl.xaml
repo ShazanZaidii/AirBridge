@@ -1,67 +1,112 @@
 <UserControl x:Class="AirBridge.TrayPopupControl"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             Background="Transparent" Width="300">
-    <UserControl.Resources>
-        <Style x:Key="FlatButton" TargetType="Button">
-            <Setter Property="Height" Value="30"/>
-            <Setter Property="Background" Value="#3A3A3C"/>
-            <Setter Property="Foreground" Value="White"/>
-            <Setter Property="BorderThickness" Value="0"/>
-            <Setter Property="Cursor" Value="Hand"/>
-            <Setter Property="Margin" Value="0,0,0,8"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="Button">
-                        <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="6" Padding="{TemplateBinding Padding}">
-                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Bd" Property="Background" Value="#48484A"/>
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
-    </UserControl.Resources>
-
-    <Border Background="#282828" CornerRadius="12" Padding="16"
-            BorderBrush="#3A3A3C" BorderThickness="1"
-            Margin="10" AllowDrop="True" Drop="Border_Drop">
+             Background="Transparent" Width="356">
+    <Border Background="{StaticResource AB.Background}" CornerRadius="14" BorderBrush="{StaticResource AB.Secondary}" BorderThickness="1"
+            Margin="12" AllowDrop="True" Drop="Border_Drop">
         <Border.Effect>
-            <DropShadowEffect Color="Black" BlurRadius="15" Opacity="0.5" Direction="270" ShadowDepth="4"/>
+            <DropShadowEffect Color="Black" BlurRadius="20" Opacity="0.5" Direction="270" ShadowDepth="5"/>
         </Border.Effect>
 
-        <StackPanel>
-            <TextBlock Text="AirBridge" Foreground="White" FontSize="16" FontWeight="Bold" HorizontalAlignment="Center"/>
-            <TextBlock x:Name="DeviceNameText" Foreground="#A0A0A5" FontSize="11" HorizontalAlignment="Center" Margin="0,2,0,12"/>
+        <StackPanel Margin="16">
+            <!-- header -->
+            <Grid Margin="0,0,0,12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <Border Width="36" Height="36" CornerRadius="10" Background="{StaticResource AB.AccentSoft}">
+                    <TextBlock Style="{StaticResource AB.Glyph}" Text="{StaticResource AB.G.Link}" Foreground="{StaticResource AB.Accent}"/>
+                </Border>
+                <StackPanel Grid.Column="1" Margin="10,0,0,0" VerticalAlignment="Center">
+                    <TextBlock Style="{StaticResource AB.Text}" Text="AirBridge" FontSize="15" FontWeight="SemiBold"/>
+                    <TextBlock x:Name="DeviceNameText" Style="{StaticResource AB.Text.Caption}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"/>
+                </StackPanel>
+                <Border Grid.Column="2" x:Name="StatusPill" CornerRadius="10" Padding="8,3" VerticalAlignment="Center" Background="{StaticResource AB.Muted}">
+                    <StackPanel Orientation="Horizontal">
+                        <Ellipse x:Name="StatusDot" Width="7" Height="7" Fill="{StaticResource AB.MutedForeground}" VerticalAlignment="Center"/>
+                        <TextBlock x:Name="StatusText" Style="{StaticResource AB.Text.Caption}" Margin="6,0,0,0" TextWrapping="NoWrap"/>
+                    </StackPanel>
+                </Border>
+            </Grid>
 
-            <Border Background="White" CornerRadius="8" Padding="8" HorizontalAlignment="Center">
-                <Grid Width="150" Height="150">
-                    <Image x:Name="QrCodeImage" RenderOptions.BitmapScalingMode="NearestNeighbor"/>
-                    <TextBlock x:Name="QrPlaceholder" Text="Starting…" Foreground="#808080" FontSize="12"
-                               HorizontalAlignment="Center" VerticalAlignment="Center" TextWrapping="Wrap" TextAlignment="Center"/>
+            <!-- control / lease status from the input half -->
+            <Border x:Name="ControlBand" Visibility="Collapsed" Background="{StaticResource AB.Card}" CornerRadius="10" Margin="0,0,0,12"
+                    BorderBrush="{StaticResource AB.Accent}" BorderThickness="3,0,0,0" Padding="12,10">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Style="{StaticResource AB.Glyph}" Text="{StaticResource AB.G.Mouse}" Foreground="{StaticResource AB.Accent}" VerticalAlignment="Top" Margin="0,1,10,0"/>
+                    <TextBlock Grid.Column="1" x:Name="ControlText" Style="{StaticResource AB.Text}" AutomationProperties.LiveSetting="Polite"/>
                 </Grid>
             </Border>
-            <TextBlock Text="Scan with the AirBridge app to pair" Foreground="#A0A0A5" FontSize="11" HorizontalAlignment="Center" Margin="0,8,0,8"/>
 
-            <TextBlock Text="or enter this code on the other device" Foreground="#A0A0A5" FontSize="11" HorizontalAlignment="Center"/>
-            <TextBlock x:Name="CodeText" Foreground="White" FontSize="24" FontFamily="Consolas" FontWeight="SemiBold"
-                       HorizontalAlignment="Center" Margin="0,2,0,0"/>
-            <TextBlock x:Name="AddressText" Foreground="#707075" FontSize="10" HorizontalAlignment="Center" Margin="0,0,0,12"/>
+            <!-- devices -->
+            <TextBlock Style="{StaticResource AB.Text.Section}" Text="Devices"/>
+            <StackPanel x:Name="PeersPanel" Margin="0,0,0,12"/>
 
-            <Separator Background="#404040" Margin="-16,0,-16,8"/>
-            <TextBlock Text="Paired devices" Foreground="#A0A0A5" FontSize="11" Margin="0,0,0,6"/>
-            <StackPanel x:Name="PeersPanel" Margin="0,0,0,10"/>
+            <!-- transfers (only while any) -->
+            <StackPanel x:Name="TransfersSection" Visibility="Collapsed" Margin="0,0,0,12">
+                <TextBlock Style="{StaticResource AB.Text.Section}" Text="Transfers"/>
+                <StackPanel x:Name="TransfersPanel"/>
+            </StackPanel>
 
-            <Button Content="Connect to a Mac / PC…" Style="{StaticResource FlatButton}" Click="OpenHostDiscovery_Click"/>
-            <Button Content="Display Arrangement…" Style="{StaticResource FlatButton}" Click="OpenArrangement_Click"/>
-            <Button Content="Clipboard Filters…" Style="{StaticResource FlatButton}" Click="OpenFilters_Click" Margin="0,0,0,12"/>
+            <!-- pair from your phone -->
+            <TextBlock Style="{StaticResource AB.Text.Section}" Text="Pair a new device"/>
+            <Border Background="{StaticResource AB.Card}" CornerRadius="12" Padding="12" Margin="0,0,0,12">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <Border Background="White" CornerRadius="8" Padding="6">
+                        <Grid Width="112" Height="112">
+                            <Image x:Name="QrCodeImage" RenderOptions.BitmapScalingMode="NearestNeighbor"
+                                   AutomationProperties.Name="Pairing QR code"/>
+                            <TextBlock x:Name="QrPlaceholder" Text="Starting…" Foreground="#475569" FontSize="12"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center" TextWrapping="Wrap" TextAlignment="Center"/>
+                        </Grid>
+                    </Border>
+                    <StackPanel Grid.Column="1" Margin="12,0,0,0" VerticalAlignment="Center">
+                        <TextBlock Style="{StaticResource AB.Text}" FontWeight="SemiBold" Text="Pair from your phone"/>
+                        <TextBlock Style="{StaticResource AB.Text.Caption}" Margin="0,4,0,0"
+                                   Text="Open AirBridge on your phone and scan this code. Or pick this PC from the list and confirm the 6-digit code."/>
+                        <TextBlock x:Name="AddressText" Style="{StaticResource AB.Text.Caption}" FontFamily="{StaticResource AB.MonoFont}" Margin="0,6,0,0" TextWrapping="NoWrap"/>
+                        <TextBlock x:Name="LockedText" Style="{StaticResource AB.Text.Caption}" Foreground="{StaticResource AB.Warning}" Margin="0,6,0,0" Visibility="Collapsed"
+                                   Text="Pairing paused for a minute after failed attempts."/>
+                    </StackPanel>
+                </Grid>
+            </Border>
 
-            <Separator Background="#404040" Margin="-16,0,-16,8"/>
-            <Button Content="Quit" Style="{StaticResource FlatButton}" Width="70" Height="28" Margin="0" Click="Quit_Click"/>
+            <!-- actions -->
+            <Rectangle Height="1" Fill="{StaticResource AB.Secondary}" Margin="-16,0,-16,8"/>
+            <Button Style="{StaticResource AB.Button.Ghost}" Click="OpenHostDiscovery_Click" AutomationProperties.Name="Connect to a Mac or PC">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Style="{StaticResource AB.Glyph}" Text="{StaticResource AB.G.Link}" FontSize="14" Width="20" Margin="0,0,10,0"/>
+                    <TextBlock Style="{StaticResource AB.Text}" Text="Connect to a Mac or PC…" VerticalAlignment="Center"/>
+                </StackPanel>
+            </Button>
+            <Button Style="{StaticResource AB.Button.Ghost}" Click="OpenArrangement_Click" AutomationProperties.Name="Display arrangement">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Style="{StaticResource AB.Glyph}" Text="{StaticResource AB.G.Display}" FontSize="14" Width="20" Margin="0,0,10,0"/>
+                    <TextBlock Style="{StaticResource AB.Text}" Text="Display arrangement…" VerticalAlignment="Center"/>
+                </StackPanel>
+            </Button>
+            <Button Style="{StaticResource AB.Button.Ghost}" Click="OpenFilters_Click" AutomationProperties.Name="Clipboard filters">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Style="{StaticResource AB.Glyph}" Text="{StaticResource AB.G.Clipboard}" FontSize="14" Width="20" Margin="0,0,10,0"/>
+                    <TextBlock Style="{StaticResource AB.Text}" Text="Clipboard filters…" VerticalAlignment="Center"/>
+                </StackPanel>
+            </Button>
+            <Button Style="{StaticResource AB.Button.Ghost}" Click="Quit_Click" AutomationProperties.Name="Quit AirBridge">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Style="{StaticResource AB.Glyph}" Text="{StaticResource AB.G.Power}" FontSize="14" Width="20" Margin="0,0,10,0" Foreground="{StaticResource AB.MutedForeground}"/>
+                    <TextBlock Style="{StaticResource AB.Text}" Text="Quit AirBridge" Foreground="{StaticResource AB.MutedForeground}" VerticalAlignment="Center"/>
+                </StackPanel>
+            </Button>
         </StackPanel>
     </Border>
 </UserControl>

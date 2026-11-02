@@ -28,6 +28,7 @@ namespace AirBridge.Net
         public PairingSecrets Secrets { get; } = new();
         public ClipboardSync Clipboard { get; }
         public Discovery Discovery { get; }
+        public TransferBoard Transfers { get; } = new();
         private readonly Server _server;
         private readonly Client _client;
 
@@ -46,6 +47,38 @@ namespace AirBridge.Net
         /// <summary>Raised on any thread when anything the UI shows may have changed.</summary>
         public event Action? StateChanged;
 
+        /// <summary>Raised (throttled, timer thread) when the transfer list changed.</summary>
+        public event Action? TransfersChanged
+        {
+            add => Transfers.Changed += value;
+            remove => Transfers.Changed -= value;
+        }
+
+        /// <summary>Test hook: AIRBRIDGE_DEBUG_AUTO_ACCEPT=1 accepts every confirm pairing without a prompt.</summary>
+        public static readonly bool DebugAutoAccept = Environment.GetEnvironmentVariable("AIRBRIDGE_DEBUG_AUTO_ACCEPT") == "1";
+
+        /// <summary>Hosts may refuse pairing entirely (§3.3 not_pairing). Always on for now.</summary>
+        public bool PairingEnabled => true;
+
+        private volatile string? _controlStatus;
+        private volatile string? _controlPeerId;
+
+        /// <summary>Control/lease status line from the input half ("Controlling Pixel 9 · Ctrl+Alt+Esc to return",
+        /// "Controlled by Shazan's MacBook", "Being controlled by …"), or null when idle. Set via
+        /// <see cref="App.SetControlStatus(string?)"/>.</summary>
+        public string? ControlStatus => _controlStatus;
+        /// <summary>Optional peer the status refers to (gets a lease badge in the device list).</summary>
+        public string? ControlPeerId => _controlPeerId;
+
+        internal void SetControlStatus(string? text, string? peerId)
+        {
+            text = string.IsNullOrWhiteSpace(text) ? null : text.Trim();
+            if (text == _controlStatus && peerId == _controlPeerId) return;
+            _controlStatus = text;
+            _controlPeerId = text == null ? null : peerId;
+            RaiseState();
+        }
+
         public PeerService()
         {
             Identity = Identity.LoadOrCreate();
@@ -62,6 +95,7 @@ namespace AirBridge.Net
         {
             if (_started) return;
             _started = true;
+            HandshakeCrypto.SelfTest();
             _screen = Win32.PrimaryScreenPixels();
             _bestAddress = NetUtil.BestAddress();
             PeerBus.Transport = this;
@@ -130,6 +164,7 @@ namespace AirBridge.Net
             _netDebounce.Dispose();
             _serverRetry?.Dispose();
             Secrets.Dispose();
+            Transfers.Dispose();
         }
 
         // ================================================================== sessions
@@ -157,7 +192,7 @@ namespace AirBridge.Net
             return task;
         }
 
-        internal JsonObject BuildHello(bool? paired, byte[] nonce)
+        internal JsonObject BuildHello(bool? paired, byte[] nonce, byte[] pk)
         {
             var h = Protocol.Msg("hello");
             h["v"] = Protocol.Version;
@@ -169,6 +204,7 @@ namespace AirBridge.Net
             foreach (var c in Protocol.Caps) caps.Add(c);
             h["caps"] = caps;
             h["nonce"] = Protocol.B64(nonce);
+            h["pk"] = Protocol.B64(pk);
             if (_screen.W > 0 && _screen.H > 0) h["screen"] = new JsonObject { ["w"] = _screen.W, ["h"] = _screen.H };
             if (paired is bool p) h["paired"] = p;
             return h;
@@ -239,6 +275,20 @@ namespace AirBridge.Net
             App.Notify("AirBridge", message);
         }
 
+        /// <summary>Host: a confirm pairing needs the local user's decision (§3.3). Any thread.</summary>
+        internal void RequestPairApproval(PairApproval a)
+        {
+            string who = $"{a.PeerName} ({PairApproval.PlatLabel(a.Plat)})";
+            if (DebugAutoAccept)
+            {
+                Log.Warn($"AIRBRIDGE_DEBUG_AUTO_ACCEPT=1: auto-accepting pairing from {who}");
+                a.Decide(true);
+                return;
+            }
+            App.Notify("Pairing request", $"{who} wants to pair. Code {a.Digits[..3]} {a.Digits[3..]}");
+            App.ShowPairPrompt(a);
+        }
+
         internal void OnFilesReceived(string peerName, List<string> paths)
         {
             Clipboard.SetFileDropList(paths);
@@ -304,8 +354,9 @@ namespace AirBridge.Net
             foreach (var s in ReadySessions()) s.EnqueueText(json);
         }
 
-        // TODO(net half): route through Session's binary send path once it is exposed.
-        public bool SendBinary(string peerId, ReadOnlyMemory<byte> frame) => false;
+        /// <summary>Sends an inner binary frame (e.g. 0x03 video) inside the encrypted envelope. Non-blocking;
+        /// copies the bytes; returns false (drop) if the peer is not ready or its send queue is backed up.</summary>
+        public bool SendBinary(string peerId, ReadOnlyMemory<byte> frame) => ReadySession(peerId)?.TryEnqueueBinary(frame.Span) ?? false;
 
         public IReadOnlyList<PeerInfo> Peers() => ReadySessions().Select(s => s.ToPeerInfo()).ToList();
 
@@ -313,7 +364,6 @@ namespace AirBridge.Net
 
         public int Port => _server.IsListening ? _server.Port : 0;
         public IPAddress? BestAddress => _bestAddress;
-        public string PairingCode => Secrets.Code;
         public bool PairingLocked => Secrets.IsLocked;
 
         public string? PairingUri
@@ -357,23 +407,52 @@ namespace AirBridge.Net
             if (rec?.Dial == true) _client.EnsureLoop(peerId);
         }
 
-        /// <summary>Pair with a host by the 6-digit code it displays. Returns null on success, else a user-facing error.</summary>
-        public async Task<string?> PairWithHostAsync(IPAddress ip, int port, string code, string? expectedId)
+        /// <summary>
+        /// Pair with a host by numeric comparison (§3.3 mode confirm). <paramref name="confirm"/> is called on a
+        /// network thread with the 6 digits; it returns true when the user tapped Confirm. Returns null on success,
+        /// else a user-facing error.
+        /// </summary>
+        public async Task<string?> PairWithHostAsync(IPAddress ip, int port, string? expectedId,
+                                                     Func<string, CancellationToken, Task<bool>> confirm)
         {
-            string? reason = await _client.PairAsync(ip, port, code, expectedId, CancellationToken.None).ConfigureAwait(false);
-            return reason switch
-            {
-                null => null,
-                "bad_code" => "Wrong code. Check the code shown on the other device.",
-                "locked" => "Too many attempts. Wait a minute and try again.",
-                "not_pairing" => "The other device is not accepting pairings right now.",
-                "unreachable" => "Could not reach that device.",
-                "version" => "The other device runs an incompatible AirBridge version.",
-                "wrong_peer" => "A different device answered at that address.",
-                "timeout" => "The other device did not answer in time.",
-                _ => $"Pairing failed ({reason}).",
-            };
+            string? reason = await _client.PairAsync(ip, port, new OutboundIntent { ExpectedPeerId = expectedId, ConfirmDigits = confirm },
+                                                     CancellationToken.None).ConfigureAwait(false);
+            return PairError(reason);
         }
+
+        /// <summary>Pair from an airbridge://pair link (§2.4, mode qr). Returns null on success, else a user-facing error.</summary>
+        public async Task<string?> PairWithLinkAsync(PairLink link)
+        {
+            var endpoints = new List<(IPAddress, int)>();
+            var host = Discovery.Find(link.Id);
+            if (host != null) foreach (var a in host.Addresses) endpoints.Add((a, host.Port));
+            if (link.Addr != null && !endpoints.Contains((link.Addr, link.Port))) endpoints.Add((link.Addr, link.Port));
+            if (endpoints.Count == 0) return PairError("unreachable");
+            string? reason = "unreachable";
+            foreach (var (ip, port) in endpoints)
+            {
+                reason = await _client.PairAsync(ip, port, new OutboundIntent { ExpectedPeerId = link.Id, QrSecret = link.Secret },
+                                                 CancellationToken.None).ConfigureAwait(false);
+                if (reason != "unreachable") break;
+            }
+            return PairError(reason);
+        }
+
+        private static string? PairError(string? reason) => reason switch
+        {
+            null => null,
+            "bad_proof" or "host_bad_proof" => "The pairing check failed. Make sure the codes match and try again.",
+            "rejected" => "The other device declined the pairing.",
+            "cancelled" => "Pairing cancelled.",
+            "locked" => "Too many attempts. Wait a minute and try again.",
+            "not_pairing" => "The other device is not accepting pairings right now.",
+            "unreachable" => "Could not reach that device.",
+            "version" => "The other device runs an incompatible AirBridge version.",
+            "wrong_peer" => "A different device answered at that address.",
+            "timeout" => "The other device did not answer in time.",
+            "bad_hello" => "The other device sent an invalid handshake (is it up to date?).",
+            _ => $"Pairing failed ({reason}).",
+        };
 
         /// <summary>Send files to one ready peer.</summary>
         public Task<TransferResult> SendFilesAsync(string peerId, IReadOnlyList<string> paths, IProgress<double>? progress, CancellationToken ct)

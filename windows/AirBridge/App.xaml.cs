@@ -57,6 +57,7 @@ namespace AirBridge
             // 1. Local services first: IPC, clipboard hook, tray. Nothing here touches the network.
             IpcManager.StartServer(_ipcCts.Token);
             Peers = new PeerService();
+            ApplyControlStatus(); // in case the input half reported a status before the network half existed
 
             _hiddenClipboardWindow = new Window
             {
@@ -179,6 +180,63 @@ namespace AirBridge
             app?.Dispatcher.BeginInvoke(new Action(() =>
             {
                 try { app._trayIcon?.ShowBalloonTip(title, message, BalloonIcon.Info); } catch { }
+            }));
+        }
+
+        // ------------------------------------------------------------------ control status (input half → UI)
+
+        private static readonly object ControlGate = new();
+        private static string? _controlText;
+        private static string? _controlPeer;
+
+        /// <summary>
+        /// Sets the one-line control/lease status shown in the tray popup and tray tooltip, e.g.
+        /// "Controlling Pixel 9 · Ctrl+Alt+Esc to return", "Controlled by Shazan's MacBook",
+        /// "Being controlled by Shazan's MacBook" (after ctl_busy). Pass null (or empty) to clear.
+        /// Thread-safe: callable from any thread (hook, network, timer); never blocks; the UI update is
+        /// marshalled to the dispatcher. The last call wins. Calls made before startup are kept and applied.
+        /// </summary>
+        public static void SetControlStatus(string? text) => SetControlStatus(text, null);
+
+        /// <summary>As <see cref="SetControlStatus(string?)"/>, additionally naming the peer id the status refers to
+        /// so its row in the device list gets a "control" badge. Optional.</summary>
+        public static void SetControlStatus(string? text, string? peerId)
+        {
+            lock (ControlGate)
+            {
+                _controlText = string.IsNullOrWhiteSpace(text) ? null : text.Trim();
+                _controlPeer = _controlText == null ? null : peerId;
+            }
+            ApplyControlStatus();
+        }
+
+        private static void ApplyControlStatus()
+        {
+            string? text, peer;
+            lock (ControlGate) { text = _controlText; peer = _controlPeer; }
+            Peers?.SetControlStatus(text, peer); // raises StateChanged; the tray re-renders on its dispatcher
+            var app = Current as App;
+            app?.Dispatcher.BeginInvoke(new Action(() =>
+            {
+                if (app._trayIcon == null) return;
+                string tip = text == null ? "AirBridge" : $"AirBridge — {text}";
+                app._trayIcon.ToolTipText = tip.Length > 120 ? tip[..120] : tip;
+            }));
+        }
+
+        // ------------------------------------------------------------------ pairing prompt (host, mode confirm)
+
+        /// <summary>Shows the topmost "wants to pair" prompt for a confirm pairing (any thread).</summary>
+        public static void ShowPairPrompt(PairApproval approval)
+        {
+            var app = Current;
+            if (app == null) { approval.Decide(false); return; }
+            app.Dispatcher.BeginInvoke(new Action(() =>
+            {
+                if (approval.Ended.IsCancellationRequested) return;
+                var w = new PairPromptWindow(approval);
+                w.Show();
+                w.Activate();
             }));
         }
 

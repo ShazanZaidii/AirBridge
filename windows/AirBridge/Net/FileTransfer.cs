@@ -29,6 +29,11 @@ namespace AirBridge.Net
         private readonly ConcurrentDictionary<uint, Incoming> _incoming = new();
         private readonly ConcurrentDictionary<uint, Outgoing> _outgoing = new();
         private int _nextId;
+        private readonly string _keyPrefix = Guid.NewGuid().ToString("N")[..8];
+
+        private string InKey(uint id) => $"{_keyPrefix}:in:{id}";
+        private string OutKey(uint id) => $"{_keyPrefix}:out:{id}";
+        private static string Label(IReadOnlyList<string> names) => names.Count == 1 ? names[0] : $"{names.Count} files";
 
         public FileTransferSession(Session session, PeerService svc) { _session = session; _svc = svc; }
 
@@ -94,6 +99,7 @@ namespace AirBridge.Net
                         if (rcv > Interlocked.Read(ref ak.Acked)) Interlocked.Exchange(ref ak.Acked, rcv);
                         ak.LastAckAt = Environment.TickCount64;
                         ak.Progress?.Report(ak.Total == 0 ? 1 : Math.Min(1.0, (double)rcv / ak.Total));
+                        _svc.Transfers.Progress(OutKey(id), rcv);
                         ak.Signal();
                     }
                     break;
@@ -159,6 +165,7 @@ namespace AirBridge.Net
             accept["id"] = id;
             accept["window"] = Protocol.DefaultWindow;
             _session.EnqueueJson(accept);
+            _svc.Transfers.Start(InKey(id), _session.PeerName, incoming: true, Label(files.Select(f => SanitizeFileName(f.Name)).ToList()), total);
             Log.Info($"Receiving {files.Count} file(s), {total} bytes from {_session.PeerName} (id {id})");
         }
 
@@ -168,13 +175,14 @@ namespace AirBridge.Net
             _session.EnqueueJson(m);
         }
 
-        /// <summary>Called from the receive loop; takes ownership of <paramref name="data"/> (pooled).</summary>
-        public async Task OnChunkAsync(byte[] data, int n)
+        /// <summary>Called from the receive loop with a decrypted 0x01 frame at data[start .. start+n);
+        /// takes ownership of <paramref name="data"/> (pooled).</summary>
+        public async Task OnChunkAsync(byte[] data, int start, int n)
         {
             if (n < Protocol.ChunkHeader) { ArrayPool<byte>.Shared.Return(data); return; }
-            uint id = BinaryPrimitives.ReadUInt32BigEndian(data.AsSpan(1, 4));
-            uint fi = BinaryPrimitives.ReadUInt32BigEndian(data.AsSpan(5, 4));
-            ulong off = BinaryPrimitives.ReadUInt64BigEndian(data.AsSpan(9, 8));
+            uint id = BinaryPrimitives.ReadUInt32BigEndian(data.AsSpan(start + 1, 4));
+            uint fi = BinaryPrimitives.ReadUInt32BigEndian(data.AsSpan(start + 5, 4));
+            ulong off = BinaryPrimitives.ReadUInt64BigEndian(data.AsSpan(start + 9, 8));
             if (!_incoming.TryGetValue(id, out var inc) || fi >= inc.Files.Count || off > long.MaxValue)
             {
                 ArrayPool<byte>.Shared.Return(data); // unknown/cancelled id: ignore
@@ -182,7 +190,7 @@ namespace AirBridge.Net
             }
             try
             {
-                await inc.Queue.Writer.WriteAsync(new Work((int)fi, (long)off, data, Protocol.ChunkHeader, n - Protocol.ChunkHeader, false), inc.Cts.Token)
+                await inc.Queue.Writer.WriteAsync(new Work((int)fi, (long)off, data, start + Protocol.ChunkHeader, n - Protocol.ChunkHeader, false), inc.Cts.Token)
                     .ConfigureAwait(false);
             }
             catch
@@ -207,6 +215,7 @@ namespace AirBridge.Net
                         await f.Stream.WriteAsync(w.Buffer.AsMemory(w.Start, w.Length), inc.Cts.Token).ConfigureAwait(false);
                         f.Written += w.Length;
                         inc.Received += w.Length;
+                        _svc.Transfers.Progress(InKey(inc.Id), inc.Received);
                         bool fileDone = w.Offset + w.Length == f.Size;
                         if (fileDone)
                         {
@@ -253,6 +262,7 @@ namespace AirBridge.Net
             complete["saved"] = saved;
             _session.EnqueueJson(complete);
             inc.Queue.Writer.TryComplete();
+            _svc.Transfers.Finish(InKey(inc.Id), ok, ok ? null : "Incomplete");
 
             var paths = inc.Files.Where(f => f.Complete).Select(f => f.Path).ToList();
             if (paths.Count > 0) _svc.OnFilesReceived(_session.PeerName, paths);
@@ -262,6 +272,7 @@ namespace AirBridge.Net
         {
             inc.Queue.Writer.TryComplete();
             try { inc.Cts.Cancel(); } catch { }
+            _svc.Transfers.Finish(InKey(inc.Id), false, sendCancel == null ? "Cancelled" : "Failed");
             // Drain queued chunks back to the pool.
             while (inc.Queue.Reader.TryRead(out var w)) if (w.Buffer != null) ArrayPool<byte>.Shared.Return(w.Buffer);
             // The writer may still hold a stream briefly; delete after it observes cancellation.
@@ -351,12 +362,17 @@ namespace AirBridge.Net
                 offer["files"] = arr;
                 offer["total"] = og.Total;
                 if (!_session.EnqueueJson(offer)) return new TransferResult(false, "Disconnected", Array.Empty<string>());
+                _svc.Transfers.Start(OutKey(id), _session.PeerName, incoming: false, Label(files.Select(f => f.Name).ToList()), og.Total);
 
                 var acceptTask = og.Accepted.Task;
                 if (await Task.WhenAny(acceptTask, Task.Delay(TimeSpan.FromSeconds(30), ct)).ConfigureAwait(false) != acceptTask)
                     throw new TimeoutException("Receiver did not answer the offer");
                 string? rejected = await acceptTask.ConfigureAwait(false);
-                if (rejected != null) return new TransferResult(false, og.FailReason ?? $"Rejected ({rejected})", Array.Empty<string>());
+                if (rejected != null)
+                {
+                    _svc.Transfers.Finish(OutKey(id), false, "Rejected");
+                    return new TransferResult(false, og.FailReason ?? $"Rejected ({rejected})", Array.Empty<string>());
+                }
 
                 long sent = 0;
                 for (int i = 0; i < files.Count; i++)
@@ -411,6 +427,7 @@ namespace AirBridge.Net
                     {
                         var res = await ctask.ConfigureAwait(false);
                         if (res.Ok) progress?.Report(1.0);
+                        _svc.Transfers.Finish(OutKey(id), res.Ok, res.Error);
                         return res;
                     }
                     if (Environment.TickCount64 - og.LastAckAt > 60_000) throw new TimeoutException("No completion from receiver");
@@ -427,11 +444,13 @@ namespace AirBridge.Net
                     _session.EnqueueJson(c);
                 }
                 Log.Warn($"Send {id} to {_session.PeerName} failed: {reason}");
+                _svc.Transfers.Finish(OutKey(id), false, reason);
                 return new TransferResult(false, reason, Array.Empty<string>());
             }
             finally
             {
                 _outgoing.TryRemove(id, out _);
+                _svc.Transfers.Finish(OutKey(id), false, "Failed"); // no-op if already finished
             }
         }
 

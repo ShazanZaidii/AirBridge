@@ -19,6 +19,11 @@ namespace AirBridge.Net
         public const int BasePort = 47632;
         public const int PortCount = 10; // 47632 … 47641
 
+        /// <summary>
+        /// The capabilities this PC advertises in hello (§3.1). This is the ONE place caps are assembled.
+        /// No "mirror_source" yet: the input half adds it here once the Windows screen-mirror source exists
+        /// (and only when capture is actually available, §8.7).
+        /// </summary>
         public static readonly string[] Caps = { "clip", "xfer", "ctl_source", "ctl_target" };
 
         public static readonly TimeSpan HandshakeTimeout = TimeSpan.FromSeconds(10);
@@ -33,6 +38,9 @@ namespace AirBridge.Net
         public const int ChunkSize = 512 * 1024;
         public const int ChunkHeader = 17;
         public const byte KindFileChunk = 0x01;
+        public const byte KindVideo = 0x03;
+        /// <summary>Largest inner binary frame (§9): 1 MiB payload + 17 header bytes.</summary>
+        public const int MaxBinaryFrame = 1024 * 1024 + 17;
         public const long DefaultWindow = 8L * 1024 * 1024;
         public const long AckEvery = 1024 * 1024;
 
@@ -112,21 +120,7 @@ namespace AirBridge.Net
             return h.ComputeHash(data);
         }
 
-        /// <summary>K = HMAC(S, "airbridge/v2/pair|" | clientId | "|" | hostId)</summary>
-        public static byte[] DeriveKey(byte[] secret, string clientId, string hostId) =>
-            Hmac(secret, Cat("airbridge/v2/pair|", clientId, "|", hostId));
-
-        public static byte[] AuthMac(byte[] k, byte[] cNonce, byte[] hNonce, string clientId) =>
-            Hmac(k, Cat("auth|", cNonce, "|", hNonce, "|", clientId));
-
-        public static byte[] AuthAckMac(byte[] k, byte[] hNonce, byte[] cNonce, string hostId) =>
-            Hmac(k, Cat("auth_ack|", hNonce, "|", cNonce, "|", hostId));
-
-        public static byte[] PairProof(byte[] k, byte[] cNonce, byte[] hNonce, string clientId) =>
-            Hmac(k, Cat("pair|", cNonce, "|", hNonce, "|", clientId));
-
-        public static byte[] PairAckProof(byte[] k, byte[] hNonce, byte[] cNonce, string hostId) =>
-            Hmac(k, Cat("pair_ack|", hNonce, "|", cNonce, "|", hostId));
+        // Handshake MACs/key derivations live in HandshakeCrypto (SecureChannel.cs).
 
         public static bool MacEquals(byte[]? a, byte[]? b) =>
             a != null && b != null && a.Length == b.Length && CryptographicOperations.FixedTimeEquals(a, b);
