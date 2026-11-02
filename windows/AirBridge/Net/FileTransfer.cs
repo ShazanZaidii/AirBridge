@@ -71,8 +71,10 @@ namespace AirBridge.Net
                             .ContinueWith(t => _ = t.Exception, TaskContinuationOptions.OnlyOnFaulted);
                     break;
                 case "xfer_cancel":
-                    if (_incoming.TryRemove(id, out var c)) CancelIncoming(c, sendCancel: null);
-                    if (_outgoing.TryGetValue(id, out var og)) og.Fail($"cancelled by peer ({Protocol.Str(o, "reason")})");
+                    // `dir` is from the peer's point of view: its "out" is our incoming transfer.
+                    string? dir = Protocol.Str(o, "dir");
+                    if (dir != "in" && _incoming.TryRemove(id, out var c)) CancelIncoming(c, sendCancel: null);
+                    if (dir != "out" && _outgoing.TryGetValue(id, out var og)) og.Fail($"cancelled by peer ({Protocol.Str(o, "reason")})");
                     break;
                 case "xfer_accept":
                     if (_outgoing.TryGetValue(id, out var a))
@@ -270,7 +272,7 @@ namespace AirBridge.Net
             });
             if (sendCancel != null)
             {
-                var m = Protocol.Msg("xfer_cancel"); m["id"] = inc.Id; m["reason"] = sendCancel;
+                var m = Protocol.Msg("xfer_cancel"); m["id"] = inc.Id; m["dir"] = "in"; m["reason"] = sendCancel;
                 _session.EnqueueJson(m);
             }
             Log.Info($"Incoming transfer {inc.Id} cancelled");
@@ -420,7 +422,7 @@ namespace AirBridge.Net
                 string reason = og.FailReason ?? (userCt.IsCancellationRequested ? "Cancelled" : ex.Message);
                 if (og.FailReason == null && _session.IsReady)
                 {
-                    var c = Protocol.Msg("xfer_cancel"); c["id"] = id;
+                    var c = Protocol.Msg("xfer_cancel"); c["id"] = id; c["dir"] = "out";
                     c["reason"] = userCt.IsCancellationRequested ? "user" : "error";
                     _session.EnqueueJson(c);
                 }

@@ -304,14 +304,11 @@ namespace AirBridge.Input
         private static void Click(int b, int n)
         {
             if (b < 0 || b > 2) return;
-            n = Math.Clamp(n, 1, 3);
-            var inputs = new List<NativeMethods.INPUT>();
-            for (int i = 0; i < n; i++)
-            {
-                inputs.Add(MouseInput(ButtonFlag(b, true)));
-                inputs.Add(MouseInput(ButtonFlag(b, false)));
-            }
-            NativeMethods.SendInput((uint)inputs.Count, inputs.ToArray(), NativeMethods.INPUT.Size);
+            // `n` is the click count of this click (a double tap arrives as n:1 then n:2); inject exactly one
+            // down/up and let Windows derive double-clicks from timing, never synthesise extra clicks.
+            _ = n;
+            var inputs = new[] { MouseInput(ButtonFlag(b, true)), MouseInput(ButtonFlag(b, false)) };
+            NativeMethods.SendInput((uint)inputs.Length, inputs, NativeMethods.INPUT.Size);
         }
 
         private void Scroll(double dx, double dy, bool px)
