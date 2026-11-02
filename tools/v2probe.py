@@ -1,21 +1,23 @@
 #!/usr/bin/env python3
-"""AirBridge Protocol v2 reference probe.
+"""AirBridge Protocol v2 (rev 2) reference probe.
 
 A minimal, spec-exact peer used to test the real apps from a laptop. It can act as a
-HOST (listen, show a pairing code, accept clients) or as a CLIENT (dial a host, pair,
-then send clipboard/files/control messages interactively).
+HOST (listen, accept clients, show pairing digits) or as a CLIENT (dial a host, pair, then
+send clipboard/files/control messages interactively). Everything after the handshake is
+encrypted exactly as docs/PROTOCOL.md §3.6 describes.
 
-Requires: python3 >= 3.9, `websockets` (13.x).  No other dependencies.
+Requires: python3 >= 3.9, `websockets` (>= 10) and `cryptography`.
+  (e.g.  uv venv .venv && uv pip install --python .venv/bin/python websockets cryptography)
 
-  python3 tools/v2probe.py host [--port 47632] [--name Probe] [--code 123456]
-  python3 tools/v2probe.py client ws://192.168.1.20:47632/v2 --code 123456
-  python3 tools/v2probe.py client 'airbridge://pair?v=2&id=...&addr=...&port=...&k=...'
+  python3 tools/v2probe.py host [--port 47632] [--name Probe] [--auto-accept]
+  python3 tools/v2probe.py client ws://192.168.1.20:47632          # confirm-mode pairing (shows digits)
+  python3 tools/v2probe.py client 'airbridge://pair?v=2&id=...'    # QR-mode pairing
 
 Interactive commands (client): clip <text> | send <path> | ping | enter <edge> <rel> |
-  move <dx> <dy> | scroll <dx> <dy> | btn <b> <down|up> | click <b> [n] | key <hid> [text] |
-  action <name> | leave | unpair | quit
+  move <dx> <dy> | scroll <dx> <dy> | btn <b> <down|up> | click <b> [n] | abs <x> <y> |
+  key <hid> [text] | action <name> | mirror [w h fps] | mirror_stop | leave | unpair | quit
 
-State (device id + peer keys) is kept in ~/.airbridge-probe.json so re-connects use `auth`.
+State (device id + peer keys) is kept in ~/.airbridge-probe.json (override: AIRBRIDGE_PROBE_STATE).
 """
 import argparse
 import asyncio
@@ -35,6 +37,10 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 import websockets
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
 STATE_PATH = Path(os.environ.get("AIRBRIDGE_PROBE_STATE", Path.home() / ".airbridge-probe.json"))
 DOWNLOAD_DIR = Path.home() / "Downloads" / "AirBridge Transfers"
@@ -60,12 +66,8 @@ def hmac256(key: bytes, data: bytes) -> bytes:
     return hmac.new(key, data, hashlib.sha256).digest()
 
 
-def derive_k(secret: bytes, client_id: str, host_id: str) -> bytes:
-    return hmac256(secret, f"airbridge/v2/pair|{client_id}|{host_id}".encode())
-
-
-def mac(k: bytes, tag: str, n1: bytes, n2: bytes, who: str) -> str:
-    return b64(hmac256(k, tag.encode() + b"|" + n1 + b"|" + n2 + b"|" + who.encode()))
+def hkdf(ikm: bytes, salt: bytes, info: bytes, length: int) -> bytes:
+    return HKDF(algorithm=hashes.SHA256(), length=length, salt=salt, info=info).derive(ikm)
 
 
 def load_state() -> dict:
@@ -82,7 +84,7 @@ def save_state(st: dict) -> None:
 
 def sanitize(name: str) -> str:
     name = name.replace("\\", "/").split("/")[-1]
-    name = re.sub(r"[\x00-\x1f]", "", name).lstrip(". ")
+    name = re.sub(r'[\x00-\x1f<>:"|?*]', "", name).strip(". ")
     stem = name.split(".")[0].upper()
     if stem in {"CON", "PRN", "AUX", "NUL"} or re.fullmatch(r"(COM|LPT)[1-9]", stem):
         name = "_" + name
@@ -104,49 +106,108 @@ def unique_path(d: Path, name: str) -> Path:
         n += 1
 
 
+def is_open(ws) -> bool:
+    if hasattr(ws, "closed"):          # websockets <= 13 legacy API
+        return not ws.closed
+    return ws.close_code is None       # websockets >= 14
+
+
 def log(*a):
     print(time.strftime("%H:%M:%S"), *a, flush=True)
 
 
+def pk_bytes(priv: ec.EllipticCurvePrivateKey) -> bytes:
+    return priv.public_key().public_bytes(serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint)
+
+
+def transcript(c_nonce, h_nonce, client_id, host_id, c_pk, h_pk) -> bytes:
+    return c_nonce + b"|" + h_nonce + b"|" + client_id.encode() + b"|" + host_id.encode() + b"|" + c_pk + b"|" + h_pk
+
+
 # ----------------------------------------------------------------------------- session
 class Session:
-    """One authenticated connection. Symmetric apart from who speaks first."""
+    """One authenticated, encrypted connection. Symmetric apart from who speaks first."""
 
-    def __init__(self, ws, st: dict, name: str, is_host: bool, pairing=None):
+    def __init__(self, ws, st: dict, name: str, is_host: bool, pairing=None, auto_accept=False):
         self.ws, self.st, self.name, self.is_host, self.pairing = ws, st, name, is_host, pairing
+        self.auto_accept = auto_accept
         self.my_id = st["id"]
-        self.peer = None  # dict(id, name, plat, caps)
+        self.peer = None
         self.k = None
         self.ready = False
         self.last_rx = time.time()
         self.xfers_in = {}
-        self.xfer_acks = {}  # id -> (event, received)
-        self.next_xfer_id = 1
+        self.xfer_acks = {}
+        self.next_xfer_id = secrets.randbelow(1 << 20) + 1
+        # crypto
+        self.priv = ec.generate_private_key(ec.SECP256R1())
+        self.tx_key = self.rx_key = None
+        self.tx_seq = self.rx_seq = 0
+        self.mirror_frames = 0
+        self.mirror_t0 = None
+
+    # -- wire ---------------------------------------------------------------
+    async def send_plain(self, msg: dict):
+        await self.ws.send(json.dumps(msg, separators=(",", ":")))
 
     async def send(self, msg: dict):
-        await self.ws.send(json.dumps(msg, separators=(",", ":")))
+        if not self.ready:
+            await self.send_plain(msg)
+            return
+        await self.send_inner(0, json.dumps(msg, separators=(",", ":")).encode())
+
+    async def send_inner(self, inner_kind: int, payload: bytes):
+        header = b"\x02" + struct.pack(">Q", self.tx_seq)
+        nonce = b"\x00" * 4 + struct.pack(">Q", self.tx_seq)
+        self.tx_seq += 1
+        ct = AESGCM(self.tx_key).encrypt(nonce, bytes([inner_kind]) + payload, header)
+        await self.ws.send(header + ct)
+
+    def open_envelope(self, frame: bytes):
+        if len(frame) < 9 + 16 or frame[0] != 2:
+            raise ValueError("not an envelope")
+        seq = struct.unpack(">Q", frame[1:9])[0]
+        if seq != self.rx_seq:
+            raise ValueError(f"bad seq {seq} != {self.rx_seq}")
+        self.rx_seq += 1
+        nonce = b"\x00" * 4 + frame[1:9]
+        pt = AESGCM(self.rx_key).decrypt(nonce, frame[9:], frame[:9])
+        return pt[0], pt[1:]
+
+    def derive_session_keys(self, z: bytes, salt: bytes, T: bytes, client_id: str, host_id: str):
+        keys = hkdf(z, salt, b"airbridge/v2/session|" + T, 64)
+        c2h, h2c = keys[:32], keys[32:]
+        self.tx_key, self.rx_key = (h2c, c2h) if self.is_host else (c2h, h2c)
 
     def hello(self, nonce: bytes, paired=None):
         m = {"t": "hello", "v": 2, "id": self.my_id, "name": self.name,
-             "plat": "linux", "app": "probe-0.1",
-             "caps": ["clip", "xfer", "ctl_source", "ctl_target", "trackpad"],
-             "nonce": b64(nonce), "screen": {"w": 1920, "h": 1080}}
+             "plat": "linux", "app": "probe-0.2",
+             "caps": ["clip", "xfer", "ctl_source", "ctl_target", "trackpad", "mirror_sink"],
+             "nonce": b64(nonce), "pk": b64(pk_bytes(self.priv)), "screen": {"w": 1920, "h": 1080}}
         if paired is not None:
             m["paired"] = paired
         return m
 
+    @staticmethod
+    def confirm_digits(z: bytes, T: bytes) -> str:
+        v = struct.unpack(">I", hmac256(z, b"airbridge/v2/confirm|" + T)[:4])[0] % 1_000_000
+        return f"{v:06d}"
+
     # -- handshake -----------------------------------------------------------
-    async def run_client_handshake(self, code=None, qr_secret=None):
+    async def run_client_handshake(self, qr_secret=None):
         c_nonce = secrets.token_bytes(16)
-        await self.send(self.hello(c_nonce))
+        await self.send_plain(self.hello(c_nonce))
         h = json.loads(await asyncio.wait_for(self.ws.recv(), 10))
         assert h.get("t") == "hello" and h.get("v") == 2, h
         self.peer = h
         h_nonce = unb64(h["nonce"])
+        h_pk = unb64(h["pk"])
+        z = self.priv.exchange(ec.ECDH(), ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP256R1(), h_pk))
+        T = transcript(c_nonce, h_nonce, self.my_id, h["id"], pk_bytes(self.priv), h_pk)
         peer_rec = self.st["peers"].get(h["id"])
         if h.get("paired") and peer_rec:
             self.k = unb64(peer_rec["k"])
-            await self.send({"t": "auth", "mac": mac(self.k, "auth", c_nonce, h_nonce, self.my_id)})
+            await self.send_plain({"t": "auth", "mac": b64(hmac256(self.k, b"auth|" + T))})
             r = json.loads(await asyncio.wait_for(self.ws.recv(), 10))
             if r.get("t") != "auth_ok":
                 log("auth failed:", r)
@@ -154,72 +215,91 @@ class Session:
                     self.st["peers"].pop(h["id"], None)
                     save_state(self.st)
                 return False
-            exp = mac(self.k, "auth_ack", h_nonce, c_nonce, h["id"])
-            if not hmac.compare_digest(exp, r["mac"]):
+            if not hmac.compare_digest(b64(hmac256(self.k, b"auth_ack|" + T)), r["mac"]):
                 log("host auth_ack MAC mismatch!")
                 return False
         else:
-            secret = qr_secret if qr_secret else (code or "").encode()
-            if not secret:
-                log("host does not know us and no --code/--qr given")
-                return False
-            self.k = derive_k(secret, self.my_id, h["id"])
-            await self.send({"t": "pair", "proof": mac(self.k, "pair", c_nonce, h_nonce, self.my_id)})
-            r = json.loads(await asyncio.wait_for(self.ws.recv(), 10))
+            if qr_secret:
+                self.k = hmac256(qr_secret, f"airbridge/v2/pair|{self.my_id}|{h['id']}".encode())
+                mode = "qr"
+            else:
+                self.k = hkdf(z, c_nonce + h_nonce, f"airbridge/v2/pairkey|{self.my_id}|{h['id']}".encode(), 32)
+                mode = "confirm"
+                await self.send_plain({"t": "pair_start", "mode": "confirm"})
+                log(f"PAIRING DIGITS: {self.confirm_digits(z, T)}  (confirm on the host; the probe auto-confirms)")
+            await self.send_plain({"t": "pair", "mode": mode, "proof": b64(hmac256(self.k, b"pair|" + T))})
+            r = json.loads(await asyncio.wait_for(self.ws.recv(), 70))
             if r.get("t") != "pair_ok":
                 log("pair failed:", r)
                 return False
-            exp = mac(self.k, "pair_ack", h_nonce, c_nonce, h["id"])
-            if not hmac.compare_digest(exp, r["proof"]):
+            if not hmac.compare_digest(b64(hmac256(self.k, b"pair_ack|" + T)), r["proof"]):
                 log("host pair_ack proof mismatch!")
                 return False
             self.st["peers"][h["id"]] = {"k": b64(self.k), "name": h["name"], "plat": h["plat"]}
             save_state(self.st)
             log("paired with", h["name"])
+        self.derive_session_keys(z, c_nonce + h_nonce, T, self.my_id, h["id"])
+        self.priv = None
         self.ready = True
-        log(f"READY with {h['name']} ({h['plat']}) caps={h.get('caps')}")
+        log(f"READY (encrypted) with {h['name']} ({h['plat']}) caps={h.get('caps')}")
         return True
 
     async def run_host_handshake(self):
         h = json.loads(await asyncio.wait_for(self.ws.recv(), 10))
         if h.get("t") != "hello" or h.get("v") != 2:
-            await self.send({"t": "auth_fail", "reason": "version"})
+            await self.send_plain({"t": "auth_fail", "reason": "version"})
             return False
         self.peer = h
         c_nonce = unb64(h["nonce"])
+        c_pk = unb64(h["pk"])
         h_nonce = secrets.token_bytes(16)
         rec = self.st["peers"].get(h["id"])
-        await self.send(self.hello(h_nonce, paired=bool(rec)))
+        await self.send_plain(self.hello(h_nonce, paired=bool(rec)))
+        z = self.priv.exchange(ec.ECDH(), ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP256R1(), c_pk))
+        T = transcript(c_nonce, h_nonce, h["id"], self.my_id, c_pk, pk_bytes(self.priv))
         r = json.loads(await asyncio.wait_for(self.ws.recv(), 10))
+        if r.get("t") == "pair_start":
+            digits = self.confirm_digits(z, T)
+            log(f"PAIR REQUEST from {h['name']}: digits {digits} — {'auto-accepting' if self.auto_accept else 'type: accept'}")
+            r = json.loads(await asyncio.wait_for(self.ws.recv(), 70))
         if r.get("t") == "auth":
             if not rec:
-                await self.send({"t": "auth_fail", "reason": "unpaired"})
+                await self.send_plain({"t": "auth_fail", "reason": "unpaired"})
                 return False
             self.k = unb64(rec["k"])
-            if not hmac.compare_digest(mac(self.k, "auth", c_nonce, h_nonce, h["id"]), r.get("mac", "")):
-                await self.send({"t": "auth_fail", "reason": "bad_mac"})
+            if not hmac.compare_digest(b64(hmac256(self.k, b"auth|" + T)), r.get("mac", "")):
+                await self.send_plain({"t": "auth_fail", "reason": "bad_mac"})
                 return False
-            await self.send({"t": "auth_ok", "mac": mac(self.k, "auth_ack", h_nonce, c_nonce, self.my_id)})
+            await self.send_plain({"t": "auth_ok", "mac": b64(hmac256(self.k, b"auth_ack|" + T))})
         elif r.get("t") == "pair":
-            ok = False
-            for secret in self.pairing.secrets():
-                k = derive_k(secret, h["id"], self.my_id)
-                if hmac.compare_digest(mac(k, "pair", c_nonce, h_nonce, h["id"]), r.get("proof", "")):
-                    self.k, ok = k, True
-                    break
-            if not ok:
+            mode = r.get("mode", "confirm")
+            if mode == "qr":
+                cands = [hmac256(s, f"airbridge/v2/pair|{h['id']}|{self.my_id}".encode()) for s in self.pairing.secrets()]
+            else:
+                cands = [hkdf(z, c_nonce + h_nonce, f"airbridge/v2/pairkey|{h['id']}|{self.my_id}".encode(), 32)]
+            ok = next((k for k in cands if hmac.compare_digest(b64(hmac256(k, b"pair|" + T)), r.get("proof", ""))), None)
+            if ok is None:
                 self.pairing.fail()
-                await self.send({"t": "pair_fail", "reason": "locked" if self.pairing.locked() else "bad_code"})
+                await self.send_plain({"t": "pair_fail", "reason": "locked" if self.pairing.locked() else "bad_proof"})
                 return False
+            if mode == "confirm" and not self.auto_accept:
+                log("waiting for 'accept' on stdin (or 'reject')…")
+                ans = await asyncio.wait_for(self.pairing.answer(), 60)
+                if ans != "accept":
+                    await self.send_plain({"t": "pair_fail", "reason": "rejected"})
+                    return False
+            self.k = ok
             self.st["peers"][h["id"]] = {"k": b64(self.k), "name": h["name"], "plat": h["plat"]}
             save_state(self.st)
             self.pairing.rotate()
-            await self.send({"t": "pair_ok", "proof": mac(self.k, "pair_ack", h_nonce, c_nonce, self.my_id)})
+            await self.send_plain({"t": "pair_ok", "proof": b64(hmac256(self.k, b"pair_ack|" + T))})
             log("paired new client", h["name"])
         else:
             return False
+        self.derive_session_keys(z, c_nonce + h_nonce, T, h["id"], self.my_id)
+        self.priv = None
         self.ready = True
-        log(f"READY with {h['name']} ({h['plat']}) caps={h.get('caps')}")
+        log(f"READY (encrypted) with {h['name']} ({h['plat']}) caps={h.get('caps')}")
         return True
 
     # -- steady state --------------------------------------------------------
@@ -236,18 +316,26 @@ class Session:
         try:
             async for frame in self.ws:
                 self.last_rx = time.time()
-                if isinstance(frame, bytes):
-                    await self.on_binary(frame)
-                else:
+                if isinstance(frame, str):
+                    log("PROTOCOL ERROR: plaintext text frame after ready:", frame[:80])
+                    continue
+                try:
+                    kind, payload = self.open_envelope(frame)
+                except Exception as e:
+                    log("envelope error:", e)
+                    await self.ws.close(1002, "envelope")
+                    return
+                if kind == 0:
                     try:
-                        msg = json.loads(frame)
+                        msg = json.loads(payload)
                     except Exception:
-                        log("bad json:", frame[:80])
+                        log("bad json:", payload[:80])
                         continue
                     await self.on_text(msg)
+                elif kind == 1:
+                    await self.on_binary(payload)
         except websockets.exceptions.ConnectionClosed as e:
-            # A peer may drop the TCP connection right after `bye` without a close frame; that's allowed.
-            log(f"connection closed ({e.code if hasattr(e, 'code') else e})")
+            log(f"connection closed ({getattr(e, 'code', e)})")
 
     async def on_text(self, m: dict):
         t = m.get("t")
@@ -293,24 +381,40 @@ class Session:
             log(f"peer completed xfer {m['id']}: ok={m.get('ok')} saved={m.get('saved')}")
         elif t in ("xfer_reject", "xfer_cancel"):
             log("xfer", t, m)
-            x = self.xfers_in.pop(m["id"], None)
-            if x:
-                for f in x["files"].values():
-                    f["fh"].close()
-                    f["path"].unlink(missing_ok=True)
+            if m.get("dir") != "in":
+                x = self.xfers_in.pop(m["id"], None)
+                if x:
+                    for f in x["files"].values():
+                        f["fh"].close()
+                        f["path"].unlink(missing_ok=True)
+        elif t == "mirror_info":
+            self.mirror_frames, self.mirror_t0 = 0, time.time()
+            log("MIRROR", json.dumps(m))
         elif t == "bye":
             log("peer says bye:", m.get("reason"))
         elif t == "unpair":
             log("peer unpaired us")
             self.st["peers"].pop(self.peer["id"], None)
             save_state(self.st)
-        elif t in ("ctl_enter", "ctl_leave", "ptr_move", "ptr_scroll", "ptr_btn", "ptr_click",
-                   "key", "key_state", "action", "name", "error"):
+        elif t in ("ctl_enter", "ctl_leave", "ctl_busy", "ptr_move", "ptr_scroll", "ptr_btn", "ptr_click",
+                   "ptr_abs", "key", "key_state", "action", "name", "error", "mirror_stop", "mirror_key",
+                   "mirror_ack"):
             log("CTL", json.dumps(m))
         else:
             log("ignored", t)
 
     async def on_binary(self, b: bytes):
+        if not b:
+            return
+        if b[0] == 3 and len(b) >= 10:
+            pts, flags = struct.unpack(">QB", b[1:10])
+            self.mirror_frames += 1
+            if self.mirror_frames % 10 == 0:
+                await self.send({"t": "mirror_ack", "pts": pts})
+            if flags & 1 or self.mirror_frames % 60 == 1:
+                el = max(time.time() - (self.mirror_t0 or time.time()), 1e-6)
+                log(f"video frame #{self.mirror_frames} pts={pts} flags={flags} size={len(b)-10} ({self.mirror_frames/el:.1f} fps)")
+            return
         if len(b) < 17 or b[0] != 1:
             log("unknown binary kind", b[:1])
             return
@@ -344,7 +448,7 @@ class Session:
         total = sum(f["size"] for f in files)
         ev = self.xfer_acks.setdefault(xid, [asyncio.Event(), 0])
         await self.send({"t": "xfer_offer", "id": xid, "files": files, "total": total})
-        await asyncio.wait_for(ev[0].wait(), 15)  # accept
+        await asyncio.wait_for(ev[0].wait(), 15)
         sent, t0 = 0, time.time()
         for i, p in enumerate(paths):
             with open(p, "rb") as fh:
@@ -356,7 +460,7 @@ class Session:
                     while sent - ev[1] > WINDOW - len(data):
                         ev[0].clear()
                         await asyncio.wait_for(ev[0].wait(), 30)
-                    await self.ws.send(struct.pack(">BIIQ", 1, xid, i, off) + data)
+                    await self.send_inner(1, struct.pack(">BIIQ", 1, xid, i, off) + data)
                     off += len(data)
                     sent += len(data)
         await self.send({"t": "xfer_done", "id": xid})
@@ -366,18 +470,17 @@ class Session:
 
 # ----------------------------------------------------------------------------- pairing state (host)
 class Pairing:
-    def __init__(self, fixed_code=None):
-        self.fixed = fixed_code
+    def __init__(self):
         self.fails, self.lock_until = 0, 0
+        self.answers = asyncio.Queue()
         self.rotate()
 
     def rotate(self):
-        self.code = self.fixed or f"{secrets.randbelow(10**6):06d}"
         self.secret = secrets.token_bytes(32)
         self.fails = 0
 
     def secrets(self):
-        return [] if self.locked() else [self.secret, self.code.encode()]
+        return [] if self.locked() else [self.secret]
 
     def fail(self):
         self.fails += 1
@@ -388,6 +491,9 @@ class Pairing:
     def locked(self):
         return time.time() < self.lock_until
 
+    async def answer(self):
+        return await self.answers.get()
+
     def qr(self, host_id, name, addr, port):
         k = base64.urlsafe_b64encode(self.secret).decode().rstrip("=")
         return f"airbridge://pair?v=2&id={host_id}&name={name}&plat=linux&addr={addr}&port={port}&k={k}"
@@ -396,15 +502,15 @@ class Pairing:
 # ----------------------------------------------------------------------------- modes
 async def run_host(args):
     st = load_state()
-    pairing = Pairing(args.code)
+    pairing = Pairing()
     sessions = []
 
     async def handler(ws, path=None):
-        req_path = getattr(ws, "path", path) or path
+        req_path = getattr(ws, "path", None) or getattr(getattr(ws, "request", None), "path", None) or path
         if req_path != "/v2":
             await ws.close(1008, "path")
             return
-        s = Session(ws, st, args.name, True, pairing)
+        s = Session(ws, st, args.name, True, pairing, auto_accept=args.auto_accept)
         try:
             if not await s.run_host_handshake():
                 await ws.close()
@@ -435,9 +541,8 @@ async def run_host(args):
                                   "v=2", f"id={st['id']}", f"name={args.name}", "plat=linux"],
                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     log(f"HOST {args.name} id={st['id']} listening on :{port}/v2")
-    log(f"pairing code: {pairing.code}")
     log("QR url:", pairing.qr(st["id"], args.name, args.addr or "0.0.0.0", port))
-    log("commands: clip <text> | send <path> | code | peers | quit")
+    log("commands: accept | reject | qr | clip <text> | send <path> | peers | quit   (the QR secret rotates after each pairing; use `qr` to print the current one)")
     loop = asyncio.get_event_loop()
     try:
         while True:
@@ -447,10 +552,12 @@ async def run_host(args):
             cmd, _, rest = line.strip().partition(" ")
             if cmd == "quit":
                 break
-            if cmd == "code":
-                log("pairing code:", pairing.code)
+            if cmd in ("accept", "reject"):
+                pairing.answers.put_nowait(cmd)
             elif cmd == "peers":
                 log([s.peer["name"] for s in sessions])
+            elif cmd == "qr":
+                log("QR url:", pairing.qr(st["id"], args.name, args.addr or "0.0.0.0", port))
             elif cmd == "clip":
                 for s in sessions:
                     await s.send_clip(rest)
@@ -477,12 +584,12 @@ async def run_client(args):
         try:
             async with websockets.connect(url, max_size=2 * 1024 * 1024, compression=None) as ws:
                 s = Session(ws, st, args.name, False)
-                if not await s.run_client_handshake(args.code, qr_secret):
+                if not await s.run_client_handshake(qr_secret):
                     return
                 backoff = 1
                 tasks = [asyncio.create_task(s.reader()), asyncio.create_task(s.pinger())]
                 loop = asyncio.get_event_loop()
-                while not ws.closed:
+                while is_open(ws):
                     line = await loop.run_in_executor(None, sys.stdin.readline)
                     if not line:
                         return
@@ -504,6 +611,8 @@ async def run_client(args):
                             await s.send({"t": "ctl_leave"})
                         elif cmd == "move":
                             await s.send({"t": "ptr_move", "dx": float(a[0]), "dy": float(a[1])})
+                        elif cmd == "abs":
+                            await s.send({"t": "ptr_abs", "x": float(a[0]), "y": float(a[1])})
                         elif cmd == "scroll":
                             await s.send({"t": "ptr_scroll", "dx": float(a[0]), "dy": float(a[1]), "px": True})
                         elif cmd == "btn":
@@ -519,6 +628,12 @@ async def run_client(args):
                             await s.send({"t": "key", "hid": hid, "down": False, "mods": 0})
                         elif cmd == "action":
                             await s.send({"t": "action", "name": a[0]})
+                        elif cmd == "mirror":
+                            w, h, fps = (int(a[0]), int(a[1]), int(a[2])) if len(a) >= 3 else (1280, 800, 30)
+                            await s.send({"t": "mirror_start", "codecs": ["h264", "hevc"], "maxW": w, "maxH": h,
+                                          "fps": fps, "bitrate": 6_000_000})
+                        elif cmd == "mirror_stop":
+                            await s.send({"t": "mirror_stop"})
                         elif cmd == "unpair":
                             await s.send({"t": "unpair"})
                             st["peers"].pop(s.peer["id"], None)
@@ -541,12 +656,11 @@ def main():
     h = sub.add_parser("host")
     h.add_argument("--port", type=int, default=PORT_BASE)
     h.add_argument("--name", default="Probe Host")
-    h.add_argument("--code", help="fixed 6-digit pairing code (default: random)")
     h.add_argument("--addr", help="IP to put in the QR url")
+    h.add_argument("--auto-accept", action="store_true", help="accept confirm-mode pairings without asking")
     c = sub.add_parser("client")
     c.add_argument("target", help="ws://host:port[/v2] or an airbridge://pair?... url")
     c.add_argument("--name", default="Probe Client")
-    c.add_argument("--code", help="6-digit code shown on the host (first pairing only)")
     args = ap.parse_args()
     try:
         asyncio.run(run_host(args) if args.mode == "host" else run_client(args))
