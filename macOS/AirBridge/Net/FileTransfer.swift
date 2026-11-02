@@ -52,8 +52,14 @@ nonisolated final class TransferService: @unchecked Sendable {
         case "xfer_done": incoming[id]?.senderDone()
         case "xfer_cancel":
             let why = "Cancelled by peer (\(msg.str("reason") ?? "user"))"
-            if let out = outgoing[id] { out.finish(.failed(why), notifyPeer: nil) }
-            else { incoming[id]?.abort(notifyPeer: nil, message: why) }
+            // `dir` is from the peer's point of view: its "out" is our incoming transfer.
+            switch msg.str("dir") {
+            case "out": incoming[id]?.abort(notifyPeer: nil, message: why)
+            case "in": outgoing[id]?.finish(.failed(why), notifyPeer: nil)
+            default:
+                if let out = outgoing[id] { out.finish(.failed(why), notifyPeer: nil) }
+                else { incoming[id]?.abort(notifyPeer: nil, message: why) }
+            }
         default: break
         }
     }
@@ -215,7 +221,7 @@ nonisolated final class IncomingTransfer: @unchecked Sendable {
     /// Stops the transfer and deletes incomplete files. `notifyPeer` is the `xfer_cancel` reason, if any.
     func abort(notifyPeer reason: String?, message: String) {
         guard !ended else { return }
-        if let reason { session?.send(["t": "xfer_cancel", "id": Int(id), "reason": reason]) }
+        if let reason { session?.send(["t": "xfer_cancel", "id": Int(id), "dir": "in", "reason": reason]) }
         end(.failed(message))
         io.async { [self] in
             ioCancelled = true
@@ -428,7 +434,7 @@ nonisolated final class OutgoingTransfer: @unchecked Sendable {
     func finish(_ phase: TransferStatus.Phase, notifyPeer reason: String? = nil) {
         guard !ended else { return }
         ended = true
-        if let reason { session?.send(["t": "xfer_cancel", "id": Int(id), "reason": reason]) }
+        if let reason { session?.send(["t": "xfer_cancel", "id": Int(id), "dir": "out", "reason": reason]) }
         if phase == .done { acked = total }
         report(phase)
         onEnd()
