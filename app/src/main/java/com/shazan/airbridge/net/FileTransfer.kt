@@ -149,6 +149,7 @@ class FileTransfer(private val s: Session) {
         val key = "${s.peerId}:out:$id"
         val o = Outgoing(id)
         outgoing[id] = o
+        TransferLocks.acquire(ctx)
         var srcs: List<Src> = emptyList()
         try {
             srcs = uris.map { describe(it) }
@@ -237,6 +238,7 @@ class FileTransfer(private val s: Session) {
             resultNotification(notifId, "Send to $peerName failed", text, null)
         } finally {
             outgoing.remove(id)
+            TransferLocks.release()
             srcs.forEach { it.tmp?.delete() }
         }
     }
@@ -313,6 +315,7 @@ class FileTransfer(private val s: Session) {
         }
         val inc = Incoming(id, metas, total)
         incoming[id] = inc
+        TransferLocks.acquire(ctx)
         s.send(Protocol.msg("xfer_accept").put("id", id).put("window", Protocol.RECV_WINDOW))
         Thread(inc, "airbridge-xfer-write-$id").apply { isDaemon = true }.start()
     }
@@ -334,6 +337,8 @@ class FileTransfer(private val s: Session) {
         private var written = 0L
         private var lastAck = 0L
         private var target: Saver.Target? = null
+        // Names already in the destination folder, read once per transfer (not once per file) and kept current.
+        private val taken: MutableSet<String> by lazy { Saver.existingNames(ctx).toMutableSet() }
         private val saved = ArrayList<String>()
         private val started = System.currentTimeMillis()
         private var lastUi = 0L
@@ -407,12 +412,13 @@ class FileTransfer(private val s: Session) {
                     resultNotification(notifId, "Transfer from $peerName failed", text, null)
                 }
                 incoming.remove(id)
+                TransferLocks.release()
             }
         }
 
         private fun write(c: Protocol.Chunk) {
             val f = files[cur]
-            val t = target ?: Saver.create(ctx, f.name, f.mime).also { target = it }
+            val t = target ?: Saver.create(ctx, f.name, f.mime, taken).also { target = it }
             t.out.write(c.data, c.dataOff, c.len)
             curWritten += c.len
             written += c.len
@@ -436,7 +442,7 @@ class FileTransfer(private val s: Session) {
         /** Zero-size files have no chunks (§6.2): create them as soon as they are next. */
         private fun advanceZeroSize() {
             while (cur < files.size && files[cur].size == 0L) {
-                target = Saver.create(ctx, files[cur].name, files[cur].mime)
+                target = Saver.create(ctx, files[cur].name, files[cur].mime, taken)
                 finishFile()
             }
         }
@@ -549,12 +555,12 @@ internal object Saver {
             ?: "application/octet-stream"
     }
 
-    fun create(ctx: Context, rawName: String, offeredMime: String?): Target {
+    /** [taken] = names already present in the destination (see [existingNames]); updated with the name chosen. */
+    fun create(ctx: Context, rawName: String, offeredMime: String?, taken: MutableSet<String>): Target {
         val clean = sanitize(rawName)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val cr = ctx.contentResolver
-            val existing = existingNames(ctx)
-            val name = unique(clean) { it in existing }
+            val name = unique(clean) { it in taken }.also { taken.add(it) }
             val cv = ContentValues().apply {
                 put(MediaStore.MediaColumns.DISPLAY_NAME, name)
                 put(MediaStore.MediaColumns.MIME_TYPE, mimeFor(name, offeredMime))
@@ -569,6 +575,7 @@ internal object Saver {
                     if (c.moveToFirst()) c.getString(0) else null
                 }
             } catch (_: Exception) { null }
+            if (actual != null) taken.add(actual)
             return Target(out.buffered(256 * 1024), uri, null, actual ?: name)
         }
         val granted = ContextCompat.checkSelfPermission(ctx, Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
@@ -600,7 +607,7 @@ internal object Saver {
         } catch (e: Exception) { Log.w(TAG, "discard", e) }
     }
 
-    private fun existingNames(ctx: Context): Set<String> {
+    fun existingNames(ctx: Context): Set<String> {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return emptySet()
         val out = HashSet<String>()
         try {
