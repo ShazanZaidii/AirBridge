@@ -91,7 +91,8 @@ class Session(
 
     fun send(m: JSONObject): Boolean {
         if (state == State.CLOSED) return false
-        val ok = link.sendText(m.toString())
+        val text = try { normalizeNumbers(m).toString() } catch (e: Exception) { Log.w(tag, "bad outgoing json", e); return false }
+        val ok = link.sendText(text)
         if (ok) lastTx = System.currentTimeMillis()
         return ok
     }
