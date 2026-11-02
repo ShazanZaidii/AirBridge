@@ -222,6 +222,7 @@ object Hub : PeerBus.Transport {
         normalizeNumbers(msg) // once, before fan-out across threads
         ready.values.forEach { it.send(msg) }
     }
+    override fun sendBinary(peerId: String, frame: ByteArray): Boolean = ready[peerId]?.sendBinary(frame) ?: false
     override fun peers(): List<PeerInfo> = ready.values.map { it.info() }
 
     fun readySession(peerId: String): Session? = ready[peerId]
