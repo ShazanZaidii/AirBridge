@@ -9,34 +9,26 @@ import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.Image
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.core.content.pm.ShortcutManagerCompat
 import com.shazan.airbridge.net.ClipboardSync
 import com.shazan.airbridge.net.Hub
 import com.shazan.airbridge.net.PeerInfo
+import com.shazan.airbridge.ui.theme.AirBridgeTheme
+import com.shazan.airbridge.ui.theme.Dimens
+import com.shazan.airbridge.ui.theme.InfoRow
+import com.shazan.airbridge.ui.theme.PlatformAvatar
+import com.shazan.airbridge.ui.theme.platformLabel
 
 /**
  * Invisible activity that reads the clipboard while focused and pushes it. This is the only
@@ -97,23 +89,26 @@ class ShareActivity : ComponentActivity() {
         }
 
         setContent {
-            MaterialTheme {
+            AirBridgeTheme {
                 val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-                ModalBottomSheet(onDismissRequest = { finish() }, sheetState = sheetState, containerColor = Color(0xFF1E1E1E)) {
-                    Column(Modifier.fillMaxWidth().padding(bottom = 32.dp, start = 24.dp, end = 24.dp)) {
-                        Text("Send via AirBridge", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Color.White,
-                            modifier = Modifier.padding(bottom = 16.dp))
+                ModalBottomSheet(
+                    onDismissRequest = { finish() },
+                    sheetState = sheetState,
+                    containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                ) {
+                    Column(
+                        Modifier.fillMaxWidth().padding(start = Dimens.md, end = Dimens.md, bottom = Dimens.xl),
+                        verticalArrangement = Arrangement.spacedBy(Dimens.sm),
+                    ) {
+                        Text("Send to", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(start = Dimens.sm, bottom = Dimens.sm))
                         connected.forEach { peer ->
-                            Card(
-                                shape = RoundedCornerShape(12.dp),
-                                colors = CardDefaults.cardColors(containerColor = Color(0xFF2C2C2C)),
-                                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp).clickable { share(peer); finish() },
+                            Surface(
+                                onClick = { share(peer); finish() },
+                                shape = MaterialTheme.shapes.large,
+                                color = MaterialTheme.colorScheme.background,
+                                modifier = Modifier.fillMaxWidth(),
                             ) {
-                                Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    Image(painterResource(DirectShare.platformIcon(peer.platform)), null, Modifier.size(28.dp))
-                                    Spacer(Modifier.width(12.dp))
-                                    Text(peer.name, color = Color.White, fontSize = 18.sp)
-                                }
+                                InfoRow(title = peer.name, subtitle = platformLabel(peer.platform), leading = { PlatformAvatar(peer.platform) })
                             }
                         }
                     }

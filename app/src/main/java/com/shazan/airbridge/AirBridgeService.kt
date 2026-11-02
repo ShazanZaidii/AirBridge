@@ -82,6 +82,7 @@ class AirBridgeService : Service() {
         Hub.start()
         ClipboardSync.startListening()
         bubble = FloatingBubble(this)
+        BubbleController.onChange = { refreshBubble() }
         refreshBubble()
 
         scope.launch {
@@ -134,10 +135,11 @@ class AirBridgeService : Service() {
         return START_STICKY
     }
 
+    /** Show the bubble only if the user wants it and nothing suppresses it (lease, trackpad, mirror — §5). */
     private fun refreshBubble() {
         val b = bubble ?: return
         val enabled = getSharedPreferences("AirBridgePrefs", Context.MODE_PRIVATE).getBoolean(FloatingBubble.PREF_ENABLED, true)
-        if (enabled && Settings.canDrawOverlays(this)) b.show() else b.hide()
+        if (enabled && !BubbleController.isSuppressed && Settings.canDrawOverlays(this)) b.show() else b.hide()
     }
 
     private fun buildNotification(peers: List<PairedPeer>, status: Map<String, PeerStatus>): Notification {
@@ -173,6 +175,7 @@ class AirBridgeService : Service() {
     @Suppress("DEPRECATION")
     override fun onDestroy() {
         scope.cancel()
+        BubbleController.onChange = null
         bubble?.hide()
         bubble = null
         if (isRunning) {

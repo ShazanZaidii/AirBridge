@@ -3,13 +3,10 @@ package com.shazan.airbridge.net
 import com.shazan.airbridge.BuildConfig
 import org.json.JSONArray
 import org.json.JSONObject
-import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
 import java.security.MessageDigest
 import java.security.SecureRandom
 import java.util.Base64
-import javax.crypto.Mac
-import javax.crypto.spec.SecretKeySpec
 
 /** Constants, message builders and crypto helpers for AirBridge Protocol v2 (docs/PROTOCOL.md). */
 object Protocol {
@@ -18,9 +15,20 @@ object Protocol {
     const val WS_PATH = "/v2"
     const val PLATFORM = "android"
     val APP_VERSION: String = BuildConfig.VERSION_NAME
-    val CAPS = listOf("clip", "xfer", "ctl_target", "trackpad")
+    /** §3.1 caps. `mirror_sink` (input half, §8.7) only if the device can decode H.264. */
+    val CAPS: List<String> by lazy {
+        listOf("clip", "xfer", "ctl_target", "trackpad") + (if (hasH264Decoder()) listOf("mirror_sink") else emptyList())
+    }
+
+    private fun hasH264Decoder(): Boolean = try {
+        android.media.MediaCodecList(android.media.MediaCodecList.REGULAR_CODECS).codecInfos.any { info ->
+            !info.isEncoder && info.supportedTypes.any { it.equals("video/avc", ignoreCase = true) }
+        }
+    } catch (_: Throwable) { true } // can't tell: assume yes (every Android device ships one)
 
     const val HANDSHAKE_TIMEOUT_MS = 10_000L
+    /** Whole `confirm`/`qr` pairing must finish within this long after `pair_start` (§3.3). */
+    const val PAIR_TIMEOUT_MS = 60_000L
     const val PING_IDLE_MS = 5_000L
     const val DEAD_MS = 15_000L
 
@@ -33,6 +41,9 @@ object Protocol {
     const val CHUNK_HEADER = 17
     const val MAX_TEXT_FRAME = 1 shl 20
     const val MAX_BINARY_FRAME = (1 shl 20) + CHUNK_HEADER
+    /** Largest frame on the wire: an envelope around the largest inner frame (§9). */
+    const val MAX_WIRE_FRAME = MAX_BINARY_FRAME + Envelope.OVERHEAD
+    const val KIND_VIDEO: Int = 0x03
 
     /** Framing for byte-stream transports (§10): u8 kind | u32 len | payload. */
     const val FRAME_TEXT = 0
@@ -45,7 +56,7 @@ object Protocol {
     fun msg(t: String): JSONObject = JSONObject().put("t", t)
 
     fun hello(
-        id: String, name: String, nonce: ByteArray, screenW: Int, screenH: Int, paired: Boolean?,
+        id: String, name: String, nonce: ByteArray, pk: ByteArray, screenW: Int, screenH: Int, paired: Boolean?,
     ): JSONObject = msg("hello")
         .put("v", VERSION)
         .put("id", id)
@@ -54,6 +65,7 @@ object Protocol {
         .put("app", APP_VERSION)
         .put("caps", JSONArray(CAPS))
         .put("nonce", b64(nonce))
+        .put("pk", b64(pk))
         .apply {
             if (screenW > 0 && screenH > 0) put("screen", JSONObject().put("w", screenW).put("h", screenH))
             if (paired != null) put("paired", paired)
@@ -67,24 +79,6 @@ object Protocol {
     // ---- crypto ----
 
     fun randomBytes(n: Int): ByteArray = ByteArray(n).also { rng.nextBytes(it) }
-
-    fun hmac(key: ByteArray, data: ByteArray): ByteArray {
-        val mac = Mac.getInstance("HmacSHA256")
-        mac.init(SecretKeySpec(key, "HmacSHA256"))
-        return mac.doFinal(data)
-    }
-
-    /** `label | a | "|" | b | "|" | id` as raw bytes (§3.2/§3.3). */
-    fun macInput(label: String, a: ByteArray, b: ByteArray, id: String): ByteArray =
-        ByteArrayOutputStream().apply {
-            write(label.toByteArray(Charsets.UTF_8))
-            write(a); write('|'.code); write(b); write('|'.code)
-            write(id.toByteArray(Charsets.UTF_8))
-        }.toByteArray()
-
-    /** K = HMAC(S, "airbridge/v2/pair|" | clientId | "|" | hostId). */
-    fun deriveKey(secret: ByteArray, clientId: String, hostId: String): ByteArray =
-        hmac(secret, "airbridge/v2/pair|$clientId|$hostId".toByteArray(Charsets.UTF_8))
 
     fun constEq(a: ByteArray?, b: ByteArray?): Boolean =
         a != null && b != null && MessageDigest.isEqual(a, b)
