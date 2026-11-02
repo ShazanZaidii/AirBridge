@@ -1,0 +1,313 @@
+package com.shazan.airbridge.input
+
+import android.accessibilityservice.AccessibilityService
+import android.content.Context
+import android.os.Build
+import android.os.Bundle
+import android.os.SystemClock
+import android.view.KeyEvent
+import android.view.View
+import android.view.accessibility.AccessibilityNodeInfo
+import android.widget.Toast
+
+/**
+ * `key` messages on the target (§8.3/§8.4). Android cannot inject raw keys, so navigation keys map
+ * to accessibility actions / swipes and printable keys type `text` into the focused editor —
+ * through the accessibility input method on API 33+, otherwise via `ACTION_SET_TEXT`.
+ * Main thread only.
+ */
+class TargetKeys(private val host: TargetController) {
+
+    private val svc: AccessibilityService get() = host.service
+    private val pressed = HashSet<Int>()
+    private var lastArrowSwipe = 0L
+    private var warnedNoField = false
+
+    fun releaseAll() {
+        // Nothing is held on the Android side (each injected key is a complete press).
+        pressed.clear()
+        warnedNoField = false
+    }
+
+    fun onKey(hid: Int, down: Boolean, mods: Int, rep: Boolean, text: String?) {
+        if (!down) { pressed.remove(hid); return }
+        pressed.add(hid)
+        if (Hid.isModifier(hid) || hid == Hid.CAPS_LOCK) return // caps state is ignored on Android
+
+        val cmd = mods and (Mods.CTRL or Mods.GUI) != 0
+        if (cmd || (hid == Hid.TAB && mods and Mods.ALT != 0)) {
+            if (!rep) shortcut(hid, mods)
+            return
+        }
+        val shift = mods and Mods.SHIFT != 0
+        when (hid) {
+            Hid.ESC -> svc.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK)
+            Hid.ENTER, Hid.KP_ENTER -> enter()
+            Hid.BACKSPACE -> deleteChar(forward = false, mods)
+            Hid.DELETE -> deleteChar(forward = true, mods)
+            Hid.TAB -> tab(shift)
+            Hid.LEFT, Hid.RIGHT, Hid.UP, Hid.DOWN -> arrow(hid, mods)
+            Hid.HOME, Hid.END -> homeEnd(hid, mods)
+            Hid.PAGE_UP -> if (!imeKey(hid, mods)) host.swipe("down")
+            Hid.PAGE_DOWN -> if (!imeKey(hid, mods)) host.swipe("up")
+            else -> {
+                val s = printable(text) ?: KeyMap.text(hid, mods)
+                if (!s.isNullOrEmpty()) type(s)
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------- shortcuts
+
+    private fun shortcut(hid: Int, mods: Int) {
+        val gui = mods and Mods.GUI != 0
+        when {
+            hid == Hid.TAB -> lastApp()
+            gui && hid == Hid.H -> svc.performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME)
+            hid == Hid.C -> copy()
+            hid == Hid.X -> cut()
+            hid == Hid.V -> paste()
+            hid == Hid.A -> selectAll()
+            else -> imeKey(hid, mods) // e.g. Ctrl+Z: let the editor handle it if it can
+        }
+    }
+
+    internal fun lastApp() {
+        svc.performGlobalAction(AccessibilityService.GLOBAL_ACTION_RECENTS)
+        host.main.postDelayed({ svc.performGlobalAction(AccessibilityService.GLOBAL_ACTION_RECENTS) }, 250)
+    }
+
+    internal fun copy() {
+        if (!contextAction(android.R.id.copy, AccessibilityNodeInfo.ACTION_COPY)) return
+        host.main.postDelayed({ NetHooks.pushClipboard("copy") }, 300)
+    }
+
+    private fun cut() {
+        if (!contextAction(android.R.id.cut, AccessibilityNodeInfo.ACTION_CUT)) return
+        host.main.postDelayed({ NetHooks.pushClipboard("cut") }, 300)
+    }
+
+    internal fun paste() { contextAction(android.R.id.paste, AccessibilityNodeInfo.ACTION_PASTE) }
+
+    private fun selectAll() {
+        if (Build.VERSION.SDK_INT >= 33) ime()?.let { it.performContextMenuAction(android.R.id.selectAll); return }
+        val n = editable() ?: return
+        setSelection(n, 0, textOf(n).length)
+    }
+
+    private fun contextAction(menuId: Int, nodeAction: Int): Boolean {
+        if (Build.VERSION.SDK_INT >= 33) ime()?.let { it.performContextMenuAction(menuId); return true }
+        val n = svc.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+            ?: svc.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY) ?: return false
+        return n.performAction(nodeAction)
+    }
+
+    // ---------------------------------------------------------------- navigation / editing
+
+    private fun enter() {
+        if (imeKey(Hid.ENTER, 0)) return
+        val n = svc.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+        if (n != null && n.isEditable) {
+            n.refresh()
+            when {
+                n.isMultiLine -> insert(n, "\n")
+                Build.VERSION.SDK_INT >= 30 ->
+                    n.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.id)
+                else -> n.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+            }
+            return
+        }
+        (n ?: svc.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY))?.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+    }
+
+    private fun deleteChar(forward: Boolean, mods: Int) {
+        if (imeKey(if (forward) Hid.DELETE else Hid.BACKSPACE, mods)) return
+        val n = editable() ?: return
+        val t = textOf(n)
+        var (s, e) = selection(n, t)
+        if (s == e) {
+            if (forward) { if (e >= t.length) return; e = nextBoundary(t, e) }
+            else { if (s <= 0) return; s = prevBoundary(t, s) }
+        }
+        if (setText(n, t.substring(0, s) + t.substring(e))) setSelection(n, s, s)
+    }
+
+    private fun tab(backward: Boolean) {
+        val n = svc.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+        if (n != null && n.isEditable && imeKey(Hid.TAB, if (backward) Mods.SHIFT else 0)) return
+        val cur = n ?: svc.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+        val next = cur?.focusSearch(if (backward) View.FOCUS_BACKWARD else View.FOCUS_FORWARD)
+            ?: if (cur == null) firstFocusable() else null
+        next ?: return
+        if (!next.performAction(AccessibilityNodeInfo.ACTION_FOCUS)) {
+            next.performAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS)
+        }
+    }
+
+    private fun firstFocusable(): AccessibilityNodeInfo? {
+        val root = svc.rootInActiveWindow ?: return null
+        val queue = ArrayDeque<AccessibilityNodeInfo>().apply { add(root) }
+        var visited = 0
+        while (queue.isNotEmpty() && visited++ < 400) {
+            val n = queue.removeFirst()
+            if (n.isFocusable && n.isVisibleToUser) return n
+            for (i in 0 until n.childCount) n.getChild(i)?.let { queue.add(it) }
+        }
+        return null
+    }
+
+    private fun arrow(hid: Int, mods: Int) {
+        val n = svc.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+        if (n != null && n.isEditable) {
+            if (imeKey(hid, mods)) return
+            n.refresh()
+            moveCaret(n, hid, mods and Mods.SHIFT != 0)
+            return
+        }
+        // Not editing: arrows scroll like before (Up arrow = finger swipes down), honouring the
+        // existing "Invert arrows" settings.
+        val now = SystemClock.uptimeMillis()
+        if (now - lastArrowSwipe < 300) return
+        lastArrowSwipe = now
+        val prefs = svc.getSharedPreferences("AirBridgePrefs", Context.MODE_PRIVATE)
+        var dir = when (hid) { Hid.UP -> "down"; Hid.DOWN -> "up"; Hid.LEFT -> "right"; else -> "left" }
+        if (prefs.getBoolean("INVERT_X", false)) dir = when (dir) { "left" -> "right"; "right" -> "left"; else -> dir }
+        if (prefs.getBoolean("INVERT_Y", false)) dir = when (dir) { "up" -> "down"; "down" -> "up"; else -> dir }
+        host.swipe(dir)
+    }
+
+    private fun homeEnd(hid: Int, mods: Int) {
+        val n = editable() ?: return
+        if (imeKey(hid, mods)) return
+        val t = textOf(n)
+        val (anchor, head) = rawSelection(n, t)
+        val target = if (hid == Hid.HOME) t.lastIndexOf('\n', (head - 1).coerceAtLeast(0)).let { if (head == 0) 0 else it + 1 }
+        else t.indexOf('\n', head).let { if (it < 0) t.length else it }
+        if (mods and Mods.SHIFT != 0) setSelection(n, anchor, target) else setSelection(n, target, target)
+    }
+
+    private fun moveCaret(n: AccessibilityNodeInfo, hid: Int, extend: Boolean) {
+        val t = textOf(n)
+        val (anchor, head) = rawSelection(n, t)
+        val lo = minOf(anchor, head)
+        val hi = maxOf(anchor, head)
+        val target = when (hid) {
+            Hid.LEFT -> if (!extend && lo != hi) lo else prevBoundary(t, head)
+            Hid.RIGHT -> if (!extend && lo != hi) hi else nextBoundary(t, head)
+            Hid.UP -> lineMove(t, head, up = true)
+            else -> lineMove(t, head, up = false)
+        }
+        if (extend) setSelection(n, anchor, target) else setSelection(n, target, target)
+    }
+
+    private fun lineMove(t: String, pos: Int, up: Boolean): Int {
+        val lineStart = if (pos == 0) 0 else t.lastIndexOf('\n', pos - 1) + 1
+        val col = pos - lineStart
+        return if (up) {
+            if (lineStart == 0) 0
+            else {
+                val prevStart = if (lineStart - 1 == 0) 0 else t.lastIndexOf('\n', lineStart - 2) + 1
+                minOf(prevStart + col, lineStart - 1)
+            }
+        } else {
+            val lineEnd = t.indexOf('\n', pos).let { if (it < 0) return t.length else it }
+            val nextEnd = t.indexOf('\n', lineEnd + 1).let { if (it < 0) t.length else it }
+            minOf(lineEnd + 1 + col, nextEnd)
+        }
+    }
+
+    private fun type(s: String) {
+        if (Build.VERSION.SDK_INT >= 33) ime()?.let { it.commitText(s, 1, null); return }
+        val n = editable() ?: run { warnNoField(); return }
+        insert(n, s)
+    }
+
+    private fun insert(n: AccessibilityNodeInfo, s: String) {
+        val t = textOf(n)
+        val (a, b) = selection(n, t)
+        val newText = t.substring(0, a) + s + t.substring(b)
+        if (n.maxTextLength in 1 until newText.length) return
+        if (setText(n, newText)) setSelection(n, a + s.length, a + s.length)
+    }
+
+    private fun warnNoField() {
+        if (warnedNoField) return
+        warnedNoField = true
+        Toast.makeText(svc, "Tap a text field on the phone to type into it", Toast.LENGTH_SHORT).show()
+    }
+
+    // ---------------------------------------------------------------- helpers
+
+    /** Drops control and private-use characters (e.g. macOS function-key glyphs U+F700…). */
+    private fun printable(t: String?): String? {
+        if (t.isNullOrEmpty()) return null
+        val ok = t.all { !Character.isISOControl(it) && it !in '\uE000'..'\uF8FF' }
+        return if (ok) t else null
+    }
+
+    private fun editable(): AccessibilityNodeInfo? {
+        val n = svc.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) ?: return null
+        n.refresh() // the node cache can be stale for text/selection
+        return if (n.isEditable) n else null
+    }
+
+    private fun textOf(n: AccessibilityNodeInfo): String =
+        if (n.isShowingHintText) "" else n.text?.toString() ?: ""
+
+    /** (anchor, head) clamped into [t]; caret at end when unknown. */
+    private fun rawSelection(n: AccessibilityNodeInfo, t: String): Pair<Int, Int> {
+        var a = n.textSelectionStart
+        var h = n.textSelectionEnd
+        if (a < 0 || h < 0 || a > t.length || h > t.length) { a = t.length; h = t.length }
+        return a to h
+    }
+
+    private fun selection(n: AccessibilityNodeInfo, t: String): Pair<Int, Int> {
+        val (a, h) = rawSelection(n, t)
+        return minOf(a, h) to maxOf(a, h)
+    }
+
+    private fun prevBoundary(t: String, i: Int): Int {
+        if (i <= 0) return 0
+        return if (i >= 2 && Character.isLowSurrogate(t[i - 1]) && Character.isHighSurrogate(t[i - 2])) i - 2 else i - 1
+    }
+
+    private fun nextBoundary(t: String, i: Int): Int {
+        if (i >= t.length) return t.length
+        return if (i + 1 < t.length && Character.isHighSurrogate(t[i]) && Character.isLowSurrogate(t[i + 1])) i + 2 else i + 1
+    }
+
+    private fun setText(n: AccessibilityNodeInfo, t: String): Boolean = n.performAction(
+        AccessibilityNodeInfo.ACTION_SET_TEXT,
+        Bundle().apply { putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, t) },
+    )
+
+    private fun setSelection(n: AccessibilityNodeInfo, start: Int, end: Int): Boolean = n.performAction(
+        AccessibilityNodeInfo.ACTION_SET_SELECTION,
+        Bundle().apply {
+            putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, start)
+            putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, end)
+        },
+    )
+
+    /** Accessibility input connection to the focused editor (API 33+, needs flagInputMethodEditor). */
+    private fun ime(): android.accessibilityservice.InputMethod.AccessibilityInputConnection? {
+        if (Build.VERSION.SDK_INT < 33) return null
+        val im = svc.inputMethod ?: return null
+        if (!im.currentInputStarted) return null
+        return im.currentInputConnection
+    }
+
+    /** Send a full key press to the focused editor through the accessibility IME. */
+    private fun imeKey(hid: Int, mods: Int): Boolean {
+        if (Build.VERSION.SDK_INT < 33) return false
+        val ic = ime() ?: return false
+        val code = KeyMap.keyCode(hid)
+        if (code == KeyEvent.KEYCODE_UNKNOWN) return false
+        val meta = KeyMap.metaState(mods and Mods.CAPS.inv())
+        val t = SystemClock.uptimeMillis()
+        ic.sendKeyEvent(KeyEvent(t, t, KeyEvent.ACTION_DOWN, code, 0, meta))
+        ic.sendKeyEvent(KeyEvent(t, SystemClock.uptimeMillis(), KeyEvent.ACTION_UP, code, 0, meta))
+        return true
+    }
+}
