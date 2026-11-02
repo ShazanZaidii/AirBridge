@@ -26,6 +26,23 @@ namespace AirBridge.Input
         public double TargetPointerGain { get; set; } = 1.0;
         /// <summary>Target side: pixels of px:true scroll that make one wheel notch (120 units).</summary>
         public double TargetScrollPixelsPerNotch { get; set; } = 50.0;
+
+        /// <summary>Controller side (§8.2 Capture intent): "easy" | "normal" | "firm" push-through strength.</summary>
+        public string CaptureStrength { get; set; } = "normal";
+        /// <summary>Controller side: crossing additionally requires holding Alt while pushing.</summary>
+        public bool CaptureRequireAlt { get; set; } = false;
+        /// <summary>Controller side: edges ("left"/"right"/"top"/"bottom") that never capture.</summary>
+        public List<string> CaptureDisabledEdges { get; set; } = new();
+
+        /// <summary>Outward push (logical px at 100 % scaling) needed within 500 ms to cross.</summary>
+        public static double ThresholdFor(string? strength) => strength switch
+        {
+            "easy" => 60,
+            "firm" => 160,
+            _ => 100,
+        };
+
+        public bool EdgeCaptureEnabled(Edge e) => !(CaptureDisabledEdges?.Contains(e.ToWire()) ?? false);
     }
 
     /// <summary>
@@ -65,6 +82,9 @@ namespace AirBridge.Input
                 _data = new LayoutData();
             }
             _data.Peers ??= new();
+            _data.CaptureDisabledEdges = (_data.CaptureDisabledEdges ?? new())
+                .Where(e => EdgeExt.Parse(e) != null).Select(e => e.ToLowerInvariant()).Distinct().ToList();
+            if (_data.CaptureStrength is not ("easy" or "normal" or "firm")) _data.CaptureStrength = "normal";
             foreach (var p in _data.Peers.Values) Sanitize(p);
         }
 
@@ -110,6 +130,9 @@ namespace AirBridge.Input
                     SwapCmdCtrlForMac = _data.SwapCmdCtrlForMac,
                     TargetPointerGain = _data.TargetPointerGain,
                     TargetScrollPixelsPerNotch = _data.TargetScrollPixelsPerNotch,
+                    CaptureStrength = _data.CaptureStrength,
+                    CaptureRequireAlt = _data.CaptureRequireAlt,
+                    CaptureDisabledEdges = new List<string>(_data.CaptureDisabledEdges),
                 };
             }
         }
@@ -117,6 +140,31 @@ namespace AirBridge.Input
         public static void SetSwapCmdCtrlForMac(bool on)
         {
             lock (Gate) { EnsureLoaded(); _data.SwapCmdCtrlForMac = on; SaveLocked(); }
+            Changed?.Invoke();
+        }
+
+        public static void SetCaptureStrength(string strength)
+        {
+            if (strength is not ("easy" or "normal" or "firm")) return;
+            lock (Gate) { EnsureLoaded(); _data.CaptureStrength = strength; SaveLocked(); }
+            Changed?.Invoke();
+        }
+
+        public static void SetCaptureRequireAlt(bool on)
+        {
+            lock (Gate) { EnsureLoaded(); _data.CaptureRequireAlt = on; SaveLocked(); }
+            Changed?.Invoke();
+        }
+
+        public static void SetEdgeCaptureEnabled(Edge edge, bool enabled)
+        {
+            lock (Gate)
+            {
+                EnsureLoaded();
+                _data.CaptureDisabledEdges.Remove(edge.ToWire());
+                if (!enabled) _data.CaptureDisabledEdges.Add(edge.ToWire());
+                SaveLocked();
+            }
             Changed?.Invoke();
         }
 
