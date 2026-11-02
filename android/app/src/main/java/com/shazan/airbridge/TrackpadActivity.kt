@@ -1,354 +1,305 @@
 package com.shazan.airbridge
 
+import android.content.Context
+import android.content.pm.ActivityInfo
+import android.os.Build
 import android.os.Bundle
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.displayCutout
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Keyboard
+import androidx.compose.material.icons.filled.KeyboardHide
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
-import androidx.compose.runtime.*
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameMillis
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.rotate
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.input.pointer.positionChanged
-import androidx.compose.ui.layout.boundsInParent
-import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.min
 import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
-import kotlin.math.abs
+import com.shazan.airbridge.input.InputRouter
+import com.shazan.airbridge.input.RemoteKeyboard
+import com.shazan.airbridge.input.RemoteKeyboardController
+import com.shazan.airbridge.input.TrackpadPrefs
+import com.shazan.airbridge.input.TrackpadSender
+import com.shazan.airbridge.input.trackpadGestures
+import com.shazan.airbridge.net.PeerInfo
 
+/** Phone as trackpad + keyboard for a desktop peer (§8.1 direct mode). */
 class TrackpadActivity : ComponentActivity() {
+
+    private companion object {
+        val DESKTOPS = setOf("macos", "windows", "linux")
+        const val PREF_PEER = "TRACKPAD_PEER"
+        const val PREF_NATURAL = "TP_NATURAL_SCROLL"
+    }
+
+    private val sender = TrackpadSender()
+    private val keyboard by lazy { RemoteKeyboardController(sender) }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
+        InputRouter.install(this)
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        // The trackpad is used held sideways. Orientation requests may be ignored (Android 16 large
+        // screens, multi-window); the layout adapts to the real window size either way.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) setTranslucent(false)
+        if (Build.VERSION.SDK_INT != Build.VERSION_CODES.O) {
+            try { requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE } catch (_: Throwable) {}
+        }
         WindowCompat.setDecorFitsSystemWindows(window, false)
+        hideSystemBars()
+
+        val prefs = getSharedPreferences("AirBridgePrefs", Context.MODE_PRIVATE)
+        setContent { TrackpadScreen(prefs) }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        hideSystemBars()
+        InputRouter.refreshPeers()
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) hideSystemBars()
+    }
+
+    override fun onPause() {
+        super.onPause()
+        keyboard.releaseAll()
+        sender.releaseAll()
+    }
+
+    private fun hideSystemBars() {
         WindowInsetsControllerCompat(window, window.decorView).apply {
             hide(WindowInsetsCompat.Type.systemBars())
             systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         }
+    }
 
-        setContent {
-            var isHolding by remember { mutableStateOf(false) }
-            var fourFingerTriggered by remember { mutableStateOf(false) }
-            var initialFourFingerPos by remember { mutableStateOf<Offset?>(null) }
-            var fabRect by remember { mutableStateOf(Rect.Zero) }
+    @Composable
+    private fun TrackpadScreen(prefs: android.content.SharedPreferences) {
+        val view = LocalView.current
+        val peers by InputRouter.peers.collectAsState()
+        val capsMap by InputRouter.capsByPeer.collectAsState()
+        val desktops = peers.filter { it.platform in DESKTOPS }
+        var chosenId by remember { mutableStateOf(prefs.getString(PREF_PEER, null)) }
+        val active = desktops.firstOrNull { it.id == chosenId } ?: desktops.firstOrNull()
+        var showKeyboard by rememberSaveable { mutableStateOf(false) }
+        var natural by remember { mutableStateOf(prefs.getBoolean(PREF_NATURAL, true)) }
+        val trackpadPrefs by rememberUpdatedState(TrackpadPrefs(naturalScroll = natural))
 
-            var showKeyboard by remember { mutableStateOf(false) }
-
-            BackHandler(enabled = showKeyboard) {
-                showKeyboard = false
+        SideEffect {
+            if (sender.peerId != active?.id) {
+                keyboard.releaseAll() // to the previous peer, before switching
+                sender.peerId = active?.id
             }
+            keyboard.reportedCaps = active?.let { capsMap[it.id] }
+            keyboard.onCapsToggled = { on -> active?.let { InputRouter.setCapsOptimistic(it.id, on) } }
+        }
 
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black)
-            ) {
-                if (showKeyboard) {
-                    val configuration = LocalConfiguration.current
-                    val screenWidth = configuration.screenWidthDp.dp
-                    val screenHeight = configuration.screenHeightDp.dp
+        LaunchedEffect(Unit) {
+            while (true) { withFrameMillis { }; sender.flush() }
+        }
 
+        BackHandler(enabled = showKeyboard) {
+            keyboard.releaseAll()
+            showKeyboard = false
+        }
+
+        BoxWithConstraints(Modifier.fillMaxSize().background(Color.Black)) {
+            val landscape = maxWidth > maxHeight
+            val portraitKeyboardHeight = min(maxWidth * 0.62f, maxHeight * 0.55f)
+            Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.displayCutout)) {
+                TopBar(
+                    desktops = desktops,
+                    active = active,
+                    keyboardShown = showKeyboard,
+                    capsOn = keyboard.capsOn,
+                    fKeys = keyboard.fKeysMode,
+                    natural = natural,
+                    onChoose = { p ->
+                        chosenId = p.id
+                        prefs.edit().putString(PREF_PEER, p.id).apply()
+                    },
+                    onToggleFKeys = { keyboard.fKeysMode = !keyboard.fKeysMode },
+                    onToggleNatural = {
+                        natural = !natural
+                        prefs.edit().putBoolean(PREF_NATURAL, natural).apply()
+                    },
+                    onToggleKeyboard = {
+                        if (showKeyboard) keyboard.releaseAll()
+                        showKeyboard = !showKeyboard
+                    },
+                    onClose = { finish() },
+                )
+                if (!showKeyboard || !landscape) {
                     Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(Color(0xFF2C2C2C)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        MacKeyboardOverlay(
-                            modifier = Modifier
-                                .requiredWidth(screenHeight)
-                                .requiredHeight(screenWidth)
-                                .rotate(90f),
-                            onKeyPress = { key -> AirBridgeService.broadcastCommand("MAC_INP:TYPE:$key") },
-                            onSpecialKey = { code -> AirBridgeService.broadcastCommand("MAC_INP:KD:$code") }
-                        )
-                    }
-                } else {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .pointerInput(fabRect) {
-                                detectTapGestures(
-                                    onTap = {
-                                        val safeZone = Rect(fabRect.left - 50f, fabRect.top - 50f, fabRect.right + 50f, fabRect.bottom + 50f)
-                                        if (!safeZone.contains(it)) AirBridgeService.broadcastCommand("MAC_INP:TAP")
-                                    },
-                                    onDoubleTap = {
-                                        val safeZone = Rect(fabRect.left - 50f, fabRect.top - 50f, fabRect.right + 50f, fabRect.bottom + 50f)
-                                        if (!safeZone.contains(it)) AirBridgeService.broadcastCommand("MAC_INP:DOUBLE_TAP")
-                                    },
-                                    onLongPress = {
-                                        val safeZone = Rect(fabRect.left - 50f, fabRect.top - 50f, fabRect.right + 50f, fabRect.bottom + 50f)
-                                        if (!safeZone.contains(it)) {
-                                            isHolding = true
-                                            AirBridgeService.broadcastCommand("MAC_INP:CD")
-                                        }
-                                    },
-                                    onPress = {
-                                        val safeZone = Rect(fabRect.left - 50f, fabRect.top - 50f, fabRect.right + 50f, fabRect.bottom + 50f)
-                                        if (safeZone.contains(it)) return@detectTapGestures
-
-                                        try {
-                                            awaitRelease()
-                                        } finally {
-                                            if (isHolding) {
-                                                AirBridgeService.broadcastCommand("MAC_INP:CU")
-                                                isHolding = false
-                                            }
-                                        }
-                                    }
-                                )
-                            }
-                            .pointerInput(fabRect) {
-                                awaitPointerEventScope {
-                                    while (true) {
-                                        val event = awaitPointerEvent()
-                                        val changes = event.changes
-
-                                        if (changes.all { !it.pressed }) {
-                                            fourFingerTriggered = false
-                                            initialFourFingerPos = null
-                                        }
-
-                                        val safeZone = Rect(fabRect.left - 50f, fabRect.top - 50f, fabRect.right + 50f, fabRect.bottom + 50f)
-
-                                        if (changes.isNotEmpty() && safeZone.contains(changes.first().position)) {
-                                            continue
-                                        }
-
-                                        if (changes.any { it.pressed && it.positionChanged() }) {
-                                            if (changes.size == 1) {
-                                                val change = changes.first()
-                                                val dx = change.position.x - change.previousPosition.x
-                                                val dy = change.position.y - change.previousPosition.y
-                                                AirBridgeService.broadcastCommand("MAC_INP:M:${dy}:${-dx}")
-                                                change.consume()
-                                            } else if (changes.size == 2) {
-                                                val change = changes.first()
-                                                val dx = change.position.x - change.previousPosition.x
-                                                val dy = change.position.y - change.previousPosition.y
-                                                AirBridgeService.broadcastCommand("MAC_INP:S:${dy}:${-dx}")
-                                                change.consume()
-                                            } else if (changes.size == 4) {
-                                                val change = changes.first()
-                                                if (initialFourFingerPos == null) initialFourFingerPos = change.position
-
-                                                val dx = change.position.x - initialFourFingerPos!!.x
-                                                val dy = change.position.y - initialFourFingerPos!!.y
-
-                                                if (!fourFingerTriggered) {
-                                                    if (abs(dx) > 100f || abs(dy) > 100f) {
-                                                        fourFingerTriggered = true
-                                                        if (abs(dx) > abs(dy)) {
-                                                            if (dx > 0f) AirBridgeService.broadcastCommand("MAC_INP:MISSION_CONTROL")
-                                                            else AirBridgeService.broadcastCommand("MAC_INP:APP_EXPOSE")
-                                                        } else {
-                                                            if (dy < 0f) AirBridgeService.broadcastCommand("MAC_INP:SPACE_LEFT")
-                                                            else AirBridgeService.broadcastCommand("MAC_INP:SPACE_RIGHT")
-                                                        }
-                                                    }
-                                                }
-                                                changes.forEach { it.consume() }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                    )
-
-                    FloatingActionButton(
-                        onClick = { showKeyboard = true },
-                        modifier = Modifier
-                            .align(Alignment.BottomEnd)
-                            .padding(32.dp)
-                            .onGloballyPositioned { coordinates ->
-                                fabRect = coordinates.boundsInParent()
+                        Modifier.fillMaxWidth().weight(1f)
+                            .pointerInput(Unit) {
+                                trackpadGestures(sender, { trackpadPrefs }) { view.performHapticFeedback(it) }
                             },
-                        containerColor = Color.Black.copy(0.4f),
+                        contentAlignment = Alignment.Center,
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.KeyboardArrowUp,
-                            contentDescription = "Open Mac Keyboard",
-                            tint = Color.White.copy(0.3f),
-                            modifier = Modifier
-                                .size(36.dp)
-                                .rotate(180f)
+                        Text(
+                            if (active == null) "No computer connected"
+                            else "Tap to click · two-finger tap = right click · hold to drag\nTwo fingers scroll · three-finger swipe for Mission Control / desktops",
+                            color = Color.White.copy(alpha = if (active == null) 0.35f else 0.14f),
+                            fontSize = if (active == null) 16.sp else 12.sp,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.padding(24.dp),
+                        )
+                    }
+                }
+                if (showKeyboard) {
+                    RemoteKeyboard(
+                        controller = keyboard,
+                        platform = active?.platform ?: "macos",
+                        modifier = if (landscape) Modifier.fillMaxWidth().weight(1f)
+                        else Modifier.fillMaxWidth().height(portraitKeyboardHeight),
+                    )
+                }
+            }
+            if (!showKeyboard) {
+                FloatingActionButton(
+                    onClick = { showKeyboard = true },
+                    modifier = Modifier.align(Alignment.BottomEnd).padding(28.dp),
+                    containerColor = Color.White.copy(alpha = 0.08f),
+                ) {
+                    Icon(Icons.Default.Keyboard, contentDescription = "Show keyboard", tint = Color.White.copy(alpha = 0.5f))
+                }
+            }
+        }
+    }
+
+    @Composable
+    private fun TopBar(
+        desktops: List<PeerInfo>,
+        active: PeerInfo?,
+        keyboardShown: Boolean,
+        capsOn: Boolean,
+        fKeys: Boolean,
+        natural: Boolean,
+        onChoose: (PeerInfo) -> Unit,
+        onToggleFKeys: () -> Unit,
+        onToggleNatural: () -> Unit,
+        onToggleKeyboard: () -> Unit,
+        onClose: () -> Unit,
+    ) {
+        var menu by remember { mutableStateOf(false) }
+        Row(
+            Modifier.fillMaxWidth().height(40.dp).background(Color(0xFF0E0E0E)).padding(horizontal = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Box {
+                Row(
+                    Modifier.clip(RoundedCornerShape(14.dp)).background(Color.White.copy(alpha = 0.07f))
+                        .clickable(enabled = desktops.size > 1) { menu = true }
+                        .padding(horizontal = 10.dp, vertical = 5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(Modifier.size(8.dp).clip(CircleShape).background(if (active != null) Color(0xFF34C759) else Color(0xFFFF453A)))
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        active?.let { "${it.name} · ${platformLabel(it.platform)}" } ?: "Not connected",
+                        color = Color.White.copy(alpha = 0.85f), fontSize = 13.sp,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(end = 2.dp),
+                    )
+                    if (desktops.size > 1) Icon(Icons.Default.ArrowDropDown, null, tint = Color.White.copy(alpha = 0.7f), modifier = Modifier.size(18.dp))
+                }
+                DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                    desktops.forEach { p ->
+                        DropdownMenuItem(
+                            text = { Text("${p.name} (${platformLabel(p.platform)})", fontWeight = if (p.id == active?.id) FontWeight.Bold else FontWeight.Normal) },
+                            onClick = { menu = false; onChoose(p) },
                         )
                     }
                 }
             }
+            Spacer(Modifier.weight(1f))
+            if (keyboardShown) {
+                Chip(if (capsOn) "⇪ CAPS" else "⇪ caps", on = capsOn, onColor = Color(0xFF34C759), onClick = null)
+                Chip("F1–F12", on = fKeys, onClick = onToggleFKeys)
+            } else {
+                Chip("Natural scroll", on = natural, onClick = onToggleNatural)
+            }
+            Icon(
+                if (keyboardShown) Icons.Default.KeyboardHide else Icons.Default.Keyboard,
+                contentDescription = if (keyboardShown) "Hide keyboard" else "Show keyboard",
+                tint = Color.White.copy(alpha = 0.7f),
+                modifier = Modifier.size(32.dp).clip(CircleShape).clickable(onClick = onToggleKeyboard).padding(5.dp),
+            )
+            Icon(
+                Icons.Default.Close, contentDescription = "Close trackpad", tint = Color.White.copy(alpha = 0.5f),
+                modifier = Modifier.size(32.dp).clip(CircleShape).clickable(onClick = onClose).padding(6.dp),
+            )
         }
     }
-}
 
-@Composable
-fun MacKeyboardOverlay(
-    modifier: Modifier = Modifier,
-    onKeyPress: (String) -> Unit,
-    onSpecialKey: (String) -> Unit
-) {
-    Column(
-        modifier = modifier
-            .background(Color(0xFF2C2C2C))
-            .padding(horizontal = 8.dp, vertical = 6.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterVertically)
-    ) {
+    @Composable
+    private fun Chip(text: String, on: Boolean, onColor: Color = Color(0xFF4285F4), onClick: (() -> Unit)?) {
+        Text(
+            text,
+            color = if (on) Color.White else Color.White.copy(alpha = 0.45f),
+            fontSize = 12.sp,
+            fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
+            modifier = Modifier.clip(RoundedCornerShape(12.dp))
+                .background(if (on) onColor.copy(alpha = 0.55f) else Color.White.copy(alpha = 0.06f))
+                .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+                .padding(horizontal = 10.dp, vertical = 4.dp),
+        )
+    }
 
-        KeyboardRow {
-            MacKey("esc", weight = 1.2f) { onSpecialKey("53") }
-            MacKey("F1", Icons.Default.BrightnessLow, 1f) { onSpecialKey("145") }
-            MacKey("F2", Icons.Default.BrightnessHigh, 1f) { onSpecialKey("144") }
-            MacKey("F3", Icons.Default.GridView, 1f) { onSpecialKey("160") }
-            MacKey("F4", Icons.Default.Search, 1f) { onSpecialKey("131") }
-            MacKey("F5", Icons.Default.Mic, 1f) { onSpecialKey("96") }
-            MacKey("F6", Icons.Default.DarkMode, 1f) { onSpecialKey("97") }
-            MacKey("F7", Icons.Default.SkipPrevious, 1f) { onSpecialKey("98") }
-            MacKey("F8", Icons.Default.PlayArrow, 1f) { onSpecialKey("100") }
-            MacKey("F9", Icons.Default.SkipNext, 1f) { onSpecialKey("101") }
-            MacKey("F10", Icons.Default.VolumeOff, 1f) { onSpecialKey("109") }
-            MacKey("F11", Icons.Default.VolumeDown, 1f) { onSpecialKey("103") }
-            MacKey("F12", Icons.Default.VolumeUp, 1f) { onSpecialKey("104") }
-            MacKey("", Icons.Default.PowerSettingsNew, 1.2f) { onSpecialKey("127") }
-        }
-
-        KeyboardRow {
-            MacKey("~\n`", weight = 1f) { onKeyPress("`") }
-            listOf("!\n1", "@\n2", "#\n3", "$\n4", "%\n5", "^\n6", "&\n7", "*\n8", "(\n9", ")\n0", "_\n-", "+\n=").forEach { key ->
-                MacKey(key, weight = 1f) { onKeyPress(key.split("\n").last()) }
-            }
-            MacKey("delete", weight = 1.5f) { onSpecialKey("51") }
-        }
-
-        KeyboardRow {
-            MacKey("tab", weight = 1.5f) { onSpecialKey("48") }
-            listOf("Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P", "{\n[", "}\n]", "|\n\\").forEach { key ->
-                MacKey(key, weight = 1f) { onKeyPress(key.split("\n").last().lowercase()) }
-            }
-        }
-
-        KeyboardRow {
-            MacKey("caps lock", weight = 1.8f) { onSpecialKey("57") }
-            listOf("A", "S", "D", "F", "G", "H", "J", "K", "L", ":\n;", "\"\n'").forEach { key ->
-                MacKey(key, weight = 1f) { onKeyPress(key.split("\n").last().lowercase()) }
-            }
-            MacKey("return", weight = 1.8f) { onSpecialKey("36") }
-        }
-
-        KeyboardRow {
-            MacKey("shift", weight = 2.2f) { onSpecialKey("56") }
-            listOf("Z", "X", "C", "V", "B", "N", "M", "<\n,", ">\n.", "?\n/").forEach { key ->
-                MacKey(key, weight = 1f) { onKeyPress(key.split("\n").last().lowercase()) }
-            }
-            MacKey("shift", weight = 2.2f) { onSpecialKey("56") }
-        }
-
-        KeyboardRow {
-            MacKey("fn", weight = 1f) { onSpecialKey("63") }
-            MacKey("control", weight = 1.2f) { onSpecialKey("59") }
-            MacKey("option\n⌥", weight = 1.2f) { onSpecialKey("58") }
-            MacKey("command\n⌘", weight = 1.5f) { onSpecialKey("55") }
-            MacKey("", weight = 5.5f) { onKeyPress(" ") } // Spacebar
-            MacKey("command\n⌘", weight = 1.5f) { onSpecialKey("55") }
-            MacKey("option\n⌥", weight = 1.2f) { onSpecialKey("58") }
-
-            Row(modifier = Modifier.weight(2.5f), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Spacer(modifier = Modifier.weight(1f))
-                    BaseMacKey(icon = Icons.Default.KeyboardArrowLeft, modifier = Modifier.weight(1f).fillMaxWidth()) { onSpecialKey("123") }
-                }
-                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    BaseMacKey(icon = Icons.Default.KeyboardArrowUp, modifier = Modifier.weight(1f).fillMaxWidth()) { onSpecialKey("126") }
-                    BaseMacKey(icon = Icons.Default.KeyboardArrowDown, modifier = Modifier.weight(1f).fillMaxWidth()) { onSpecialKey("125") }
-                }
-                Column(modifier = Modifier.weight(1f)) {
-                    Spacer(modifier = Modifier.weight(1f))
-                    BaseMacKey(icon = Icons.Default.KeyboardArrowRight, modifier = Modifier.weight(1f).fillMaxWidth()) { onSpecialKey("124") }
-                }
-            }
-        }
+    private fun platformLabel(p: String) = when (p) {
+        "macos" -> "Mac"; "windows" -> "Windows"; "linux" -> "Linux"; else -> p
     }
 }
-
-@Composable
-fun ColumnScope.KeyboardRow(content: @Composable RowScope.() -> Unit) {
-    Row(
-        modifier = Modifier.fillMaxWidth().weight(1f),
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-        content = content
-    )
-}
-
-@Composable
-fun RowScope.MacKey(text: String = "", icon: ImageVector? = null, weight: Float, onClick: () -> Unit) {
-    BaseMacKey(
-        text = text,
-        icon = icon,
-        modifier = Modifier.weight(weight).fillMaxHeight(),
-        onClick = onClick
-    )
-}
-
-@Composable
-fun BaseMacKey(
-    text: String = "",
-    icon: ImageVector? = null,
-    modifier: Modifier = Modifier,
-    onClick: () -> Unit
-) {
-    Box(
-        contentAlignment = Alignment.Center,
-        modifier = modifier
-            .clip(RoundedCornerShape(6.dp))
-            .background(Color(0xFF161616))
-            .clickable { onClick() }
-    ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
-        ) {
-            if (icon != null) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    tint = Color.White,
-                    modifier = Modifier.size(if (text.isNotEmpty()) 14.dp else 18.dp)
-                )
-            }
-            if (icon != null && text.isNotEmpty()) {
-                Spacer(modifier = Modifier.height(2.dp))
-            }
-            if (text.isNotEmpty()) {
-                Text(
-                    text = text,
-                    color = Color.White,
-                    fontSize = if (text.contains("\n")) 10.sp else if (text.length > 2) 12.sp else 16.sp,
-                    fontWeight = FontWeight.Medium,
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                    lineHeight = 12.sp
-                )
-            }
-        }
-    }
-}
-
-

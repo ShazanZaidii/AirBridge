@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">AirBridge</string>
+    <string name="accessibility_service_description">Lets a paired computer control this phone: shows a cursor when your mouse moves onto the phone, taps, drags, scrolls, types into the focused text field and performs system actions (home, back, volume, media). AirBridge does not collect or store what is on screen.</string>
 </resources>
