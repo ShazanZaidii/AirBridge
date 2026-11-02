@@ -1,0 +1,62 @@
+{
+  "description": "AirBridge PROTOCOL.md \u00a710.1 Wi-Fi Direct credential derivation test vectors. Computed with Python 'cryptography' HKDF (cross-checked against a stdlib-hmac RFC 5869 implementation).",
+  "spec": "wk = HKDF-SHA256(ikm=K, salt=\"airbridge/v2/wfd\", info=hostId|\"|\"|clientId|\"|\"|u8(gen), 32); ssid = \"DIRECT-AB-\" + base32(HMAC-SHA256(wk,\"ssid\")[0..5)) (RFC 4648, no padding); psk = base64url(HMAC-SHA256(wk,\"psk\")[0..24)) (no padding)",
+  "encoding": {
+    "k": "hex",
+    "wk": "hex",
+    "ids": "UTF-8 strings, lowercase as on the wire",
+    "gen": "integer 0..255, one byte"
+  },
+  "cases": [
+    {
+      "name": "k_seq_gen0",
+      "k": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "hostId": "22222222-2222-4222-8222-222222222222",
+      "clientId": "11111111-1111-4111-8111-111111111111",
+      "gen": 0,
+      "wk": "e1fec81f9370a81f6761ce869ae9d61a66939d65fae55895e71bbbfe664d0293",
+      "ssid": "DIRECT-AB-AJK2GU36",
+      "psk": "_YplE0mmh49Xt0dAZrqDRrs7RVPKKaRc"
+    },
+    {
+      "name": "k_seq_gen1",
+      "k": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "hostId": "22222222-2222-4222-8222-222222222222",
+      "clientId": "11111111-1111-4111-8111-111111111111",
+      "gen": 1,
+      "wk": "23434178b4a6418b30cfe7607ca7a66cc9f8a32a2defd1571a238b42b20b0eda",
+      "ssid": "DIRECT-AB-TYBQYOLR",
+      "psk": "OdRMcGuLvG0xtGATePcPKL09SPkehPSJ"
+    },
+    {
+      "name": "k_seq_roles_swapped",
+      "k": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "hostId": "11111111-1111-4111-8111-111111111111",
+      "clientId": "22222222-2222-4222-8222-222222222222",
+      "gen": 0,
+      "wk": "5a304f5e53a5cd156acbb4175fa3f0a5a09072df77deabd748501f5ba74a0ba5",
+      "ssid": "DIRECT-AB-BRC7W474",
+      "psk": "Sm0OyDVCPfjLAcTbpMI6CEvch1bGpc6X"
+    },
+    {
+      "name": "k_a5_gen255",
+      "k": "a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+      "hostId": "22222222-2222-4222-8222-222222222222",
+      "clientId": "11111111-1111-4111-8111-111111111111",
+      "gen": 255,
+      "wk": "d54a4cb6dd71a40eb63e0076d1e8ec2798942e97fea0508c2a3764d9169052f0",
+      "ssid": "DIRECT-AB-NEEOPKA6",
+      "psk": "HDk84bSOp0Ecdlf7HL20csQRCX-ROgFi"
+    },
+    {
+      "name": "k_ff_real_ids",
+      "k": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "hostId": "0f9c2d4e-8b1a-4c3d-9e7f-1a2b3c4d5e6f",
+      "clientId": "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d",
+      "gen": 7,
+      "wk": "6e10b613ca98e6095ce19c84a9b176e5291ccface312f60a263088183bfd9283",
+      "ssid": "DIRECT-AB-NQKA2EFD",
+      "psk": "rISmckKd1WboIahd-n4A0vOgyXjiiB3P"
+    }
+  ]
+}
