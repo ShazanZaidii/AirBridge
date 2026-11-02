@@ -137,10 +137,14 @@ fun isVpnActive(context: Context): Boolean {
     return caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
 }
 
+/** An `airbridge://pair?...` link opened from another app (tapped link, shared QR text); consumed by [AirBridgeRoot]. */
+private val pendingPairLink = mutableStateOf<String?>(null)
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        intent?.dataString?.takeIf { it.startsWith("airbridge://") }?.let { pendingPairLink.value = it }
         // Browse mDNS while visible (discovery list, QR address lookup); the service keeps its own reference.
         lifecycle.addObserver(object : DefaultLifecycleObserver {
             override fun onStart(owner: LifecycleOwner) = Discovery.acquire()
@@ -151,6 +155,11 @@ class MainActivity : ComponentActivity() {
                 Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) { AirBridgeRoot() }
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        intent.dataString?.takeIf { it.startsWith("airbridge://") }?.let { pendingPairLink.value = it }
     }
 
     override fun onResume() {
@@ -252,6 +261,28 @@ private fun AirBridgeRoot() {
         WsClient.pair(host, port, id, mode, name, plat)
     }
 
+    /** Shared by the QR scanner and opened `airbridge://pair` links. Returns true if pairing started. */
+    fun handlePairLink(raw: String): Boolean {
+        val link = PairLink.parse(raw)
+        val addr = link?.let { Discovery.lookup(it.id) ?: it.addr?.let { a -> a to it.port } }
+        return when {
+            link == null -> { toast(ctx, "That isn't an AirBridge pairing code"); false }
+            addr == null || addr.second !in 1..65535 -> { toast(ctx, "${link.name} isn't on this network"); false }
+            else -> {
+                screen = Screen.ADD
+                startPair(link.name, link.plat, addr.first, addr.second, link.id, PairMode.Qr(link.secret))
+                true
+            }
+        }
+    }
+
+    val openedLink by pendingPairLink
+    LaunchedEffect(openedLink) {
+        val raw = openedLink ?: return@LaunchedEffect
+        pendingPairLink.value = null
+        handlePairLink(raw)
+    }
+
     if (showVpnWarning) {
         AlertDialog(
             onDismissRequest = { showVpnWarning = false },
@@ -325,19 +356,7 @@ private fun AirBridgeRoot() {
 
         Screen.SCANNER -> CameraScannerScreen(
             onCancel = { screen = Screen.ADD },
-            onScanned = { raw ->
-                val link = PairLink.parse(raw)
-                val addr = link?.let { Discovery.lookup(it.id) ?: it.addr?.let { a -> a to it.port } }
-                when {
-                    link == null -> { toast(ctx, "That isn't an AirBridge pairing code"); false }
-                    addr == null || addr.second !in 1..65535 -> { toast(ctx, "${link.name} isn't on this network"); false }
-                    else -> {
-                        screen = Screen.ADD
-                        startPair(link.name, link.plat, addr.first, addr.second, link.id, PairMode.Qr(link.secret))
-                        true
-                    }
-                }
-            },
+            onScanned = { raw -> handlePairLink(raw) },
         )
     }
 }

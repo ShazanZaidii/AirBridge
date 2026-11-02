@@ -199,6 +199,9 @@ object Hub : PeerBus.Transport {
 
     // ---- interactive pairing (§3.3) ----
 
+    /** True while an interactive pairing is in flight (keeps the service alive before the first peer is stored). */
+    fun isPairing(): Boolean = pairingSession?.isClosed == false
+
     /** A LAN pairing attempt was dialled; [s] becomes the one the pairing sheet follows. */
     fun beginPairing(s: Session, name: String, plat: String, mode: String) {
         pairingSession?.takeIf { it !== s }?.close(Outcome.Ended("superseded"), "user")
