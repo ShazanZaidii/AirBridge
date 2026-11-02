@@ -60,11 +60,22 @@ struct DisplayArrangementView: View {
         let id: String
         let name: String
         let online: Bool
+        var platform = ""
+
+        var symbol: String {
+            guard online else { return "wifi.slash" }
+            switch platform {
+            case "android", "ios": return "iphone"
+            case "macos": return "laptopcomputer"
+            case "windows", "linux": return "desktopcomputer"
+            default: return "display"
+            }
+        }
     }
 
     private var items: [Item] {
         let online = directory.peers.filter { $0.caps.contains("ctl_target") }
-        var list = online.map { Item(id: $0.id, name: $0.name, online: true) }
+        var list = online.map { Item(id: $0.id, name: $0.name, online: true, platform: $0.platform) }
         let ids = Set(list.map(\.id))
         for (id, p) in placements where p.edge != nil && !ids.contains(id) {
             list.append(Item(id: id, name: p.name.isEmpty ? "Device" : p.name, online: false))
@@ -275,7 +286,7 @@ struct DisplayArrangementView: View {
             )
             .overlay {
                 HStack(spacing: Tok.xs) {
-                    Image(systemName: item.online ? "iphone" : "wifi.slash").font(.caption2)
+                    Image(systemName: item.symbol).font(.caption2)
                     Text(item.name).font(.caption.weight(.semibold)).lineLimit(1)
                 }
                 .foregroundStyle(item.online ? Tok.onAccent : Tok.mutedFg)
@@ -476,7 +487,7 @@ struct DisplayArrangementView: View {
                 .labelsHidden()
             }
             Toggle(isOn: $requireOption) {
-                Label("Also hold ⌥ Option to cross", systemImage: "option")
+                Label("Also hold Option to cross", systemImage: "option")
                     .font(.callout)
             }
             .toggleStyle(.checkbox)
