@@ -33,8 +33,6 @@ nonisolated final class Controller: @unchecked Sendable {
     private var peers: [PeerInfo] = []
     private var geo = DisplayGeometry.current()
     private var geoAt: CFAbsoluteTime = 0
-    private var natural = true
-    private var naturalAt: CFAbsoluteTime = 0
 
     private static let moveInterval = 1.0 / 120.0
 
@@ -332,14 +330,9 @@ nonisolated final class Controller: @unchecked Sendable {
         let a2 = continuous ? e.getDoubleValueField(.scrollWheelEventPointDeltaAxis2)
                             : Double(e.getIntegerValueField(.scrollWheelEventDeltaAxis2))
         guard a1 != 0 || a2 != 0 else { return }
-        let now = CFAbsoluteTimeGetCurrent()
-        if now - naturalAt > 5 {
-            natural = UserDefaults.standard.object(forKey: "com.apple.swipescrolldirection") as? Bool ?? true
-            naturalAt = now
-        }
-        // CG deltas already include the Mac's natural-scrolling inversion (negative axis1 = content up).
-        // The protocol wants the gesture in natural terms (+dy = content up) and lets the target invert.
-        let dy = natural ? -a1 : a1, dx = natural ? -a2 : a2
+        // CG deltas already include the Mac's natural-scrolling setting (negative axis1 = content up).
+        // Wire values describe content motion (+dy = content up, +dx = content left); targets never invert.
+        let dy = -a1, dx = -a2
         flushMoves()
         send(["t": "ptr_scroll", "dx": Msg.round(dx), "dy": Msg.round(dy), "px": continuous])
     }

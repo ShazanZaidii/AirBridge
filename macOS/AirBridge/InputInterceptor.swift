@@ -35,9 +35,6 @@ nonisolated final class InputInterceptor: @unchecked Sendable {
         }
     }
 
-    /// Legacy v1 hook (old SyncServer); no-op.
-    func setup(server: AnyObject) {}
-
     /// Brings the cursor back to the Mac if it is on a remote screen.
     func forceReturnToMac() {
         Controller.shared.perform { Controller.shared.recall() }

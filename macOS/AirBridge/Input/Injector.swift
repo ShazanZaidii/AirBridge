@@ -52,8 +52,6 @@ nonisolated final class Injector: @unchecked Sendable {
     private var geoAt: CFAbsoluteTime = 0
     private var lastDown: (button: Int, time: CFAbsoluteTime, pos: CGPoint, count: Int64) = (-1, 0, .zero, 0)
     private var scrollRemainder = (x: 0.0, y: 0.0)
-    private var natural = true
-    private var naturalAt: CFAbsoluteTime = 0
 
     // MARK: entry points (any thread)
 
@@ -190,16 +188,11 @@ nonisolated final class Injector: @unchecked Sendable {
     }
 
     private func scroll(_ peer: String, _ dx: Double, _ dy: Double, px: Bool) {
-        let now = CFAbsoluteTimeGetCurrent()
-        if now - naturalAt > 5 {
-            natural = UserDefaults.standard.object(forKey: "com.apple.swipescrolldirection") as? Bool ?? true
-            naturalAt = now
-        }
-        // Protocol: +dy = content moves up under natural scrolling; the target applies its own preference.
-        // CG: negative axis1 = content moves up.
+        // Wire values describe content motion (+dy = content up, +dx = content left); the controller
+        // already applied its own natural-scrolling preference. CG: negative axis1 = content moves up.
         let gain = entered?.peer == peer ? 1.0 : Self.pref("AirBridge.trackpadScrollGain", 1.5)
-        let a1 = (natural ? -dy : dy) * gain
-        let a2 = (natural ? -dx : dx) * gain
+        let a1 = -dy * gain
+        let a2 = -dx * gain
         scrollRemainder.y += a1
         scrollRemainder.x += a2
         let i1 = scrollRemainder.y.rounded(.towardZero), i2 = scrollRemainder.x.rounded(.towardZero)

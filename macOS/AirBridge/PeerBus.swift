@@ -1,7 +1,7 @@
 import Foundation
 
 /// A peer with a ready (authenticated) session.
-struct PeerInfo: Identifiable, Equatable {
+nonisolated struct PeerInfo: Identifiable, Equatable, Sendable {
     let id: String
     let name: String
     let platform: String
@@ -21,7 +21,7 @@ struct PeerInfo: Identifiable, Equatable {
 ///
 /// Threading: `controlHandler` is invoked on a network queue. The input half hops to the main
 /// thread itself where needed. `send` / `broadcast` are safe from any thread and never block.
-protocol PeerTransport: AnyObject {
+nonisolated protocol PeerTransport: AnyObject {
     /// Send to one peer. Returns false if that peer has no ready session.
     @discardableResult func send(to peerId: String, _ msg: [String: Any]) -> Bool
     /// Send to every ready peer.
