@@ -170,21 +170,27 @@ namespace AirBridge.Input
             return false;
         }
 
-        /// <summary>The holder is being pre-empted: tell it where its cursor was, release what it held.</summary>
-        private void PreemptHolder()
+        /// <summary>The holder is being pre-empted by <paramref name="newHolder"/>: an edge controller learns where
+        /// its cursor was (ctl_leave edge/rel); an implicit trackpad/mirror holder gets ctl_busy (§8.6). Release what it held.</summary>
+        private void PreemptHolder(string newHolder)
         {
             var old = _controller;
             if (old == null) return;
-            var leave = Msg.Of("ctl_leave");
             if (_explicit)
             {
                 RefreshMonitors(force: false);
                 SyncPos();
+                var leave = Msg.Of("ctl_leave");
                 leave["edge"] = _entryEdge.ToWire();
                 leave["rel"] = Math.Round(CurrentRel(_entryEdge), 4);
+                Send(old, leave);
             }
-            // An implicit (trackpad/mirror) holder has no entry edge; it gets a bare ctl_leave.
-            Send(old, leave);
+            else
+            {
+                var busy = Msg.Of("ctl_busy");
+                busy["holder"] = ControlState.NameOf(newHolder);
+                Send(old, busy);
+            }
             _controller = null;
             Release(old);
         }
@@ -275,7 +281,7 @@ namespace AirBridge.Input
         private void Enter(string peer, JsonObject m)
         {
             // A person physically pushing a cursor over always wins (§8.6).
-            if (_controller != null && _controller != peer) PreemptHolder();
+            if (_controller != null && _controller != peer) PreemptHolder(peer);
             _busySentMs.Remove(peer);
             RefreshMonitors(force: true);
             SyncPos();
