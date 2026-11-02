@@ -64,6 +64,12 @@ class TargetController(internal val service: AccessibilityService) {
 
     private val idleHide = Runnable { if (controllerId == null) cursor.hide() }
 
+    /** §8.6 lease table: who may drive this phone right now. */
+    private val lease = ControlLease()
+    private var leaseBubbleOn = false
+    private val peerNames = HashMap<String, String>()
+    private val leaseExpiry = Runnable { checkLeaseExpiry() }
+
     // ---------------------------------------------------------------- lifecycle
 
     fun start() {
@@ -73,6 +79,8 @@ class TargetController(internal val service: AccessibilityService) {
     }
 
     fun stop() {
+        lease.clear()
+        syncLeaseBubble()
         releaseAll()
         cursor.detach()
         main.removeCallbacksAndMessages(null)
@@ -94,15 +102,48 @@ class TargetController(internal val service: AccessibilityService) {
 
     fun onPeers(peers: List<PeerInfo>) {
         main.post {
-            val c = controllerId ?: return@post
-            if (peers.none { it.id == c }) leaveLocal()
+            for (p in peers) peerNames[p.id] = p.name
+            val h = lease.holder
+            if (h != null && peers.none { it.id == h }) {
+                lease.onPeerGone(h)
+                if (controllerId == h) leaveLocal() else releaseAll()
+                syncLeaseBubble()
+            }
+            val c = controllerId
+            if (c != null && peers.none { it.id == c }) leaveLocal()
         }
     }
 
     private fun handle(peerId: String, msg: JSONObject) {
-        when (msg.optString("t")) {
-            "ctl_enter" -> enter(peerId, msg.optString("edge", "left"), num(msg, "rel", 0.5f).coerceIn(0f, 1f))
-            "ctl_leave" -> if (controllerId == null || controllerId == peerId) leaveLocal()
+        val type = msg.optString("t")
+        when (type) {
+            "ctl_enter" -> {
+                enter(peerId, msg.optString("edge", "left"), num(msg, "rel", 0.5f).coerceIn(0f, 1f))
+                syncLeaseBubble()
+                return
+            }
+            "ctl_leave" -> {
+                if (lease.onLeave(peerId)) leaveLocal()
+                syncLeaseBubble()
+                return
+            }
+        }
+        // ptr_* / key / action: lease rules (§8.6).
+        when (val d = lease.onInput(peerId, SystemClock.uptimeMillis())) {
+            is ControlLease.Decision.Drop -> {
+                d.busyTo?.let { to ->
+                    val holderName = lease.holder?.let { peerNames[it] ?: lookupName(it) } ?: "another device"
+                    PeerBus.send(to, JSONObject().put("t", "ctl_busy").put("holder", holderName))
+                }
+                return
+            }
+            is ControlLease.Decision.Accept -> {
+                if (d.gained) syncLeaseBubble()
+                scheduleLeaseExpiry()
+            }
+        }
+        when (type) {
+            "ptr_abs" -> absolute(peerId, num(msg, "x", 0.5f), num(msg, "y", 0.5f))
             "ptr_move" -> move(peerId, num(msg, "dx"), num(msg, "dy"))
             "ptr_scroll" -> scroll(peerId, num(msg, "dx"), num(msg, "dy"), msg.optBoolean("px", false))
             "ptr_btn" -> button(peerId, msg.optInt("b", 0), msg.optBoolean("down", false))
@@ -115,6 +156,31 @@ class TargetController(internal val service: AccessibilityService) {
         }
     }
 
+    private fun lookupName(id: String): String? =
+        try { PeerBus.peers().firstOrNull { it.id == id }?.name?.also { peerNames[id] = it } } catch (_: Throwable) { null }
+
+    private fun scheduleLeaseExpiry() {
+        val at = lease.nextExpiry() ?: return
+        main.removeCallbacks(leaseExpiry)
+        main.postAtTime(leaseExpiry, at + 1)
+    }
+
+    private fun checkLeaseExpiry() {
+        val released = lease.expire(SystemClock.uptimeMillis())
+        if (released != null) {
+            releaseAll() // implicit lease expired: release the holder's keys/buttons
+            syncLeaseBubble()
+        } else scheduleLeaseExpiry()
+    }
+
+    /** §5: hide the clipboard bubble while this phone is under a control lease. */
+    private fun syncLeaseBubble() {
+        val on = lease.holder != null
+        if (on == leaseBubbleOn) return
+        leaseBubbleOn = on
+        NetHooks.setBubbleSuppressed("lease", on)
+    }
+
     private fun num(m: JSONObject, k: String, def: Float = 0f): Float {
         val v = m.optDouble(k, def.toDouble())
         return if (v.isNaN() || v.isInfinite()) def else v.toFloat()
@@ -123,9 +189,14 @@ class TargetController(internal val service: AccessibilityService) {
     // ---------------------------------------------------------------- enter / leave
 
     private fun enter(peerId: String, edgeIn: String, rel: Float) {
-        val prev = controllerId
-        if (prev != null && prev != peerId) {
-            PeerBus.send(prev, leaveMsg(entryEdge ?: "left", relAlong(entryEdge ?: "left")))
+        val prev = lease.onEnter(peerId, SystemClock.uptimeMillis())
+        main.removeCallbacks(leaseExpiry)
+        if (prev != null) {
+            // Pre-empted: an edge controller gets its entry edge + current rel; an implicit
+            // (trackpad/mirror) holder never entered through an edge and gets a bare ctl_leave.
+            val msg = if (prev == controllerId) leaveMsg(entryEdge ?: "left", relAlong(entryEdge ?: "left"))
+            else JSONObject().put("t", "ctl_leave")
+            PeerBus.send(prev, msg)
         }
         releaseAll()
         main.removeCallbacks(idleHide)
@@ -149,6 +220,8 @@ class TargetController(internal val service: AccessibilityService) {
         val c = controllerId ?: return
         val edge = entryEdge ?: "left"
         val rel = relAlong(edge)
+        lease.clear()
+        syncLeaseBubble()
         leaveLocal()
         PeerBus.send(c, leaveMsg(edge, rel))
     }
@@ -206,6 +279,18 @@ class TargetController(internal val service: AccessibilityService) {
         }
         x = clampX(nx)
         y = clampY(ny)
+        cursor.moveTo(x, y)
+        if (btnDown) {
+            if (drag == null && hypot(x - downX, y - downY) > 8f * density) startDrag()
+            drag?.moveTo(x, y)
+        }
+    }
+
+    /** `ptr_abs`: normalised position on this display, no gain (§8.2). */
+    private fun absolute(peerId: String, nx: Float, ny: Float) {
+        touch(peerId)
+        x = clampX(nx.coerceIn(0f, 1f) * (screenW - 1f))
+        y = clampY(ny.coerceIn(0f, 1f) * (screenH - 1f))
         cursor.moveTo(x, y)
         if (btnDown) {
             if (drag == null && hypot(x - downX, y - downY) > 8f * density) startDrag()
