@@ -16,6 +16,16 @@ namespace AirBridge.Input
     ///    synthesises local key-ups, calls PeerBus, watches for a lost hook, polls caps lock.
     ///
     /// Recall hotkey while controlling: Ctrl+Alt+Esc (tracked from physical events inside the hook).
+    ///
+    /// Capture intent (§8.2): touching an edge never crosses. The cursor must be pinned at an outer edge inside a
+    /// peer's span and the user must keep pushing outward: the outward delta accumulated over a sliding 500 ms
+    /// window must reach the threshold (Easy 60 / Normal 100 / Firm 160 logical px × the edge monitor's scale).
+    /// Delta source: raw input (WM_INPUT, relative mouse counts) on a message-only window owned by the hook thread,
+    /// because whether WH_MOUSE_LL reports a pre-clamp <c>pt</c> at a screen edge is undocumented. When no fresh
+    /// relative raw input exists (absolute devices, registration failure) the hook's overshoot beyond the edge
+    /// (<c>pt</c> minus the clamped position) is used instead. Inward motion, a pause, leaving the span or a button
+    /// press resets; 700 ms cooldown after returning through an edge; nothing during or 1 s after a drag; nothing
+    /// while a remote peer holds this PC's lease.
     /// </summary>
     internal sealed class Controller
     {
@@ -25,9 +35,9 @@ namespace AirBridge.Input
 
         // ---------- shared (volatile snapshots) ----------
         private sealed record Portal(string PeerId, Edge PcEdge, double SpanStart, double SpanEnd, EdgeSegment[] Segments);
-        private sealed record PortalMap(Portal[] Portals, IReadOnlyList<MonitorInfo> Monitors);
+        private sealed record PortalMap(Portal[] Portals, IReadOnlyList<MonitorInfo> Monitors, double Threshold, bool RequireAlt);
 
-        private volatile PortalMap _map = new(Array.Empty<Portal>(), Array.Empty<MonitorInfo>());
+        private volatile PortalMap _map = new(Array.Empty<Portal>(), Array.Empty<MonitorInfo>(), 100, false);
         private volatile string? _activePeer;       // written by hook thread only
         private readonly object _rebuildGate = new();
 
@@ -51,6 +61,32 @@ namespace AirBridge.Input
         private readonly bool[] _suppressBtnUp = new bool[5];
         private bool _capsOn;
         private bool _physLCtrl, _physRCtrl, _physLAlt, _physRAlt;
+        private volatile int _hookEvents;           // every mouse hook call; read by the idle watchdog
+
+        // ---------- capture intent (hook thread) ----------
+        private const long CaptureWindowMs = 500;
+        private const long ReturnCooldownMs = 700;
+        private const long BusyCooldownMs = 2000;
+        private const long DragQuietMs = 1000;
+        private const long RawFreshMs = 250;
+        private const int PushRing = 1024;
+        private const int RawBufSize = 128;
+
+        private Portal? _pinPortal;
+        private EdgeSegment _pinSeg;
+        private int _pinAlong;
+        private double _pinScale = 1;
+        private readonly long[] _noCaptureUntil = new long[4];
+        private long _dragQuietUntil;
+        private bool _movedWhileDown;
+        private readonly long[] _pushT = new long[PushRing];
+        private readonly double[] _pushV = new double[PushRing];
+        private int _pushHead, _pushCount;
+        private double _pushSum;
+        private int _lastChargeStep = -1;
+        private long _lastRawMs = long.MinValue / 2;
+        private IntPtr _rawHwnd, _rawBuf;
+        private volatile bool _inhibit;             // a remote peer holds this PC's lease
 
         // ---------- sender thread ----------
         private enum K { Enter, Leave, Move, Btn, Scroll, Key, Action, CapsCheck, Peers }
@@ -75,6 +111,9 @@ namespace AirBridge.Input
         private double _lastFlushMs = -1000;
         private int _watchdogMisses;
         private double _nextWatchdogMs;
+        private int _idleMisses, _idleHookEvents;
+        private NativeMethods.POINT _idleLastPos;
+        private double _nextIdleCheckMs, _lastRehookMs = -100000;
         private double _nextCapsPollMs, _capsCheckAtMs = -1, _nextMonitorPollMs;
         private bool? _lastCapsSent;
         private HashSet<string> _knownTrackpads = new();
@@ -132,7 +171,29 @@ namespace AirBridge.Input
         // =====================================================================
 
         /// <summary>Return the cursor to this PC (no-op if not controlling).</summary>
-        public void RequestReturn(bool sendLeave) => Post(() => DoReturn(null, sendLeave));
+        /// <param name="restoreCursor">false when someone else is about to place the cursor (a remote ctl_enter).</param>
+        public void RequestReturn(bool sendLeave, bool restoreCursor = true) => Post(() => DoReturn(null, sendLeave, restoreCursor));
+
+        /// <summary>While a remote peer holds this PC's control lease, edges never capture (§8.6).</summary>
+        public void SetInhibited(bool inhibited)
+        {
+            _inhibit = inhibited;
+            if (inhibited) Post(Unpin);
+        }
+
+        /// <summary>ctl_busy from a target: stop forwarding, give the cursor back, tell the user (§8.6).</summary>
+        public void OnCtlBusy(string peerId, JsonObject msg)
+        {
+            string holder = Msg.Str(msg, "holder") is { Length: > 0 } h ? h : "another device";
+            ControlState.Notice($"{ControlState.NameOf(peerId)} is being controlled by {holder}");
+            Post(() =>
+            {
+                if (!_remote || _portal?.PeerId != peerId) return;
+                var edge = _portal.PcEdge;
+                DoReturn(null, sendLeave: false);
+                _noCaptureUntil[(int)edge] = Environment.TickCount64 + BusyCooldownMs;
+            });
+        }
 
         /// <summary>ctl_leave from the target we are controlling: resume at the matching point of our edge.</summary>
         public void OnCtlLeave(string peerId, JsonObject msg)
@@ -161,16 +222,19 @@ namespace AirBridge.Input
                 var mons = Monitors.Enumerate();
                 var union = Monitors.Union(mons);
                 var placements = Layout.Snapshot();
+                var settings = Layout.Settings();
                 var portals = new List<Portal>();
+                // Only online peers with ctl_target get a portal: an edge with no assigned or an offline peer is inert.
                 foreach (var peer in PeerDirectory.Current)
                 {
                     if (!peer.Caps.Contains("ctl_target")) continue;
                     if (!placements.TryGetValue(peer.Id, out var pl) || EdgeExt.Parse(pl.Edge) is not Edge e) continue;
+                    if (!settings.EdgeCaptureEnabled(e)) continue;
                     double len = e.IsVertical() ? union.Height : union.Width;
                     double start = (e.IsVertical() ? union.Top : union.Left) + pl.Offset * len;
                     portals.Add(new Portal(peer.Id, e, start, start + pl.Size * len, Monitors.OuterSegments(mons, e).ToArray()));
                 }
-                _map = new PortalMap(portals.ToArray(), mons);
+                _map = new PortalMap(portals.ToArray(), mons, LayoutData.ThresholdFor(settings.CaptureStrength), settings.CaptureRequireAlt);
             }
         }
 
@@ -197,10 +261,21 @@ namespace AirBridge.Input
             NativeMethods.PeekMessage(out _, IntPtr.Zero, 0, 0, NativeMethods.PM_NOREMOVE); // create the queue
             _hookThreadId = NativeMethods.GetCurrentThreadId();
             InstallHooks();
+            InstallRawInput();
             _hookReady.Set();
 
             while (NativeMethods.GetMessage(out var msg, IntPtr.Zero, 0, 0) > 0)
             {
+                if (msg.message == NativeMethods.WM_INPUT)
+                {
+                    // Only parsed while pinned at an edge; DispatchMessage lets DefWindowProc free the input.
+                    if (_pinPortal != null && !_remote)
+                    {
+                        try { OnRawInput(msg.lParam); } catch (Exception ex) { Debug.WriteLine($"raw input: {ex.Message}"); }
+                    }
+                    NativeMethods.DispatchMessage(ref msg);
+                    continue;
+                }
                 if (msg.message == WM_APP_CMD)
                 {
                     while (_hookCmds.TryDequeue(out var a))
@@ -214,8 +289,49 @@ namespace AirBridge.Input
             }
 
             try { DoReturn(null, sendLeave: true); } catch { }
+            try { Unpin(); } catch { }
             UninstallHooks();
+            UninstallRawInput();
             _hookThreadId = 0;
+        }
+
+        private void InstallRawInput()
+        {
+            try
+            {
+                // A message-only window of the built-in STATIC class: no WndProc delegate to keep alive.
+                _rawHwnd = NativeMethods.CreateWindowEx(0, "STATIC", "AirBridge raw input", 0, 0, 0, 0, 0,
+                    NativeMethods.HWND_MESSAGE, IntPtr.Zero, NativeMethods.GetModuleHandle(null), IntPtr.Zero);
+                if (_rawHwnd == IntPtr.Zero) { Debug.WriteLine($"raw input window failed: {Marshal.GetLastWin32Error()}"); return; }
+                _rawBuf = Marshal.AllocHGlobal(RawBufSize);
+                var rid = new[]
+                {
+                    new NativeMethods.RAWINPUTDEVICE
+                    {
+                        usUsagePage = 0x01, usUsage = 0x02, // generic desktop / mouse
+                        dwFlags = NativeMethods.RIDEV_INPUTSINK, hwndTarget = _rawHwnd,
+                    },
+                };
+                if (!NativeMethods.RegisterRawInputDevices(rid, 1, (uint)Marshal.SizeOf<NativeMethods.RAWINPUTDEVICE>()))
+                    Debug.WriteLine($"RegisterRawInputDevices failed: {Marshal.GetLastWin32Error()} (hook overshoot fallback only)");
+            }
+            catch (Exception ex) { Debug.WriteLine($"raw input setup: {ex.Message}"); }
+        }
+
+        private void UninstallRawInput()
+        {
+            try
+            {
+                if (_rawHwnd != IntPtr.Zero)
+                {
+                    var rid = new[] { new NativeMethods.RAWINPUTDEVICE { usUsagePage = 0x01, usUsage = 0x02, dwFlags = NativeMethods.RIDEV_REMOVE } };
+                    NativeMethods.RegisterRawInputDevices(rid, 1, (uint)Marshal.SizeOf<NativeMethods.RAWINPUTDEVICE>());
+                    NativeMethods.DestroyWindow(_rawHwnd);
+                }
+            }
+            catch { }
+            _rawHwnd = IntPtr.Zero;
+            if (_rawBuf != IntPtr.Zero) { Marshal.FreeHGlobal(_rawBuf); _rawBuf = IntPtr.Zero; }
         }
 
         private void InstallHooks()
@@ -244,6 +360,7 @@ namespace AirBridge.Input
         private IntPtr MouseHook(int nCode, IntPtr wParam, IntPtr lParam)
         {
             if (nCode < 0) return NativeMethods.CallNextHookEx(IntPtr.Zero, nCode, wParam, lParam);
+            _hookEvents++;
             try
             {
                 uint flags = (uint)Marshal.ReadInt32(lParam, 12);
@@ -286,21 +403,32 @@ namespace AirBridge.Input
             {
                 if (!down && _suppressBtnUp[b]) { _suppressBtnUp[b] = false; _localBtn[b] = false; return (IntPtr)1; }
                 _localBtn[b] = down;
+                if (down) { _movedWhileDown = false; Unpin(); }
+                else if (_movedWhileDown && !AnyLocalButtonState())
+                {
+                    _movedWhileDown = false;
+                    _dragQuietUntil = Environment.TickCount64 + DragQuietMs; // no capture right after a drag
+                }
             }
-            else if (msg == NativeMethods.WM_MOUSEMOVE && !AnyLocalButton() && TryEnter(x, y))
+            else if (msg == NativeMethods.WM_MOUSEMOVE)
             {
-                return (IntPtr)1;
+                if (AnyLocalButton()) { _movedWhileDown = true; Unpin(); }
+                else if (EvaluatePin(x, y)) return (IntPtr)1;
             }
             return NativeMethods.CallNextHookEx(IntPtr.Zero, nCode, wParam, lParam);
         }
 
         private static readonly int[] ButtonVks = { 0x01, 0x02, 0x04, 0x05, 0x06 };
 
+        private bool AnyLocalButtonState()
+        {
+            foreach (bool b in _localBtn) if (b) return true;
+            return false;
+        }
+
         private bool AnyLocalButton()
         {
-            bool any = false;
-            foreach (bool b in _localBtn) any |= b;
-            if (!any) return false;
+            if (!AnyLocalButtonState()) return false;
             // An up may have been lost (secure desktop, UAC); don't block crossing forever on stale state.
             foreach (int vk in ButtonVks)
                 if ((NativeMethods.GetAsyncKeyState(vk) & 0x8000) != 0) return true;
@@ -308,31 +436,167 @@ namespace AirBridge.Input
             return false;
         }
 
-        private bool TryEnter(int x, int y)
+        // ---------------------------------------------------------------- capture intent (§8.2)
+
+        /// <summary>
+        /// Hook thread, local mode, real mouse move with no button held. Updates the pinned edge and feeds the
+        /// hook overshoot into the accumulator when raw input isn't flowing. Returns true if the cursor was captured.
+        /// </summary>
+        private bool EvaluatePin(int x, int y)
         {
             var map = _map;
-            if (map.Portals.Length == 0) return false;
+            long now = Environment.TickCount64;
+            if (_inhibit || map.Portals.Length == 0 || map.Monitors.Count == 0 || now < _dragQuietUntil) { Unpin(); return false; }
+
+            var c = Monitors.ClampToNearest(map.Monitors, x, y);
             foreach (var p in map.Portals)
             {
+                if (now < _noCaptureUntil[(int)p.PcEdge]) continue;
                 foreach (var s in p.Segments)
                 {
-                    int dead = Math.Min(3, (s.To - s.From) / 4);
-                    bool hit;
-                    int along;
+                    if (c.mon.Bounds != s.Monitor) continue;
+                    bool atEdge;
+                    int along, overshoot;
                     switch (p.PcEdge)
                     {
-                        case Edge.Left: hit = x <= s.Fixed; along = y; break;
-                        case Edge.Right: hit = x >= s.Fixed - 1; along = y; break;
-                        case Edge.Top: hit = y <= s.Fixed; along = x; break;
-                        default: hit = y >= s.Fixed - 1; along = x; break;
+                        case Edge.Left: atEdge = c.x <= s.Fixed; along = c.y; overshoot = s.Fixed - x; break;
+                        case Edge.Right: atEdge = c.x >= s.Fixed - 1; along = c.y; overshoot = x - (s.Fixed - 1); break;
+                        case Edge.Top: atEdge = c.y <= s.Fixed; along = c.x; overshoot = s.Fixed - y; break;
+                        default: atEdge = c.y >= s.Fixed - 1; along = c.x; overshoot = y - (s.Fixed - 1); break;
                     }
-                    if (!hit || along < s.From + dead || along >= s.To - dead) continue;
+                    if (!atEdge) continue;
+                    int dead = Math.Min(3, (s.To - s.From) / 4); // corners stay usable for hot corners
+                    if (along < s.From + dead || along >= s.To - dead) continue;
                     if (along < p.SpanStart || along > p.SpanEnd) continue;
-                    Enter(p, s, along);
-                    return true;
+
+                    if (!ReferenceEquals(_pinPortal, p) || _pinSeg != s)
+                    {
+                        ResetPush();
+                        _pinPortal = p;
+                        _pinSeg = s;
+                        _pinScale = c.mon.Scale > 0 ? c.mon.Scale : 1;
+                    }
+                    _pinAlong = along;
+                    if (map.RequireAlt && !(_physLAlt || _physRAlt)) { ResetPush(); return false; }
+                    if (overshoot > 0 && now - _lastRawMs > RawFreshMs) return Push(overshoot, now);
+                    return false;
                 }
             }
+            Unpin();
             return false;
+        }
+
+        /// <summary>Hook thread (message loop): relative raw mouse counts while pinned.</summary>
+        private void OnRawInput(IntPtr hRawInput)
+        {
+            if (_rawBuf == IntPtr.Zero || _pinPortal is not { } p) return;
+            uint hdr = (uint)(8 + 2 * IntPtr.Size); // RAWINPUTHEADER
+            uint size = RawBufSize;
+            uint got = NativeMethods.GetRawInputData(hRawInput, NativeMethods.RID_INPUT, _rawBuf, ref size, hdr);
+            if (got == uint.MaxValue || got < hdr + 24) return;
+            if (Marshal.ReadInt32(_rawBuf, 0) != NativeMethods.RIM_TYPEMOUSE) return;
+            int off = (int)hdr; // RAWMOUSE: usFlags@0, buttons@4, rawButtons@8, lLastX@12, lLastY@16
+            ushort flags = (ushort)Marshal.ReadInt16(_rawBuf, off);
+            if ((flags & NativeMethods.MOUSE_MOVE_ABSOLUTE) != 0) return; // tablets/RDP: hook overshoot fallback
+            int dx = Marshal.ReadInt32(_rawBuf, off + 12), dy = Marshal.ReadInt32(_rawBuf, off + 16);
+            if (dx == 0 && dy == 0) return;
+            long now = Environment.TickCount64;
+            _lastRawMs = now;
+            if (_inhibit || now < _noCaptureUntil[(int)p.PcEdge]) { Unpin(); return; }
+            if (_map.RequireAlt && !(_physLAlt || _physRAlt)) return;
+            double outward = p.PcEdge switch
+            {
+                Edge.Right => dx,
+                Edge.Left => -dx,
+                Edge.Bottom => dy,
+                _ => -dy,
+            };
+            Push(outward, now);
+        }
+
+        /// <summary>Adds an outward sample; captures when the 500 ms window reaches the threshold.</summary>
+        private bool Push(double outward, long now)
+        {
+            if (_pinPortal == null) return false;
+            if (outward < 0) { ResetPush(); return false; } // any inward motion resets
+            if (outward == 0) return false;
+
+            while (_pushCount > 0)
+            {
+                int tail = (_pushHead - _pushCount + PushRing) % PushRing;
+                if (now - _pushT[tail] <= CaptureWindowMs && _pushCount < PushRing) break;
+                _pushSum -= _pushV[tail];
+                _pushCount--;
+            }
+            if (_pushCount == 0) _pushSum = 0;
+            _pushT[_pushHead] = now;
+            _pushV[_pushHead] = outward;
+            _pushHead = (_pushHead + 1) % PushRing;
+            _pushCount++;
+            _pushSum += outward;
+
+            double threshold = Math.Max(1, _map.Threshold * _pinScale);
+            if (_pushSum >= threshold)
+            {
+                Capture();
+                return true;
+            }
+            int step = (int)(_pushSum * 20 / threshold); // indicator in 5 % steps
+            if (step != _lastChargeStep)
+            {
+                _lastChargeStep = step;
+                EdgeIndicator.Charge(BarRect(), step / 20.0);
+            }
+            return false;
+        }
+
+        private void ResetPush()
+        {
+            _pushCount = 0;
+            _pushSum = 0;
+            if (_lastChargeStep >= 0)
+            {
+                _lastChargeStep = -1;
+                EdgeIndicator.Hide();
+            }
+        }
+
+        private void Unpin()
+        {
+            if (_pinPortal == null) return;
+            _pinPortal = null;
+            ResetPush();
+        }
+
+        /// <summary>The peer's span on the pinned segment, as a thin bar just inside the screen (physical px).</summary>
+        private IRect BarRect()
+        {
+            var p = _pinPortal!;
+            var s = _pinSeg;
+            int from = (int)Math.Max(s.From, Math.Floor(p.SpanStart));
+            int to = (int)Math.Min(s.To, Math.Ceiling(p.SpanEnd));
+            if (to <= from) { from = s.From; to = s.To; }
+            int t = Math.Max(2, (int)Math.Round(4 * _pinScale));
+            return p.PcEdge switch
+            {
+                Edge.Left => new IRect(s.Fixed, from, s.Fixed + t, to),
+                Edge.Right => new IRect(s.Fixed - t, from, s.Fixed, to),
+                Edge.Top => new IRect(from, s.Fixed, to, s.Fixed + t),
+                _ => new IRect(from, s.Fixed - t, to, s.Fixed),
+            };
+        }
+
+        private void Capture()
+        {
+            var p = _pinPortal!;
+            var s = _pinSeg;
+            var bar = BarRect();
+            _pinPortal = null;
+            _pushCount = 0;
+            _pushSum = 0;
+            _lastChargeStep = -1;
+            EdgeIndicator.Flash(bar);
+            Enter(p, s, _pinAlong);
         }
 
         private void Enter(Portal p, EdgeSegment s, int along)
@@ -507,13 +771,15 @@ namespace AirBridge.Input
         }
 
         /// <summary>Hook thread only. rel = position along the edge reported by the target (null = entry point).</summary>
-        private void DoReturn(double? rel, bool sendLeave)
+        private void DoReturn(double? rel, bool sendLeave, bool restoreCursor = true)
         {
             if (!_remote) return;
             var p = _portal!;
             _remote = false;
             _portal = null;
             _activePeer = null;
+            _noCaptureUntil[(int)p.PcEdge] = Environment.TickCount64 + ReturnCooldownMs; // no bounce
+            Unpin();
 
             for (int id = 0; id < 512; id++)
             {
@@ -524,8 +790,11 @@ namespace AirBridge.Input
             for (int b = 0; b < 3; b++)
                 if (_remoteBtn[b]) { _remoteBtn[b] = false; _suppressBtnUp[b] = true; }
 
-            var (x, y) = ReturnPoint(p, rel);
-            NativeMethods.SetCursorPos(x, y);
+            if (restoreCursor)
+            {
+                var (x, y) = ReturnPoint(p, rel);
+                NativeMethods.SetCursorPos(x, y);
+            }
             Enqueue(new Ev(K.Leave, p.PeerId, F: sendLeave));
         }
 
@@ -597,6 +866,7 @@ namespace AirBridge.Input
                 if (_out.IsCompleted) break;
             }
             if (_peer != null) { Flush(); Send(_peer, Msg.Of("ctl_leave")); _peer = null; }
+            ControlState.SetControlling(null);
             CursorHider.Restore();
         }
 
@@ -633,11 +903,12 @@ namespace AirBridge.Input
                     var ks = Msg.Of("key_state");
                     ks["caps"] = ev.F;
                     Send(_peer!, ks);
+                    ControlState.SetControlling(_peer);
                     break;
 
                 case K.Leave:
                     if (ev.F && ev.Peer != null) Send(ev.Peer, Msg.Of("ctl_leave"));
-                    if (_peer == ev.Peer) _peer = null;
+                    if (_peer == ev.Peer) { _peer = null; ControlState.SetControlling(null); }
                     _pdx = _pdy = _sdx = _sdy = 0;
                     _pendingMove = _pendingScroll = false;
                     _pendingDead = null;
@@ -744,6 +1015,29 @@ namespace AirBridge.Input
                 }
             }
 
+            if (_peer == null && now >= _nextIdleCheckMs)
+            {
+                // Idle watchdog: Windows silently unhooks a hook that exceeds LowLevelHooksTimeout. If the cursor
+                // moves while the mouse hook sees nothing, re-install (rate-limited; SetCursorPos by other apps
+                // can cause a harmless false positive).
+                _nextIdleCheckMs = now + 1000;
+                int events = _hookEvents;
+                if (NativeMethods.GetCursorPos(out var pos))
+                {
+                    bool moved = pos.x != _idleLastPos.x || pos.y != _idleLastPos.y;
+                    _idleMisses = moved && events == _idleHookEvents ? _idleMisses + 1 : 0;
+                    _idleLastPos = pos;
+                    if (_idleMisses >= 2 && now - _lastRehookMs > 5000)
+                    {
+                        _idleMisses = 0;
+                        _lastRehookMs = now;
+                        Debug.WriteLine("input watchdog: mouse hook silent while the cursor moves; re-hooking");
+                        Post(Rehook);
+                    }
+                }
+                _idleHookEvents = events;
+            }
+
             if (now >= _nextCapsPollMs || (_capsCheckAtMs >= 0 && now >= _capsCheckAtMs))
             {
                 _nextCapsPollMs = now + 500;
@@ -781,22 +1075,33 @@ namespace AirBridge.Input
             }
         }
 
+        private const int VK_MENU_MASK = 0xE8; // unassigned VK: breaks "Alt/Win tapped alone" (menu bar / Start)
+
         private static void SynthLocalUps(int[]? vks)
         {
             if (vks == null || vks.Length == 0) return;
-            var inputs = new NativeMethods.INPUT[vks.Length];
-            for (int i = 0; i < vks.Length; i++)
+            var inputs = new List<NativeMethods.INPUT>(vks.Length + 2);
+            // Alt or Win released with nothing in between would activate the menu bar / open Start (e.g. after
+            // crossing with "hold Alt to cross"): tap an unassigned key first, like AutoHotkey's menu mask key.
+            if (vks.Any(v => v is KeyMap.VK_LMENU or KeyMap.VK_RMENU or KeyMap.VK_LWIN or KeyMap.VK_RWIN))
             {
-                int vk = vks[i];
-                inputs[i].type = NativeMethods.INPUT_KEYBOARD;
-                inputs[i].U.ki = new NativeMethods.KEYBDINPUT
-                {
-                    wVk = (ushort)vk,
-                    wScan = (ushort)NativeMethods.MapVirtualKey((uint)vk, 0),
-                    dwFlags = NativeMethods.KEYEVENTF_KEYUP | (KeyMap.IsExtendedVk(vk) ? NativeMethods.KEYEVENTF_EXTENDEDKEY : 0),
-                };
+                inputs.Add(KeyInput(VK_MENU_MASK, up: false));
+                inputs.Add(KeyInput(VK_MENU_MASK, up: true));
             }
-            NativeMethods.SendInput((uint)inputs.Length, inputs, NativeMethods.INPUT.Size);
+            foreach (int vk in vks) inputs.Add(KeyInput(vk, up: true));
+            NativeMethods.SendInput((uint)inputs.Count, inputs.ToArray(), NativeMethods.INPUT.Size);
+        }
+
+        private static NativeMethods.INPUT KeyInput(int vk, bool up)
+        {
+            var i = new NativeMethods.INPUT { type = NativeMethods.INPUT_KEYBOARD };
+            i.U.ki = new NativeMethods.KEYBDINPUT
+            {
+                wVk = (ushort)vk,
+                wScan = (ushort)NativeMethods.MapVirtualKey((uint)vk, 0),
+                dwFlags = (up ? NativeMethods.KEYEVENTF_KEYUP : 0) | (KeyMap.IsExtendedVk(vk) ? NativeMethods.KEYEVENTF_EXTENDEDKEY : 0),
+            };
+            return i;
         }
 
         private void SendKey(in Ev ev)

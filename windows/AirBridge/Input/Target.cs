@@ -7,9 +7,15 @@ using System.Text.Json.Nodes;
 namespace AirBridge.Input
 {
     /// <summary>
-    /// Remote → PC (§8.1–8.5): injects ptr_*/key/action from any ready peer with SendInput on a dedicated thread,
-    /// handles ctl_enter/ctl_leave, sends ctl_leave when the cursor is pushed back out through the entry edge, and
-    /// releases everything a peer holds on ctl_leave / peer loss / takeover by another controller.
+    /// Remote → PC (§8.1–8.6): injects ptr_*/key/action with SendInput on a dedicated thread under a single
+    /// control lease (§8.6), handles ctl_enter/ctl_leave, sends ctl_leave when the cursor is pushed back out
+    /// through the entry edge, and releases everything a peer holds whenever it loses the lease.
+    ///
+    /// Lease: ctl_enter always takes it (pre-empting the holder, who gets ctl_leave with its entry edge + current
+    /// rel). Input from a peer while nobody holds it takes an implicit lease that expires after 1500 ms without
+    /// input. Input from a non-holder is dropped and answered with ctl_busy at most once per 2 s per peer.
+    /// key_state is never subject to the lease. mirror_start is answered with mirror_stop (no mirror source on
+    /// Windows yet, see the design notes).
     ///
     /// Pointer gain: ptr_move deltas are treated as logical (96-dpi) pixels: injected px = d × monitorScale × TargetPointerGain.
     /// rel: fraction along the bounding box of all monitors (top→bottom for left/right, left→right for top/bottom).
@@ -18,13 +24,19 @@ namespace AirBridge.Input
     {
         private const int EntryInset = 2;
         private const int SM_SWAPBUTTON = 23;
+        private const double ImplicitLeaseMs = 1500;
+        private const double BusyIntervalMs = 2000;
 
         private readonly BlockingCollection<Action> _q = new(new ConcurrentQueue<Action>());
         private Thread? _thread;
         private readonly Action _onEnter;
+        private readonly Action<string?, bool> _onLease;
 
         // target-thread state
-        private string? _controller;
+        private string? _controller;        // lease holder
+        private bool _explicit;             // lease came from ctl_enter
+        private double _lastInputMs;        // last admitted input from the holder
+        private readonly Dictionary<string, double> _busySentMs = new();
         private Edge _entryEdge;
         private double _cx, _cy;
         private bool _havePos;
@@ -43,8 +55,13 @@ namespace AirBridge.Input
         }
         private readonly Dictionary<string, Held> _held = new();
 
-        /// <param name="onEnter">Called (on the target thread) when a controller takes over this PC.</param>
-        public Target(Action onEnter) => _onEnter = onEnter;
+        /// <param name="onEnter">Called (on the target thread) when a remote peer takes this PC's lease.</param>
+        /// <param name="onLease">Called (on the target thread) with (holderId, explicit) whenever the lease changes.</param>
+        public Target(Action onEnter, Action<string?, bool> onLease)
+        {
+            _onEnter = onEnter;
+            _onLease = onLease;
+        }
 
         public void Start()
         {
@@ -68,13 +85,17 @@ namespace AirBridge.Input
 
         public void Handle(string peerId, JsonObject msg) => Post(() => Dispatch(peerId, msg));
 
+        /// <summary>Drop the lease and release everything (session lock, shutdown). Thread-safe.</summary>
+        public void ReleaseAll() => Post(ReleaseAllPeers);
+
         public void OnPeersChanged(IReadOnlyList<PeerInfo> peers)
         {
             var alive = new HashSet<string>(peers.Select(p => p.Id));
             Post(() =>
             {
+                if (_controller != null && !alive.Contains(_controller)) EndLease();
                 foreach (var id in _held.Keys.Where(k => !alive.Contains(k)).ToList()) Release(id);
-                if (_controller != null && !alive.Contains(_controller)) _controller = null;
+                foreach (var id in _busySentMs.Keys.Where(k => !alive.Contains(k)).ToList()) _busySentMs.Remove(id);
             });
         }
 
@@ -87,22 +108,142 @@ namespace AirBridge.Input
         private void Run()
         {
             DpiBootstrap.EnterThread();
-            foreach (var a in _q.GetConsumingEnumerable())
+            while (!_q.IsCompleted)
             {
-                try { a(); } catch (Exception ex) { Debug.WriteLine($"input target: {ex}"); }
+                // Wake up periodically only while an implicit lease can expire.
+                int timeout = _controller != null && !_explicit ? 200 : Timeout.Infinite;
+                try
+                {
+                    if (_q.TryTake(out var a, timeout)) a();
+                    ExpireImplicitLease();
+                }
+                catch (InvalidOperationException) { break; } // completed while waiting
+                catch (Exception ex) { Debug.WriteLine($"input target: {ex}"); }
             }
+        }
+
+        private double Now => _clock.Elapsed.TotalMilliseconds;
+
+        // ---------------------------------------------------------------- lease (§8.6)
+
+        private void SetLease(string peer, bool isExplicit)
+        {
+            bool newHolder = _controller != peer;
+            _controller = peer;
+            _explicit = isExplicit;
+            _lastInputMs = Now;
+            if (newHolder) _onEnter(); // if this PC is itself controlling something, take the cursor back first
+            _onLease(peer, isExplicit);
+        }
+
+        /// <summary>Releases the lease and everything the holder pressed.</summary>
+        private void EndLease()
+        {
+            var old = _controller;
+            if (old == null) return;
+            _controller = null;
+            _explicit = false;
+            Release(old);
+            _onLease(null, false);
+        }
+
+        private void ExpireImplicitLease()
+        {
+            if (_controller != null && !_explicit && Now - _lastInputMs > ImplicitLeaseMs) EndLease();
+        }
+
+        /// <summary>True if input from <paramref name="peer"/> may be applied; takes an implicit lease when free.</summary>
+        private bool Admit(string peer)
+        {
+            ExpireImplicitLease();
+            if (_controller == null) { SetLease(peer, isExplicit: false); return true; }
+            if (_controller == peer) { _lastInputMs = Now; return true; }
+
+            double now = Now;
+            if (!_busySentMs.TryGetValue(peer, out double last) || now - last >= BusyIntervalMs)
+            {
+                _busySentMs[peer] = now;
+                var busy = Msg.Of("ctl_busy");
+                busy["holder"] = ControlState.NameOf(_controller);
+                Send(peer, busy);
+            }
+            return false;
+        }
+
+        /// <summary>The holder is being pre-empted by <paramref name="newHolder"/>: an edge controller learns where
+        /// its cursor was (ctl_leave edge/rel); an implicit trackpad/mirror holder gets ctl_busy (§8.6). Release what it held.</summary>
+        private void PreemptHolder(string newHolder)
+        {
+            var old = _controller;
+            if (old == null) return;
+            if (_explicit)
+            {
+                RefreshMonitors(force: false);
+                SyncPos();
+                var leave = Msg.Of("ctl_leave");
+                leave["edge"] = _entryEdge.ToWire();
+                leave["rel"] = Math.Round(CurrentRel(_entryEdge), 4);
+                Send(old, leave);
+            }
+            else
+            {
+                var busy = Msg.Of("ctl_busy");
+                busy["holder"] = ControlState.NameOf(newHolder);
+                Send(old, busy);
+            }
+            _controller = null;
+            Release(old);
+        }
+
+        private double CurrentRel(Edge e)
+        {
+            var u = _union;
+            double r = e.IsVertical()
+                ? (Math.Floor(_cy) - u.Top) / Math.Max(1.0, u.Height - 1)
+                : (Math.Floor(_cx) - u.Left) / Math.Max(1.0, u.Width - 1);
+            return Math.Clamp(r, 0, 1);
         }
 
         private void Dispatch(string peer, JsonObject m)
         {
-            switch (Msg.Str(m, "t"))
+            string? t = Msg.Str(m, "t");
+            switch (t)
             {
-                case "ctl_enter": Enter(peer, m); break;
+                case "ctl_enter": Enter(peer, m); return;
                 case "ctl_leave":
-                    if (_controller == peer) _controller = null;
-                    Release(peer);
+                    if (_controller == peer) EndLease();
+                    else Release(peer);
+                    return;
+                case "key_state": return; // never subject to the lease; nothing to show on Windows
+                case "ctl_busy": return;  // controller-side message, handled by the Controller
+                case "mirror_start":
+                    // No Windows mirror source yet: decline explicitly so the sink doesn't wait.
+                    Send(peer, Msg.Of("mirror_stop"));
+                    return;
+                case "mirror_info":
+                case "mirror_key":
+                case "mirror_ack":
+                case "mirror_stop":
+                    return;
+                case "ptr_move":
+                case "ptr_abs":
+                case "ptr_scroll":
+                case "ptr_btn":
+                case "ptr_click":
+                case "key":
+                case "action":
+                    if (!Admit(peer)) return;
                     break;
+                default:
+                    return;
+            }
+
+            switch (t)
+            {
                 case "ptr_move": Move(peer, Msg.Num(m, "dx") ?? 0, Msg.Num(m, "dy") ?? 0); break;
+                case "ptr_abs":
+                    if (Msg.Num(m, "x") is double ax && Msg.Num(m, "y") is double ay) MoveAbs(ax, ay);
+                    break;
                 case "ptr_scroll": Scroll(Msg.Num(m, "dx") ?? 0, Msg.Num(m, "dy") ?? 0, Msg.Bool(m, "px") ?? false); break;
                 case "ptr_btn":
                     if (Msg.Num(m, "b") is double b && Msg.Bool(m, "down") is bool down) Button(peer, (int)b, down);
@@ -112,7 +253,6 @@ namespace AirBridge.Input
                     break;
                 case "key": Key(peer, m); break;
                 case "action": DoAction(Msg.Str(m, "name")); break;
-                case "key_state": break; // nothing to show on Windows
             }
         }
 
@@ -140,16 +280,14 @@ namespace AirBridge.Input
 
         private void Enter(string peer, JsonObject m)
         {
-            _onEnter(); // if this PC is itself controlling something, take the cursor back first
-            if (_controller != null && _controller != peer)
-            {
-                Send(_controller, Msg.Of("ctl_leave"));
-                Release(_controller);
-            }
-            _controller = peer;
-            _entryEdge = EdgeExt.Parse(Msg.Str(m, "edge")) ?? Edge.Left;
-            double rel = Math.Clamp(Msg.Num(m, "rel") ?? 0.5, 0, 1);
+            // A person physically pushing a cursor over always wins (§8.6).
+            if (_controller != null && _controller != peer) PreemptHolder(peer);
+            _busySentMs.Remove(peer);
             RefreshMonitors(force: true);
+            SyncPos();
+            _entryEdge = EdgeExt.Parse(Msg.Str(m, "edge")) ?? Edge.Left;
+            SetLease(peer, isExplicit: true);
+            double rel = Math.Clamp(Msg.Num(m, "rel") ?? 0.5, 0, 1);
 
             bool vertical = _entryEdge.IsVertical();
             double along = vertical ? _union.Top + rel * (_union.Height - 1) : _union.Left + rel * (_union.Width - 1);
@@ -200,14 +338,13 @@ namespace AirBridge.Input
 
             if (Monitors.At(_mons, nx, ny) == null)
             {
-                if (peer == _controller && LeavesThroughEntryEdge(cur, nx, ny, out double rel))
+                if (peer == _controller && _explicit && LeavesThroughEntryEdge(cur, nx, ny, out double rel))
                 {
                     var leave = Msg.Of("ctl_leave");
                     leave["edge"] = _entryEdge.ToWire();
                     leave["rel"] = Math.Round(rel, 4);
                     Send(peer, leave);
-                    _controller = null;
-                    Release(peer);
+                    EndLease();
                     return;
                 }
                 var c = Monitors.ClampToNearest(_mons, nx, ny);
@@ -217,6 +354,23 @@ namespace AirBridge.Input
             }
             _cx = nx; _cy = ny;
             MoveCursorTo((int)Math.Floor(_cx), (int)Math.Floor(_cy));
+        }
+
+        /// <summary>
+        /// ptr_abs (§8.2): x/y ∈ [0,1] normalised to the primary display (Windows is never a mirror source, so the
+        /// "mirrored display" case does not arise). No gain. Injected as an absolute virtual-desk move.
+        /// </summary>
+        private void MoveAbs(double x, double y)
+        {
+            if (double.IsNaN(x) || double.IsNaN(y)) return;
+            RefreshMonitors(force: false);
+            if (_mons.Count == 0) return;
+            var prim = _mons.FirstOrDefault(mm => mm.Primary) ?? _mons[0];
+            var b = prim.Bounds;
+            double px = b.Left + Math.Clamp(x, 0, 1) * (b.Width - 1);
+            double py = b.Top + Math.Clamp(y, 0, 1) * (b.Height - 1);
+            _cx = px + 0.5; _cy = py + 0.5; _havePos = true;
+            MoveCursorTo((int)Math.Round(px), (int)Math.Round(py));
         }
 
         private bool LeavesThroughEntryEdge(MonitorInfo cur, double nx, double ny, out double rel)
@@ -430,8 +584,8 @@ namespace AirBridge.Input
 
         private void ReleaseAllPeers()
         {
+            EndLease();
             foreach (var id in _held.Keys.ToList()) Release(id);
-            _controller = null;
         }
 
         // ---------------------------------------------------------------- actions
