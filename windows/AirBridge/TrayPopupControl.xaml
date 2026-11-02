@@ -20,7 +20,8 @@
                     <TextBlock Style="{StaticResource AB.Glyph}" Text="{StaticResource AB.G.Link}" Foreground="{StaticResource AB.Accent}"/>
                 </Border>
                 <StackPanel Grid.Column="1" Margin="10,0,0,0" VerticalAlignment="Center">
-                    <TextBlock Style="{StaticResource AB.Text}" Text="AirBridge" FontSize="15" FontWeight="SemiBold"/>
+                    <TextBlock Style="{StaticResource AB.Text}" Text="AirBridge" FontSize="15" FontWeight="SemiBold"
+                               MouseLeftButtonUp="Title_MouseLeftButtonUp" ToolTipService.IsEnabled="False"/>
                     <TextBlock x:Name="DeviceNameText" Style="{StaticResource AB.Text.Caption}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"/>
                 </StackPanel>
                 <Border Grid.Column="2" x:Name="StatusPill" CornerRadius="10" Padding="8,3" VerticalAlignment="Center" Background="{StaticResource AB.Muted}">

@@ -9,6 +9,7 @@ using System.Text.Json.Nodes;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
+using AirBridge.Net.Link;
 
 namespace AirBridge.Net
 {
@@ -29,6 +30,8 @@ namespace AirBridge.Net
         public ClipboardSync Clipboard { get; }
         public Discovery Discovery { get; }
         public TransferBoard Transfers { get; } = new();
+        /// <summary>Wi-Fi Direct link upgrades (§10.1, Windows host role).</summary>
+        public LinkManager Links { get; }
         private readonly Server _server;
         private readonly Client _client;
 
@@ -82,6 +85,9 @@ namespace AirBridge.Net
         public PeerService()
         {
             Identity = Identity.LoadOrCreate();
+            LinkLog.Sink = Log.Info;
+            Links = new LinkManager(this);
+            Links.Changed += RaiseState;
             Clipboard = new ClipboardSync(this);
             Discovery = new Discovery(Identity);
             _server = new Server(this);
@@ -96,6 +102,7 @@ namespace AirBridge.Net
             if (_started) return;
             _started = true;
             HandshakeCrypto.SelfTest();
+            Links.Settings.Probe(); // wfd_host caps probe (activation only) before the first hello
             _screen = Win32.PrimaryScreenPixels();
             _bestAddress = NetUtil.BestAddress();
             PeerBus.Transport = this;
@@ -151,6 +158,7 @@ namespace AirBridge.Net
             NetworkChange.NetworkAddressChanged -= OnNetworkEvent;
             NetworkChange.NetworkAvailabilityChanged -= OnNetworkAvailability;
             _client.StopAll();
+            Links.Shutdown();
             foreach (var s in _all.Keys) s.Close(s.IsReady ? "shutdown" : null, terminal: true);
             try { Task.WhenAll(_all.Values).Wait(1500); } catch { }
             _server.Stop();
@@ -162,6 +170,7 @@ namespace AirBridge.Net
         {
             Stop();
             _netDebounce.Dispose();
+            Links.Dispose();
             _serverRetry?.Dispose();
             Secrets.Dispose();
             Transfers.Dispose();
@@ -178,9 +187,9 @@ namespace AirBridge.Net
 
         internal void ReleasePendingSlot() => Interlocked.Decrement(ref _pending);
 
-        internal void RunInbound(WebSocket ws, string remote, int remotePort, IDisposable owner)
+        internal void RunInbound(WebSocket ws, string remote, int remotePort, IDisposable owner, IPAddress? local = null)
         {
-            var s = new Session(ws, SessionRole.Inbound, this, remote, remotePort, owner: owner);
+            var s = new Session(ws, SessionRole.Inbound, this, remote, remotePort, owner: owner, localAddress: local);
             _pendingInbound[s] = 0;
             RunSession(s);
         }
@@ -202,6 +211,7 @@ namespace AirBridge.Net
             h["app"] = Protocol.AppVersion;
             var caps = new JsonArray();
             foreach (var c in Protocol.Caps) caps.Add(c);
+            if (Links.Settings.AdvertiseWfdHost) caps.Add(LinkWire.CapHost); // policy: LinkSettings.AdvertiseWfdHost
             h["caps"] = caps;
             h["nonce"] = Protocol.B64(nonce);
             h["pk"] = Protocol.B64(pk);
@@ -220,6 +230,10 @@ namespace AirBridge.Net
                 _ready.TryGetValue(id, out old);
                 _ready[id] = s;
             }
+            // A dial over the Wi-Fi Direct adapter becomes the link session here (§10.1). The replacement below is legal for it:
+            // the host always keeps the newest session and sends bye replaced on the old one (§3.4 + §10.1 exception).
+            try { Links.OnSessionReady(s, old != s ? old : null); }
+            catch (Exception ex) { Log.Error("LinkManager.OnSessionReady threw", ex); }
             if (old != null && old != s)
             {
                 Log.Info($"Replacing older session for {s.PeerName}");
@@ -247,6 +261,8 @@ namespace AirBridge.Net
                     changed = true;
                 }
             }
+            try { Links.OnSessionEnded(s); }
+            catch (Exception ex) { Log.Error("LinkManager.OnSessionEnded threw", ex); }
             if (changed)
             {
                 Log.Info($"Session closed: {s}");
@@ -314,6 +330,15 @@ namespace AirBridge.Net
         private Session? ReadySession(string peerId)
         {
             lock (_gate) return _ready.TryGetValue(peerId, out var s) ? s : null;
+        }
+
+        internal Session? ReadySessionFor(string peerId) => ReadySession(peerId);
+
+        /// <summary>A link ended or failed: clear any "replaced" pause for this peer and dial it now if we are its client.</summary>
+        internal void ResumeDialing(string peerId)
+        {
+            var rec = Store.Get(peerId);
+            if (rec?.Dial == true) _client.EnsureLoop(peerId);
         }
 
         /// <summary>mDNS address for the id first (§2.3), last known address as fallback.</summary>
@@ -453,6 +478,22 @@ namespace AirBridge.Net
             "bad_hello" => "The other device sent an invalid handshake (is it up to date?).",
             _ => $"Pairing failed ({reason}).",
         };
+
+        /// <summary>
+        /// "Send fast": bring up a Wi-Fi Direct link first (§10.1; the offer is held until the link session is ready), then send on
+        /// the newest ready session. Falls back to the current session when the link fails. <paramref name="linkStatus"/> gets
+        /// null on success or the fail reason.
+        /// </summary>
+        public async Task<TransferResult> SendFilesFastAsync(string peerId, IReadOnlyList<string> paths, IProgress<double>? progress,
+                                                             Action<string?>? linkStatus, CancellationToken ct)
+        {
+            long total = 0;
+            foreach (var p in paths) { try { total += new System.IO.FileInfo(p).Length; } catch { } }
+            string? fail = await Links.EnsureLinkAsync(peerId, "xfer", total, ct).ConfigureAwait(false);
+            try { linkStatus?.Invoke(fail); } catch { }
+            ct.ThrowIfCancellationRequested();
+            return await SendFilesAsync(peerId, paths, progress, ct).ConfigureAwait(false);
+        }
 
         /// <summary>Send files to one ready peer.</summary>
         public Task<TransferResult> SendFilesAsync(string peerId, IReadOnlyList<string> paths, IProgress<double>? progress, CancellationToken ct)

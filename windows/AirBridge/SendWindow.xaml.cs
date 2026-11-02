@@ -9,6 +9,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using AirBridge.Net;
+using AirBridge.Net.Link;
 
 namespace AirBridge
 {
@@ -80,6 +81,8 @@ namespace AirBridge
                 DeviceList.Children.Add(cb);
             }
             SendButton.IsEnabled = _files.Length > 0;
+            FastBox.IsEnabled = targets.Any(t => t.Caps.Contains(LinkWire.CapJoin));
+            if (!FastBox.IsEnabled) FastBox.IsChecked = false;
         }
 
         private async void Send_Click(object sender, RoutedEventArgs e)
@@ -89,6 +92,8 @@ namespace AirBridge
             if (peers == null || selected.Count == 0) { StatusText.Text = "Select at least one device."; return; }
 
             _sending = true;
+            bool fast = FastBox.IsChecked == true;
+            FastBox.IsEnabled = false;
             SendButton.IsEnabled = false;
             StatusText.Text = "";
             DeviceList.Children.Clear();
@@ -98,7 +103,8 @@ namespace AirBridge
             {
                 var label = new TextBlock { Text = p.Name, Style = (Style)FindResource("AB.Text"), FontWeight = FontWeights.SemiBold };
                 var bar = new ProgressBar { Style = (Style)FindResource("AB.Progress"), Margin = new Thickness(0, 6, 0, 4) };
-                var state = new TextBlock { Text = "Waiting for the device to accept…", Style = (Style)FindResource("AB.Text.Caption") };
+                bool viaLink = fast && p.Caps.Contains(LinkWire.CapJoin);
+                var state = new TextBlock { Text = viaLink ? "Starting fast link…" : "Waiting for the device to accept…", Style = (Style)FindResource("AB.Text.Caption") };
                 var row = new StackPanel { Margin = new Thickness(0, 0, 0, 12) };
                 row.Children.Add(label); row.Children.Add(bar); row.Children.Add(state);
                 DeviceList.Children.Add(row);
@@ -110,7 +116,17 @@ namespace AirBridge
                 });
                 tasks.Add(Task.Run(async () =>
                 {
-                    try { return (p, await peers.SendFilesAsync(p.Id, _files, progress, _cts.Token)); }
+                    void OnLink(string? fail) => Dispatcher.BeginInvoke(new Action(() =>
+                    {
+                        if (state.Text.EndsWith('%')) return; // progress already reported
+                        state.Text = fail == null ? "Fast link ready · waiting for the device to accept…"
+                                                  : $"{TrayPopupControl.LinkFailText(fail)} Sending over the current connection…";
+                    }));
+                    try
+                    {
+                        return viaLink ? (p, await peers.SendFilesFastAsync(p.Id, _files, progress, OnLink, _cts.Token))
+                                       : (p, await peers.SendFilesAsync(p.Id, _files, progress, _cts.Token));
+                    }
                     catch (Exception ex) { return (p, new TransferResult(false, ex.Message, Array.Empty<string>())); }
                 }).ContinueWith(t =>
                 {

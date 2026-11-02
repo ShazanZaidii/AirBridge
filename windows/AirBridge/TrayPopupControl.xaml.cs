@@ -11,6 +11,7 @@ using System.Windows.Shapes;
 using System.Windows.Automation;
 using System.Threading;
 using AirBridge.Net;
+using AirBridge.Net.Link;
 using QRCoder;
 
 namespace AirBridge
@@ -88,9 +89,10 @@ namespace AirBridge
             // devices
             PeersPanel.Children.Clear();
             var paired = peers.PairedPeers();
+            var joinCapable = peers.Peers().Where(x => x.Caps.Contains(LinkWire.CapJoin)).Select(x => x.Id).ToHashSet();
             if (paired.Count == 0)
                 PeersPanel.Children.Add(new TextBlock { Text = "No paired devices yet. Scan the code below with your phone to start.", Style = St("AB.Text.Caption"), Margin = new Thickness(2, 0, 0, 0) });
-            foreach (var p in paired) PeersPanel.Children.Add(BuildPeerRow(p, p.Id == peers.ControlPeerId));
+            foreach (var p in paired) PeersPanel.Children.Add(BuildPeerRow(p, p.Id == peers.ControlPeerId, peers.Links.StatusFor(p.Id), joinCapable.Contains(p.Id)));
 
             // transfers
             var transfers = peers.Transfers.Snapshot();
@@ -99,7 +101,7 @@ namespace AirBridge
             foreach (var t in transfers) TransfersPanel.Children.Add(BuildTransferRow(t));
         }
 
-        private UIElement BuildPeerRow(PairedPeerView p, bool hasLease)
+        private UIElement BuildPeerRow(PairedPeerView p, bool hasLease, LinkStatusView link, bool joinCapable)
         {
             var row = new Border { Background = Res("AB.Card"), CornerRadius = new CornerRadius(10), Padding = new Thickness(10, 8, 6, 8), Margin = new Thickness(0, 0, 0, 6) };
             var grid = new Grid();
@@ -135,6 +137,9 @@ namespace AirBridge
             }
             text.Children.Add(nameLine);
             text.Children.Add(new TextBlock { Text = $"{state} · {role}", Style = St("AB.Text.Caption"), Foreground = p.Connected ? Res("AB.Accent") : Res("AB.MutedForeground"), TextWrapping = TextWrapping.NoWrap, TextTrimming = TextTrimming.CharacterEllipsis });
+            // Wi-Fi Direct "Fast link" chip (§10.1): shown for phones that can join one, or while a link is not Off.
+            if ((p.Connected && joinCapable) || link.Phase != LinkPhase.Off)
+                text.Children.Add(BuildLinkChip(link));
             Grid.SetColumn(text, 1);
             grid.Children.Add(text);
 
@@ -157,6 +162,51 @@ namespace AirBridge
             grid.Children.Add(actions);
             AutomationProperties.SetName(row, $"{p.Name}, {state}{(hasLease ? ", in control" : "")}");
             return row;
+        }
+
+        private UIElement BuildLinkChip(LinkStatusView link)
+        {
+            var (bg, fg) = link.Phase switch
+            {
+                LinkPhase.Ready => ("AB.AccentSoft", "AB.Accent"),
+                LinkPhase.Failed => ("AB.Muted", "AB.Warning"),
+                LinkPhase.Off => ("AB.Muted", "AB.MutedForeground"),
+                _ => ("AB.Muted", "AB.Foreground"),
+            };
+            var chip = new Border
+            {
+                Background = Res(bg), CornerRadius = new CornerRadius(6), Padding = new Thickness(6, 1, 6, 1), Margin = new Thickness(0, 3, 0, 0),
+                HorizontalAlignment = HorizontalAlignment.Left,
+                ToolTip = link.Phase == LinkPhase.Failed ? LinkFailText(link.Reason) : "Wi-Fi Direct link for fast transfers",
+            };
+            chip.Child = new TextBlock { Text = $"Fast link · {link.Text}", FontSize = 11, Foreground = Res(fg), TextWrapping = TextWrapping.NoWrap, TextTrimming = TextTrimming.CharacterEllipsis };
+            AutomationProperties.SetName(chip, $"Fast link {link.Text}");
+            return chip;
+        }
+
+        /// <summary>User-facing text for §10.1 link_fail reasons.</summary>
+        public static string LinkFailText(string? reason) => reason switch
+        {
+            LinkWire.Reason.HotspotActive => "Turn off Mobile Hotspot on this PC to use a fast link.",
+            LinkWire.Reason.NoGoSupport => "This PC's Wi-Fi adapter could not start a Wi-Fi Direct group.",
+            LinkWire.Reason.RadioOff => "Wi-Fi is off on this PC.",
+            LinkWire.Reason.NoIp => "The Wi-Fi Direct adapter got no address.",
+            LinkWire.Reason.JoinFailed => "The phone could not join the PC's Wi-Fi Direct network.",
+            LinkWire.Reason.ApprovalDenied => "The connection request was declined on the phone.",
+            LinkWire.Reason.Vpn => "A VPN is blocking the local connection.",
+            LinkWire.Reason.ApiLevel => "The phone's Android version cannot join (Android 10 or later needed).",
+            LinkWire.Reason.Timeout => "The fast link did not come up in time.",
+            LinkWire.Reason.Busy => "A fast link or transfer is already running.",
+            LinkWire.Reason.User => "Cancelled.",
+            _ => $"Fast link failed ({reason}).",
+        };
+
+        private void Title_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+        {
+            // Hidden Debug window for the Wi-Fi Direct device tests (S-W1/S-W3/S-W4): Ctrl+Shift+click the title.
+            if ((Keyboard.Modifiers & (ModifierKeys.Control | ModifierKeys.Shift)) != (ModifierKeys.Control | ModifierKeys.Shift)) return;
+            ClosePopup();
+            ShowSingle(() => new LinkDebugWindow());
         }
 
         private Button IconButton(string glyph, string label)

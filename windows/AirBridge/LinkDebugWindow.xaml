@@ -1,0 +1,79 @@
+<Window x:Class="AirBridge.LinkDebugWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="AirBridge · Wi-Fi Direct debug" Width="720" Height="760" MinWidth="560" MinHeight="520"
+        WindowStartupLocation="CenterScreen" Background="{StaticResource AB.Background}">
+    <!-- Hidden (Ctrl+Shift+click the tray title). Device tests S-W1 / S-W3 / S-W4 of the design notes §6.5. -->
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <!-- group owner -->
+        <Border Grid.Row="0" Background="{StaticResource AB.Card}" CornerRadius="12" Padding="12" Margin="0,0,0,10">
+            <StackPanel>
+                <TextBlock Style="{StaticResource AB.Text.Section}" Text="Group owner (derived credentials)"/>
+                <Grid Margin="0,4,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Style="{StaticResource AB.Text}" Text="Paired device" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                    <ComboBox Grid.Column="1" x:Name="PeerBox" DisplayMemberPath="Label" AutomationProperties.Name="Paired device"/>
+                </Grid>
+                <WrapPanel Margin="0,8,0,0">
+                    <CheckBox x:Name="DiscNoneBox" IsChecked="True" Foreground="{StaticResource AB.Foreground}" Margin="0,0,16,4"
+                              Content="ListenStateDiscoverability = None"/>
+                    <CheckBox x:Name="KeepDevicesBox" IsChecked="True" Foreground="{StaticResource AB.Foreground}" Margin="0,0,16,4"
+                              Content="FromIdAsync per request (2-min drop fix)"/>
+                    <CheckBox x:Name="ShowPskBox" Foreground="{StaticResource AB.Foreground}" Margin="0,0,16,4" Content="Show passphrase"
+                              Checked="ShowPsk_Changed" Unchecked="ShowPsk_Changed"/>
+                </WrapPanel>
+                <WrapPanel Margin="0,6,0,0">
+                    <Button x:Name="StartButton" Style="{StaticResource AB.Button.Primary}" Content="Start" MinWidth="90" Margin="0,0,8,0" Click="Start_Click"/>
+                    <Button x:Name="StopButton" Style="{StaticResource AB.Button.Secondary}" Content="Stop" MinWidth="90" Margin="0,0,8,0" Click="Stop_Click"/>
+                    <Button x:Name="LoopButton" Style="{StaticResource AB.Button.Secondary}" Content="Start/stop 10×" MinWidth="110" Margin="0,0,8,0" Click="Loop_Click"/>
+                    <Button x:Name="RotateButton" Style="{StaticResource AB.Button.Ghost}" Content="Rotate Wi-Fi key (gen+1)" Margin="0,0,8,0" Click="Rotate_Click"/>
+                    <Button Style="{StaticResource AB.Button.Ghost}" Content="Refresh info" Click="Refresh_Click"/>
+                </WrapPanel>
+            </StackPanel>
+        </Border>
+
+        <!-- info -->
+        <Border Grid.Row="1" Background="{StaticResource AB.Card}" CornerRadius="12" Padding="12" Margin="0,0,0,10">
+            <TextBlock x:Name="InfoText" Style="{StaticResource AB.Text.Caption}" FontFamily="{StaticResource AB.MonoFont}" TextWrapping="Wrap"/>
+        </Border>
+
+        <!-- throughput -->
+        <Border Grid.Row="2" Background="{StaticResource AB.Card}" CornerRadius="12" Padding="12" Margin="0,0,0,10">
+            <StackPanel>
+                <TextBlock Style="{StaticResource AB.Text.Section}" Text="TCP test on the Wi-Fi Direct interface (10 s per connection)"/>
+                <WrapPanel Margin="0,4,0,0">
+                    <TextBlock Style="{StaticResource AB.Text}" Text="Port" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                    <TextBox x:Name="PortBox" Style="{StaticResource AB.TextBox}" Width="80" Text="47641" Margin="0,0,16,0"
+                             ToolTip="Must be inside the firewall rule range 47632-47641 (AirBridge itself uses the first free port)."/>
+                    <RadioButton x:Name="SinkRadio" GroupName="mode" IsChecked="True" Foreground="{StaticResource AB.Foreground}" VerticalAlignment="Center"
+                                 Margin="0,0,12,0" Content="Sink (phone → PC)"/>
+                    <RadioButton x:Name="BlastRadio" GroupName="mode" Foreground="{StaticResource AB.Foreground}" VerticalAlignment="Center"
+                                 Margin="0,0,16,0" Content="Blast (PC → phone)"/>
+                    <Button x:Name="TcpButton" Style="{StaticResource AB.Button.Secondary}" Content="Listen" MinWidth="90" Click="Tcp_Click"/>
+                </WrapPanel>
+                <TextBlock x:Name="TcpText" Style="{StaticResource AB.Text.Caption}" FontFamily="{StaticResource AB.MonoFont}" Margin="0,6,0,0" TextWrapping="Wrap"
+                           Text="Connect from the phone (bound to the Wi-Fi Direct network) to the IP above and this port. Sink: send anything; Blast: just read."/>
+            </StackPanel>
+        </Border>
+
+        <Grid Grid.Row="3" Margin="0,0,0,4">
+            <TextBlock Style="{StaticResource AB.Text.Section}" Text="AirBridge.Link log" VerticalAlignment="Center"/>
+            <Button Style="{StaticResource AB.Button.Ghost}" Content="Copy log" HorizontalAlignment="Right" Click="CopyLog_Click"/>
+        </Grid>
+        <TextBox Grid.Row="4" x:Name="LogBox" Background="{StaticResource AB.Card}" Foreground="{StaticResource AB.Foreground}"
+                 BorderBrush="{StaticResource AB.Border}" Padding="6" IsReadOnly="True" FontFamily="{StaticResource AB.MonoFont}" FontSize="11"
+                 TextWrapping="NoWrap" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" AcceptsReturn="True"
+                 VerticalContentAlignment="Top" AutomationProperties.Name="Link log"/>
+    </Grid>
+</Window>
