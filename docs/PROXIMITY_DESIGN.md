@@ -15,6 +15,27 @@ Scope: Android ↔ macOS first, with Android ↔ Windows noted throughout.
 
 ---
 
+## 0. Strategy per device pair (supersedes the phase order in §4.4)
+
+The link is chosen **per pair of platforms**, not globally. Only the Apple pairs need clever workarounds; every other
+pair uses a platform-exposed peer-to-peer API directly. The selector (§4.1) holds a small `LinkProfile` table
+`(ownPlatform, peerPlatform) → ordered link types`, and falls back down the list.
+
+| Pair | High-speed link (no shared router) | Discovery / wake-up | Status |
+|---|---|---|---|
+| **Android ↔ Windows** | **Wi-Fi Direct**: Windows hosts a legacy P2P group (`WiFiDirectAdvertisementPublisher` + `LegacySettings`) and the phone joins it (`WifiNetworkSpecifier`); or the phone is group owner and Windows joins as a Wi-Fi Direct client. Both sides keep internet in the first form. | P2P device discovery itself, or a tiny BLE GATT "wake" write (Windows needs only GATT here, because bulk data does not use Bluetooth). Credentials can be **derived from the pairing key** so nothing needs to be exchanged. | Exposed APIs on both sides → **build first** (Phase A) |
+| **Android ↔ Linux** | Same idea: NetworkManager hotspot / `wpa_supplicant` P2P group; phone joins | BLE wake or P2P discovery | After the Linux client exists |
+| **Android ↔ Android** | Nearby Connections (`P2P_STAR`, Wi-Fi Direct/hotspot upgrade) | Nearby discovery | Already built |
+| **Android ↔ Mac** | Phone local-only hotspot that the Mac joins via CoreWLAN (§3), or USB NCM | BLE (§2) | The "make Apple cooperate" research track (Phase B) |
+| Windows ↔ Mac, Linux ↔ Mac, Windows ↔ Linux | LAN only for now (a Windows-hosted AP the Mac joins is possible later) | mDNS | — |
+| iOS ↔ any | Wi-Fi Aware / Multipeer for Apple peers, otherwise LAN | later | Not started |
+
+**Phase order:** A = Android↔Windows Wi-Fi Direct (new, first), B = Android↔Mac BLE + hotspot spikes and build (§4.4
+phases 0–2), C = Linux. Phases A and B are independent and can run in parallel because they sit behind the same
+`LinkProfile` selector and the same `link_*` messages.
+
+---
+
 ## 1. The AirDrop/AWDL question: settled
 
 ### 1.1 How AirDrop works
