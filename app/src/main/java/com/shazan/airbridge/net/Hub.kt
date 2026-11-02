@@ -144,6 +144,7 @@ object Hub : PeerBus.Transport {
     fun onReady(s: Session) {
         val id = s.peerId ?: return
         val old = ready.put(id, s)
+        if (s.isClosed) { ready.remove(id, s); return } // finished between becomeReady and here
         if (old != null && old !== s) old.close(Outcome.Ended("replaced"), "replaced") // §3.4
         PairStore.updateMeta(id, name = s.peerName, plat = s.peerPlat)
         if (s.isPairing) _events.tryEmit(NetEvent.PairResult(true, s.peerName))
@@ -161,7 +162,7 @@ object Hub : PeerBus.Transport {
                 _events.tryEmit(NetEvent.PairAgain(name))
             }
             is Outcome.PairFailed -> if (s.isPairing) _events.tryEmit(NetEvent.PairResult(false, s.peerName, outcome.reason))
-            else -> if (s.isPairing && !wasReady) {
+            else -> if (s.isPairing && !s.everReady) {
                 val why = when (outcome) {
                     is Outcome.Lost -> outcome.why
                     is Outcome.Ended -> outcome.why

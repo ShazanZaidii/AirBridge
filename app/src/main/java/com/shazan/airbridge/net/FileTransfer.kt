@@ -31,7 +31,8 @@ import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
 import java.util.Locale
-import java.util.concurrent.ArrayBlockingQueue
+import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -72,7 +73,7 @@ class FileTransfer(private val s: Session) {
             "xfer_done" -> incoming[id]?.enqueue(DONE)
             "xfer_accept" -> outgoing[id]?.update {
                 accepted = true
-                window = m.optLong("window", Protocol.RECV_WINDOW).coerceIn(Protocol.CHUNK_SIZE.toLong(), MAX_WINDOW)
+                window = m.optLong("window", Protocol.RECV_WINDOW).coerceIn(1L, MAX_WINDOW)
             }
             "xfer_reject" -> outgoing[id]?.update { rejected = m.str("reason") ?: "user" }
             "xfer_ack" -> outgoing[id]?.update {
@@ -182,13 +183,15 @@ class FileTransfer(private val s: Session) {
                 o.lastProgressAt = System.currentTimeMillis()
             }
 
-            val buf = ByteArray(Protocol.CHUNK_SIZE)
+            val window = synchronized(o.lock) { o.window }
+            val chunkSize = minOf(Protocol.CHUNK_SIZE.toLong(), window).toInt() // never exceed a tiny window
+            val buf = ByteArray(chunkSize)
             var sent = 0L
             srcs.forEachIndexed { i, f ->
                 openSrc(f).use { input ->
                     var off = 0L
                     while (off < f.size) {
-                        val want = minOf(Protocol.CHUNK_SIZE.toLong(), f.size - off).toInt()
+                        val want = minOf(chunkSize.toLong(), f.size - off).toInt()
                         val n = readFully(input, buf, want)
                         if (n < want) throw XferError("${f.name} changed while sending")
                         synchronized(o.lock) {
@@ -315,8 +318,10 @@ class FileTransfer(private val s: Session) {
     }
 
     private inner class Incoming(val id: Int, val files: List<Meta>, val total: Long) : Runnable {
-        // Bounded: the 8 MiB window already caps bytes in flight (16 × 512 KiB); slack for small-chunk senders.
-        private val queue = ArrayBlockingQueue<Any>(160)
+        // Bounded by bytes, never blocking the network reader: acks are sent after writing, so a sender
+        // that respects the window can never have more than RECV_WINDOW bytes queued here.
+        private val queue = LinkedBlockingQueue<Any>()
+        private val queuedBytes = AtomicLong()
         @Volatile var cancelled: String? = null
         private val key = "${s.peerId}:in:$id"
         private val notifId = notifIds.incrementAndGet()
@@ -335,7 +340,12 @@ class FileTransfer(private val s: Session) {
 
         fun enqueue(item: Any) {
             if (cancelled != null) return
-            if (!queue.offer(item, 15, TimeUnit.SECONDS)) cancel("error", tellPeer = true)
+            if (item is Protocol.Chunk && queuedBytes.addAndGet(item.len.toLong()) > Protocol.RECV_WINDOW + Protocol.CHUNK_SIZE) {
+                Log.w(TAG, "sender exceeded the window")
+                cancel("error", tellPeer = true)
+                return
+            }
+            queue.offer(item)
         }
 
         fun onChunk(c: Protocol.Chunk) {
@@ -374,7 +384,7 @@ class FileTransfer(private val s: Session) {
                             finishAll() // §6.1: xfer_complete only after xfer_done with everything written
                             return
                         }
-                        is Protocol.Chunk -> write(item)
+                        is Protocol.Chunk -> { queuedBytes.addAndGet(-item.len.toLong()); write(item) }
                     }
                 }
             } catch (e: Exception) {
@@ -410,7 +420,7 @@ class FileTransfer(private val s: Session) {
                 finishFile()
                 ack()
                 advanceZeroSize()
-            } else if (written - lastAck >= Protocol.ACK_EVERY) ack()
+            } else if (written - lastAck >= Protocol.ACK_EVERY / 2) ack() // keeps every gap ≤ 1 MiB for chunks ≤ 1 MiB
             ui()
         }
 

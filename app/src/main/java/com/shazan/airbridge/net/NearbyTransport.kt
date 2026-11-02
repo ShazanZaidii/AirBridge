@@ -122,9 +122,13 @@ object NearbyTransport {
         if (advertising) { stopAdvertising(); refresh() }
     }
 
-    /** Advertise + discover while (service running && visible) or the discovery screen is open. */
+    /**
+     * Advertise + discover while the discovery screen is open, or while the service runs and the
+     * phone is visible or has a Nearby-paired peer (so paired phones find each other again).
+     */
     @Synchronized fun refresh() {
-        val want = (serviceActive && visiblePref || uiRefs > 0) && hasPermissions()
+        val pairedNearby = PairStore.all().any { it.via == "nearby" }
+        val want = (serviceActive && (visiblePref || pairedNearby) || uiRefs > 0) && hasPermissions()
         if (want) { startAdvertising(); startDiscovery() }
         else { stopAdvertising(); stopDiscovery() }
     }
@@ -138,7 +142,7 @@ object NearbyTransport {
 
     private fun parseName(raw: String): Pair<String?, String> {
         val id = raw.substringBefore('|', "")
-        return if (id.length == 36 && id.count { it == '-' } == 4) id.lowercase() to raw.substringAfter('|')
+        return if (id.length == 36 && id.count { it == '-' } == 4) id to raw.substringAfter('|')
         else null to raw
     }
 
@@ -177,7 +181,10 @@ object NearbyTransport {
 
     fun requestConnection(endpointId: String) {
         client.requestConnection(endpointName(), endpointId, lifecycle)
-            .addOnFailureListener { e -> Log.w(TAG, "requestConnection failed: ${e.message}") }
+            .addOnFailureListener { e ->
+                Log.w(TAG, "requestConnection failed: ${e.message}")
+                _found.value.firstOrNull { it.endpointId == endpointId }?.peerId?.let { scheduleRetry(it) }
+            }
     }
 
     /** User confirmed (or rejected) the digits for a pending endpoint. */
@@ -252,6 +259,7 @@ object NearbyTransport {
             if (!result.status.isSuccess) {
                 endpoints.remove(endpointId)
                 Log.i(TAG, "connection to ${ep.name} failed: ${result.status.statusCode}")
+                ep.peerIdHint?.let { scheduleRetry(it) }
                 return
             }
             open(ep)
@@ -307,10 +315,20 @@ object NearbyTransport {
 
     private fun onSessionEnd(ep: Endpoint, s: Session, outcome: Outcome) {
         endpoints.remove(ep.id, ep)
-        try { client.disconnectFromEndpoint(ep.id) } catch (_: Exception) {}
+        val link = ep.link
+        Thread({
+            // Let bye/unpair/auth_fail reach the pipe, then give Nearby a moment to forward it.
+            if (link?.awaitDrained(1500) == true) Thread.sleep(300)
+            try { client.disconnectFromEndpoint(ep.id) } catch (_: Exception) {}
+        }, "airbridge-nearby-close").apply { isDaemon = true }.start()
         val peer = s.peerId ?: ep.peerIdHint ?: return
         if (s.everReady) backoff.remove(peer)
-        if (!outcome.reconnect || !serviceActive || PairStore.get(peer) == null) return
+        if (outcome.reconnect) scheduleRetry(peer)
+    }
+
+    /** Re-request a paired peer later if it is still discoverable (backoff 2 s → 30 s). */
+    private fun scheduleRetry(peer: String) {
+        if (!serviceActive || PairStore.get(peer)?.via != "nearby") return
         val delay = backoff[peer] ?: 2000L
         backoff[peer] = (delay * 2).coerceAtMost(30_000L)
         Hub.scheduler.schedule({
@@ -345,6 +363,10 @@ object NearbyTransport {
         @Volatile private var closed = false
         private var pipe: Array<ParcelFileDescriptor>? = null
         @Volatile private var readerStarted = false
+        private val drained = java.util.concurrent.CountDownLatch(1)
+
+        /** Waits (bounded) until frames queued before [close] — e.g. bye/unpair/auth_fail — are written. */
+        fun awaitDrained(ms: Long) = drained.await(ms, TimeUnit.MILLISECONDS)
 
         fun startWriter(client: ConnectionsClient) {
             val p = ParcelFileDescriptor.createPipe()
@@ -355,9 +377,10 @@ object NearbyTransport {
             Thread({
                 try {
                     DataOutputStream(BufferedOutputStream(ParcelFileDescriptor.AutoCloseOutputStream(p[1]), 64 * 1024)).use { out ->
-                        while (!closed) {
-                            val f = queue.poll(1, TimeUnit.SECONDS) ?: continue
-                            if (f === poison) break
+                        // Runs until the poison frame so everything queued before close() still goes out.
+                        while (true) {
+                            val f = queue.take()
+                            if (f === poison) { out.flush(); break }
                             out.writeByte(f.kind)
                             out.writeInt(f.data.size)
                             out.write(f.data)
@@ -367,6 +390,9 @@ object NearbyTransport {
                     }
                 } catch (e: Exception) {
                     if (!closed) session.onTransportClosed("nearby write: ${e.message}")
+                } finally {
+                    try { p[0].close() } catch (_: Exception) {}
+                    drained.countDown()
                 }
             }, "airbridge-nearby-w").apply { isDaemon = true }.start()
         }
@@ -413,7 +439,6 @@ object NearbyTransport {
             if (closed) return
             closed = true
             queue.offer(poison)
-            try { pipe?.get(0)?.close() } catch (_: Exception) {}
         }
 
         fun transportClosed(why: String) {

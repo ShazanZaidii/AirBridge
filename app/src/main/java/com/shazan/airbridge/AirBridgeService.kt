@@ -111,7 +111,10 @@ class AirBridgeService : Service() {
         scope.launch {
             PairStore.peers.map { list -> list.map { Triple(it.id, it.name, it.plat) } }
                 .distinctUntilChanged()
-                .collect { DirectShare.publish(this@AirBridgeService, PairStore.all()) }
+                .collect {
+                    DirectShare.publish(this@AirBridgeService, PairStore.all())
+                    NearbyTransport.refresh() // Nearby-paired peers keep discovery on
+                }
         }
     }
 
