@@ -51,7 +51,7 @@ class TargetKeys(private val host: TargetController) {
             Hid.PAGE_UP -> if (!imeKey(hid, mods)) host.swipe("down")
             Hid.PAGE_DOWN -> if (!imeKey(hid, mods)) host.swipe("up")
             else -> {
-                val s = text ?: KeyMap.text(hid, mods)
+                val s = printable(text) ?: KeyMap.text(hid, mods)
                 if (!s.isNullOrEmpty()) type(s)
             }
         }
@@ -237,6 +237,13 @@ class TargetKeys(private val host: TargetController) {
     }
 
     // ---------------------------------------------------------------- helpers
+
+    /** Drops control and private-use characters (e.g. macOS function-key glyphs U+F700…). */
+    private fun printable(t: String?): String? {
+        if (t.isNullOrEmpty()) return null
+        val ok = t.all { !Character.isISOControl(it) && it !in '\uE000'..'\uF8FF' }
+        return if (ok) t else null
+    }
 
     private fun editable(): AccessibilityNodeInfo? {
         val n = svc.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) ?: return null
