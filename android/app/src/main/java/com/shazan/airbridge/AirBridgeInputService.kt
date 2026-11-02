@@ -17,13 +17,6 @@ class AirBridgeInputService : AccessibilityService() {
 
         /** True while the accessibility service is connected. */
         val isRunning: Boolean get() = running != null
-
-        @Deprecated("v1 shim, removed at merge. Use isRunning.")
-        val instance: AirBridgeInputService? get() = running
-
-        @Deprecated("v1 shim, removed at merge. v2 control messages arrive through PeerBus.")
-        @Suppress("UNUSED_PARAMETER")
-        fun processCommand(command: String) {}
     }
 
     private var controller: TargetController? = null
