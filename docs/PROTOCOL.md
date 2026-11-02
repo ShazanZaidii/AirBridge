@@ -518,13 +518,16 @@ connected; the last choice is remembered and shown on screen).
 
 | Event | Effect |
 |-------|--------|
-| `ctl_enter` from peer A | A takes the lease immediately (a person physically pushing a cursor always wins). If B held it, B receives `ctl_leave` (entry edge + current `rel`) and the target releases B's held keys/buttons. |
+| `ctl_enter` from peer A | A takes the lease immediately (a person physically pushing a cursor always wins). If B held it via `ctl_enter`, B receives `ctl_leave` (entry edge + current `rel`); if B held an implicit (trackpad/mirror) lease, B receives `ctl_busy {holder: A}`. Either way the target releases B's held keys/buttons. |
 | `ptr_*`/`key`/`action` from peer A while nobody holds a lease | A takes an **implicit** lease (trackpad/mirror use). It expires after **1500 ms** without input from A. |
 | Input from peer B while A holds the lease | Dropped. B receives `{"t":"ctl_busy","holder":"<A's name>"}` at most once per 2 s and shows "Being controlled by A". Exception: `ctl_enter` from B pre-empts as above. |
 | `ctl_leave` from the holder, holder disconnects, or implicit lease expires | Lease released; held keys/buttons released. |
 
 Targets show their state ("Controlled by Shazan's MacBook"); controllers show theirs ("Controlling Pixel 9 ·
 press Ctrl+Opt+Cmd+Esc to return"). `key_state`, `clip` and file transfers are never affected by leases.
+A controller that receives `ctl_busy` stops forwarding and restores its local cursor without sending
+`ctl_leave`. A device that is itself under a lease does not capture onward (no chaining). An implicit lease
+whose holder has a button down is kept until the 5 s button watchdog instead of the 1500 ms idle timer.
 
 ### 8.7 Screen mirror ("touchscreen" mode)
 
@@ -553,7 +556,13 @@ Rules:
   `mirror_key`, parameter sets repeated with every keyframe, bitrate adaptive from `mirror_ack` lag; never
   queue more than 2 unacknowledged frames beyond the ack window (drop, don't buffer). Stop on `mirror_stop`,
   on sink disconnect, and when the sink stops acking for 3 s.
-- Sink: render the newest frame, discard older undecoded frames, keep the decoder in low-latency mode.
+- Sink: render the newest frame, discard older undecoded frames, keep the decoder in low-latency mode. Ack
+  every 10 received frames **or** every 500 ms, whichever comes first (the source may hold at most 12
+  unacknowledged frames; it re-sends the last frame at ~10 fps while the screen is static so acks keep
+  flowing). Decoders must tolerate SEI NAL units. H.264 keyframes = SPS, PPS, IDR; HEVC keyframes = VPS, SPS,
+  PPS, SEI, IDR; 4-byte start codes; `mirror_info.display` is in pixels; `pts` is strictly increasing.
+- Errors: `{"t":"error","code":"mirror_permission"}` (screen recording not granted) or `"mirror_codec"` (no
+  hardware encoder), each followed by `mirror_stop`.
   Touch → `ptr_abs` (normalised to the mirrored display) + `ptr_click`/`ptr_btn`; two fingers → `ptr_scroll
   px:true`; the on-screen keyboard sends `key`. Mirror input uses the normal lease rules (§8.6).
 - A source needs the OS screen-recording permission; it advertises `mirror_source` only when granted.
