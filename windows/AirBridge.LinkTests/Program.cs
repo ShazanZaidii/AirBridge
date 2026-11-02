@@ -69,7 +69,7 @@ internal static class Program
         Check(netsh.Count == 1 && netsh[0]["channel"] == "36" && netsh[0]["band"] == "5 GHz", "netsh parse");
 
         // Optional cross-check with the Android agent's shared vectors.
-        string android = args.Length > 0 ? args[0] : "/Users/xaidi/AndroidStudioProjects/AirBridge-wt/link/docs/test-vectors/wfd-creds.json";
+        string android = args.Length > 0 ? args[0] : "docs/test-vectors/wfd-creds.json";
         if (File.Exists(android)) CrossCheck(android);
         else Console.WriteLine($"(no Android vectors at {android}; skipped)");
 
