@@ -304,6 +304,9 @@ namespace AirBridge.Net
             foreach (var s in ReadySessions()) s.EnqueueText(json);
         }
 
+        // TODO(net half): route through Session's binary send path once it is exposed.
+        public bool SendBinary(string peerId, ReadOnlyMemory<byte> frame) => false;
+
         public IReadOnlyList<PeerInfo> Peers() => ReadySessions().Select(s => s.ToPeerInfo()).ToList();
 
         // ================================================================== UI API
