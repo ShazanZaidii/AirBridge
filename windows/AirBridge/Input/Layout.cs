@@ -18,7 +18,9 @@ namespace AirBridge.Input
 
     public sealed class LayoutData
     {
-        public int Version { get; set; } = 1;
+        /// <summary>2: firm default push, no automatic full top/bottom placements (migrated once from 1).</summary>
+        public int Version { get; set; } = CurrentVersion;
+        public const int CurrentVersion = 2;
         public Dictionary<string, PeerPlacement> Peers { get; set; } = new();
         /// <summary>Target side: when a macOS peer controls this PC, Cmd acts as Ctrl and Ctrl as Win.</summary>
         public bool SwapCmdCtrlForMac { get; set; } = false;
@@ -28,7 +30,7 @@ namespace AirBridge.Input
         public double TargetScrollPixelsPerNotch { get; set; } = 50.0;
 
         /// <summary>Controller side (§8.2 Capture intent): "easy" | "normal" | "firm" push-through strength.</summary>
-        public string CaptureStrength { get; set; } = "normal";
+        public string CaptureStrength { get; set; } = "firm";
         /// <summary>Controller side: crossing additionally requires holding Alt while pushing.</summary>
         public bool CaptureRequireAlt { get; set; } = false;
         /// <summary>Controller side: edges ("left"/"right"/"top"/"bottom") that never capture.</summary>
@@ -84,8 +86,17 @@ namespace AirBridge.Input
             _data.Peers ??= new();
             _data.CaptureDisabledEdges = (_data.CaptureDisabledEdges ?? new())
                 .Where(e => EdgeExt.Parse(e) != null).Select(e => e.ToLowerInvariant()).Distinct().ToList();
-            if (_data.CaptureStrength is not ("easy" or "normal" or "firm")) _data.CaptureStrength = "normal";
+            if (_data.CaptureStrength is not ("easy" or "normal" or "firm")) _data.CaptureStrength = "firm";
             foreach (var p in _data.Peers.Values) Sanitize(p);
+            if (_data.Version < LayoutData.CurrentVersion)
+            {
+                // v1 → v2 (§8.1 "Edge assignment is explicit"): a peer on a full top/bottom edge sat on the taskbar, and
+                // "normal" was only ever the old default; the new default push-through is firm (160).
+                AutoPlacement.ClearFullTopBottom(_data.Peers);
+                if (_data.CaptureStrength == "normal") _data.CaptureStrength = "firm";
+                _data.Version = LayoutData.CurrentVersion;
+                SaveLocked();
+            }
         }
 
         private static void Sanitize(PeerPlacement p)
@@ -188,6 +199,22 @@ namespace AirBridge.Input
             Changed?.Invoke();
         }
 
+        /// <summary>
+        /// Newly seen controllable peers get a free left/right edge with the middle span (<see cref="AutoPlacement"/>);
+        /// never the top or bottom edge, never a full-length edge.
+        /// </summary>
+        public static void AutoAssign(IEnumerable<(string Id, string Name)> peers)
+        {
+            bool changed;
+            lock (Gate)
+            {
+                EnsureLoaded();
+                changed = AutoPlacement.AssignNew(_data.Peers, peers);
+                if (changed) SaveLocked();
+            }
+            if (changed) Changed?.Invoke();
+        }
+
         /// <summary>Remember the latest display name of a peer that already has a placement.</summary>
         public static void UpdateName(string peerId, string name)
         {
@@ -215,6 +242,7 @@ namespace AirBridge.Input
         public static void Update(IReadOnlyList<PeerInfo> peers)
         {
             _current = peers ?? Array.Empty<PeerInfo>();
+            Layout.AutoAssign(_current.Where(p => p.Caps.Contains("ctl_target")).Select(p => (p.Id, p.Name)));
             foreach (var p in _current) Layout.UpdateName(p.Id, p.Name);
             Changed?.Invoke();
         }
