@@ -39,13 +39,17 @@ object EmulatorHost {
     }
 
     /** Every AirBridge host answering on the emulator's host computer (ports of §2.2). Blocking. */
-    fun scan(): List<DiscoveredHost> = (47632..47641).mapNotNull { peek(it) }
+    fun scan(): List<DiscoveredHost> = (47632..47641).mapNotNull { peek(HOST, it, "emulator-host:$it") }
 
-    private fun peek(port: Int): DiscoveredHost? {
+    /**
+     * Opens `/v2` at [host]:[port], sends our `hello`, reads the other side's `hello`, closes: who is
+     * there (no pairing, nothing stored). Blocking, at most ~3 s. Also used by [LanSweep].
+     */
+    fun peek(host: String, port: Int, serviceName: String): DiscoveredHost? {
         val done = CountDownLatch(1)
         var found: DiscoveredHost? = null
         val eph = Crypto.ephemeral()
-        val req = try { Request.Builder().url("http://$HOST:$port${Protocol.WS_PATH}").build() } catch (_: Exception) { return null }
+        val req = try { Request.Builder().url("http://$host:$port${Protocol.WS_PATH}").build() } catch (_: Exception) { return null }
         val ws = client.newWebSocket(req, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 val (w, h) = Identity.screenSize()
@@ -56,7 +60,7 @@ object EmulatorHost {
                     val m = JSONObject(text)
                     val id = m.optString("id")
                     if (m.optString("t") == "hello" && id.isNotBlank() && id != Identity.id) {
-                        found = DiscoveredHost(id, m.optString("name", "Computer"), m.optString("plat"), HOST, port, "emulator-host:$port")
+                        found = DiscoveredHost(id, m.optString("name", "Device"), m.optString("plat"), host, port, serviceName)
                     }
                 } catch (_: Exception) {}
                 webSocket.close(1000, null)
@@ -68,7 +72,7 @@ object EmulatorHost {
         done.await(3, TimeUnit.SECONDS)
         ws.cancel()
         eph.destroy()
-        found?.let { Log.i(TAG, "${it.name} (${it.plat}) answers at $HOST:$port") }
+        found?.let { Log.i(TAG, "${it.name} (${it.plat}) answers at $host:$port") }
         return found
     }
 }
