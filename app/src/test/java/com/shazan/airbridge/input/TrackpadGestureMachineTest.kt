@@ -3,7 +3,9 @@ package com.shazan.airbridge.input
 import com.shazan.airbridge.input.GestureIntent.Click
 import com.shazan.airbridge.input.GestureIntent.DragEnd
 import com.shazan.airbridge.input.GestureIntent.DragStart
+import com.shazan.airbridge.input.GestureIntent.MultiTap
 import com.shazan.airbridge.input.GestureIntent.Move
+import com.shazan.airbridge.input.GestureIntent.Zoom
 import com.shazan.airbridge.input.GestureIntent.Pinch
 import com.shazan.airbridge.input.GestureIntent.ResetAll
 import com.shazan.airbridge.input.GestureIntent.Scroll
@@ -150,10 +152,73 @@ class TrackpadGestureMachineTest {
         assertEquals(listOf(ThreeFingerSwipe(SwipeDir.UP)), out)
     }
 
-    @Test fun threeFingerTapDoesNothing() {
+    @Test fun threeFingerTapIsLookUpOnce() {
         ev(1, DOWN, 100f, 300f, 0); ev(2, DOWN, 200f, 300f, 5); ev(3, DOWN, 300f, 300f, 10)
         for (id in 1L..3L) ev(id, UP, id * 100f, 300f, 80)
+        assertEquals(listOf(MultiTap(3)), out)
+        assertEquals(0, clicks().size)
+    }
+
+    @Test fun slowThreeFingerRestIsNotATap() {
+        ev(1, DOWN, 100f, 300f, 0); ev(2, DOWN, 200f, 300f, 5); ev(3, DOWN, 300f, 300f, 10)
+        for (id in 1L..3L) ev(id, UP, id * 100f, 300f, 600)
         assertTrue(out.isEmpty())
+    }
+
+    @Test fun twoFingerSpreadZoomsInStepByStep() {
+        ev(1, DOWN, 300f, 400f, 0); ev(2, DOWN, 500f, 400f, 10) // 200 px apart
+        // spread 40 px per side in 8 moves => distance 200 -> 360 (>= 2 steps of 56 after the 40 px start)
+        for (i in 1..8) {
+            ev(1, MOVE, 300f - 10f * i, 400f, 20L + i * 16); ev(2, MOVE, 500f + 10f * i, 400f, 20L + i * 16)
+        }
+        ev(1, UP, 220f, 400f, 300); ev(2, UP, 580f, 400f, 300)
+        val zooms = out.filterIsInstance<Zoom>()
+        assertTrue("expected zoom steps, got $out", zooms.size >= 2)
+        assertTrue(zooms.all { !it.inward })
+        assertTrue(out.none { it is Scroll })
+    }
+
+    @Test fun twoFingerPinchInZoomsOut() {
+        ev(1, DOWN, 200f, 400f, 0); ev(2, DOWN, 600f, 400f, 10) // 400 px apart
+        for (i in 1..10) {
+            ev(1, MOVE, 200f + 12f * i, 400f, 20L + i * 16); ev(2, MOVE, 600f - 12f * i, 400f, 20L + i * 16)
+        }
+        ev(1, UP, 320f, 400f, 300); ev(2, UP, 480f, 400f, 300)
+        val zooms = out.filterIsInstance<Zoom>()
+        assertTrue("expected zoom steps, got $out", zooms.isNotEmpty())
+        assertTrue(zooms.all { it.inward })
+    }
+
+    @Test fun twoFingerScrollWithSlightSpreadStaysAScroll() {
+        ev(1, DOWN, 300f, 400f, 0); ev(2, DOWN, 500f, 400f, 10)
+        for (i in 1..12) {
+            ev(1, MOVE, 300f - 0.5f * i, 400f + 12f * i, 20L + i * 16); ev(2, MOVE, 500f + 0.5f * i, 400f + 12f * i, 20L + i * 16)
+        }
+        ev(1, UP, 294f, 544f, 300); ev(2, UP, 506f, 544f, 300)
+        assertTrue(out.any { it is Scroll })
+        assertTrue(out.none { it is Zoom })
+    }
+
+    @Test fun fiveFingerPinchInIsLaunchpad() {
+        val pos = fingersDown(5)
+        moveAll(pos, 10, 0f, 0f, dr = -10f)
+        liftAll(pos, 400)
+        assertEquals(listOf(Pinch(spread = false)), out)
+    }
+
+    @Test fun fiveFingerSpreadIsShowDesktop() {
+        val pos = fingersDown(5, r = 60f)
+        moveAll(pos, 10, 0f, 0f, dr = 10f)
+        liftAll(pos, 400)
+        assertEquals(listOf(Pinch(spread = true)), out)
+    }
+
+    @Test fun fiveFingerSwipeUpIsMissionControlOnce() {
+        val pos = fingersDown(5)
+        moveAll(pos, 20, 0f, -20f)
+        liftAll(pos, 600)
+        assertEquals(1, out.filterIsInstance<ThreeFingerSwipe>().size)
+        assertEquals(SwipeDir.UP, out.filterIsInstance<ThreeFingerSwipe>().first().dir)
     }
 
     @Test fun longPressDragStartsAndEnds() {
