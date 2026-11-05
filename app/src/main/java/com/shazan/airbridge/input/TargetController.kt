@@ -1,6 +1,7 @@
 package com.shazan.airbridge.input
 
 import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.AccessibilityServiceInfo
 import android.accessibilityservice.GestureDescription
 import android.graphics.Path
 import android.os.Handler
@@ -30,6 +31,9 @@ class TargetController(internal val service: AccessibilityService) {
         private const val DIRECT_IDLE_HIDE_MS = 10_000L
         private const val DOUBLE_TAP_WINDOW_MS = 500L
         private const val FLICK_MS = 80L
+        private const val SILENCE_CHECK_MS = 2_000L
+        /** After a hand-back the cursor keeps following in-flight moves while it fades. */
+        private const val FADE_FOLLOW_MS = 160L
     }
 
     internal val main = Handler(Looper.getMainLooper())
@@ -62,13 +66,29 @@ class TargetController(internal val service: AccessibilityService) {
     private var pendScrollY = 0f
     private var flicking = false
 
-    private val idleHide = Runnable { if (controllerId == null) cursor.hide() }
+    private val idleHide = Runnable { if (controllerId == null) cursor.fadeOut() }
 
     /** §8.6 lease table: who may drive this phone right now. */
     private val lease = ControlLease()
     private var leaseBubbleOn = false
     private val peerNames = HashMap<String, String>()
     private val leaseExpiry = Runnable { checkLeaseExpiry() }
+    private var reportedHolder: String? = null
+    private val silenceCheck = object : Runnable {
+        override fun run() {
+            val h = lease.holder ?: return
+            if (lease.isSilent(SystemClock.uptimeMillis(), PeerBus.lastHeard(h))) {
+                Log.i(TAG, "no message from lease holder $h for 10 s: releasing")
+                dropHolder(h)
+            } else main.postDelayed(this, SILENCE_CHECK_MS)
+        }
+    }
+    private val screenOff = object : android.content.BroadcastReceiver() {
+        override fun onReceive(c: android.content.Context?, i: android.content.Intent?) {
+            if (i?.action == android.content.Intent.ACTION_SCREEN_OFF) main.post { releaseControl("screen off") }
+        }
+    }
+    private var screenOffRegistered = false
 
     // ---------------------------------------------------------------- lifecycle
 
@@ -76,14 +96,50 @@ class TargetController(internal val service: AccessibilityService) {
         cursor.attach()
         x = screenW / 2f
         y = screenH / 2f
+        try {
+            service.registerReceiver(screenOff, android.content.IntentFilter(android.content.Intent.ACTION_SCREEN_OFF))
+            screenOffRegistered = true
+        } catch (t: Throwable) { Log.w(TAG, "screen-off receiver", t) }
     }
 
+    /** Service stopping (disabled, unbound): hand the cursor back first so the controller isn't stuck. */
     fun stop() {
+        val c = controllerId
+        if (c != null) try {
+            val edge = entryEdge ?: "left"
+            PeerBus.send(c, leaveMsg(edge, relAlong(edge)).put("reason", TargetAck.UNAVAILABLE))
+        } catch (_: Throwable) {}
         lease.clear()
+        controllerId = null
         syncLeaseBubble()
         releaseAll()
         cursor.detach()
         main.removeCallbacksAndMessages(null)
+        if (screenOffRegistered) {
+            try { service.unregisterReceiver(screenOff) } catch (_: Throwable) {}
+            screenOffRegistered = false
+        }
+    }
+
+    /**
+     * Stop being controlled (screen off, "Stop being controlled" in the trackpad screen): the holder
+     * gets `ctl_leave` (with our edge and rel if it entered through one), the cursor goes away.
+     */
+    fun releaseControl(why: String) {
+        val h = lease.holder ?: controllerId ?: run { if (cursor.visible) cursor.hide(); return }
+        Log.i(TAG, "releasing control of $h: $why")
+        if (h == controllerId) { leaveToController(); cursor.hide(); return }
+        lease.clear()
+        syncLeaseBubble()
+        PeerBus.send(h, JSONObject().put("t", "ctl_leave"))
+        leaveLocal()
+    }
+
+    /** The holder is gone (session ended, silent for 10 s): hide everything, release everything. */
+    private fun dropHolder(h: String) {
+        lease.onPeerGone(h)
+        if (controllerId == h || controllerId == null) leaveLocal() else releaseAll()
+        syncLeaseBubble()
     }
 
     fun onConfigurationChanged() = main.post {
@@ -104,26 +160,50 @@ class TargetController(internal val service: AccessibilityService) {
         main.post {
             for (p in peers) peerNames[p.id] = p.name
             val h = lease.holder
-            if (h != null && peers.none { it.id == h }) {
-                lease.onPeerGone(h)
-                if (controllerId == h) leaveLocal() else releaseAll()
-                syncLeaseBubble()
-            }
+            // Explicit or implicit holder: its cursor must not outlive its session (§8.6 "No stray state").
+            if (h != null && peers.none { it.id == h }) dropHolder(h)
             val c = controllerId
             if (c != null && peers.none { it.id == c }) leaveLocal()
+            if (lease.holder == null && controllerId == null && cursor.visible && !cursor.fadingOut) cursor.hide()
         }
     }
 
     private fun handle(peerId: String, msg: JSONObject) {
         val type = msg.optString("t")
+        lease.driving = InputRouter.driving
         when (type) {
             "ctl_enter" -> {
-                enter(peerId, msg.optString("edge", "left"), num(msg, "rel", 0.5f).coerceIn(0f, 1f))
+                if (!lease.enterAllowed(peerId)) {
+                    // §8.6 "No loops": we are driving this peer right now.
+                    Log.i(TAG, "ctl_enter from $peerId -> ctl_leave loop")
+                    PeerBus.send(peerId, JSONObject().put("t", "ctl_leave").put("reason", "loop"))
+                    return
+                }
+                val ok = try {
+                    enter(peerId, msg.optString("edge", "left"), num(msg, "rel", 0.5f).coerceIn(0f, 1f))
+                } catch (t: Throwable) {
+                    Log.w(TAG, "ctl_enter failed", t)
+                    if (lease.onLeave(peerId)) leaveLocal()
+                    false
+                }
                 syncLeaseBubble()
+                // §8.1: answer every ctl_enter at once so the controller never stays captured.
+                val reply = if (TargetAck.reply(ok, cursor.shown) == TargetAck.Reply.ACK) {
+                    JSONObject().put("t", TargetAck.ACK)
+                } else {
+                    if (ok && lease.onLeave(peerId)) { leaveLocal(); syncLeaseBubble() }
+                    JSONObject().put("t", "ctl_leave").put("reason", TargetAck.UNAVAILABLE)
+                }
+                Log.i(TAG, "ctl_enter from $peerId -> ${reply.optString("t")} ${reply.optString("reason")}".trimEnd())
+                PeerBus.send(peerId, reply)
                 return
             }
             "ctl_leave" -> {
-                if (lease.onLeave(peerId)) leaveLocal()
+                val wasController = controllerId == peerId
+                if (lease.onLeave(peerId) || wasController) {
+                    lease.onHandBack(peerId, SystemClock.uptimeMillis())
+                    leaveLocal()
+                }
                 syncLeaseBubble()
                 return
             }
@@ -131,8 +211,13 @@ class TargetController(internal val service: AccessibilityService) {
         // ptr_* / key / action: lease rules (§8.6).
         when (val d = lease.onInput(peerId, SystemClock.uptimeMillis())) {
             is ControlLease.Decision.Drop -> {
+                // Late moves from the controller we just handed back to: the fading cursor follows them.
+                if (type == "ptr_move" && peerId == fadingFrom && SystemClock.uptimeMillis() - fadingAt < FADE_FOLLOW_MS) {
+                    followFade(num(msg, "dx"), num(msg, "dy"))
+                }
                 d.busyTo?.let { to ->
-                    val holderName = lease.holder?.let { peerNames[it] ?: lookupName(it) } ?: "another device"
+                    val holderName = if (d.loop) com.shazan.airbridge.net.Identity.name.ifBlank { "this phone" }
+                    else lease.holder?.let { peerNames[it] ?: lookupName(it) } ?: "another device"
                     PeerBus.send(to, JSONObject().put("t", "ctl_busy").put("holder", holderName))
                 }
                 return
@@ -140,6 +225,7 @@ class TargetController(internal val service: AccessibilityService) {
             is ControlLease.Decision.Accept -> {
                 if (d.gained) syncLeaseBubble()
                 scheduleLeaseExpiry()
+                scheduleSilenceCheck()
             }
         }
         when (type) {
@@ -173,9 +259,23 @@ class TargetController(internal val service: AccessibilityService) {
         } else scheduleLeaseExpiry()
     }
 
-    /** §5: hide the clipboard bubble while this phone is under a control lease. */
+    private fun scheduleSilenceCheck() {
+        main.removeCallbacks(silenceCheck)
+        if (lease.holder != null) main.postDelayed(silenceCheck, SILENCE_CHECK_MS)
+    }
+
+    /**
+     * §5: hide the clipboard bubble while this phone is under a control lease; publish the holder
+     * ("Controlling you", trackpad loop guard). Call after every lease change.
+     */
     private fun syncLeaseBubble() {
-        val on = lease.holder != null
+        val h = lease.holder
+        if (h != reportedHolder) {
+            reportedHolder = h
+            InputRouter.setControlledBy(h)
+            if (h != null) scheduleSilenceCheck() else main.removeCallbacks(silenceCheck)
+        }
+        val on = h != null
         if (on == leaseBubbleOn) return
         leaseBubbleOn = on
         NetHooks.setBubbleSuppressed("lease", on)
@@ -188,7 +288,26 @@ class TargetController(internal val service: AccessibilityService) {
 
     // ---------------------------------------------------------------- enter / leave
 
-    private fun enter(peerId: String, edgeIn: String, rel: Float) {
+    /** Can we show a cursor and inject input right now? Re-tries the overlay once if it failed before. */
+    private fun canBeTarget(): Boolean {
+        cursor.updateScreen() // true size/orientation now, so `rel` maps to the matching edge point
+        if (!cursor.attached) {
+            cursor.attach()
+            x = clampX(x); y = clampY(y)
+        }
+        val gestures = try {
+            (service.serviceInfo?.capabilities ?: AccessibilityServiceInfo.CAPABILITY_CAN_PERFORM_GESTURES) and
+                AccessibilityServiceInfo.CAPABILITY_CAN_PERFORM_GESTURES != 0
+        } catch (_: Throwable) { true }
+        return TargetAck.canAccept(com.shazan.airbridge.AirBridgeInputService.isRunning, cursor.attached, gestures, screenW, screenH)
+    }
+
+    /** Returns false (lease untouched) when this phone can't be a target right now. */
+    private fun enter(peerId: String, edgeIn: String, rel: Float): Boolean {
+        if (!canBeTarget()) {
+            Log.w(TAG, "ctl_enter from $peerId: cannot show the cursor / inject input")
+            return false
+        }
         val prev = lease.onEnter(peerId, SystemClock.uptimeMillis())
         main.removeCallbacks(leaseExpiry)
         if (prev != null) {
@@ -212,23 +331,50 @@ class TargetController(internal val service: AccessibilityService) {
             "top" -> { x = rel * w; y = 0f }
             "bottom" -> { x = rel * w; y = h }
         }
-        cursor.showAt(x, y)
+        fadingFrom = null
+        cursor.showAt(x, y, fade = true) // §8.6: fade in; ctl_ack goes out as the fade starts
+        return true
     }
 
-    /** Our cursor went back through the entry edge: hand control back to the controller. */
-    private fun leaveToController() {
+    /**
+     * Our cursor went back through the entry edge: hand control back to the controller at once
+     * (§8.6), then fade the cursor out while it keeps following the in-flight motion.
+     */
+    private fun leaveToController(visX: Float = x, visY: Float = y) {
         val c = controllerId ?: return
         val edge = entryEdge ?: "left"
         val rel = relAlong(edge)
-        lease.clear()
-        syncLeaseBubble()
-        leaveLocal()
         PeerBus.send(c, leaveMsg(edge, rel))
+        lease.clear()
+        lease.onHandBack(c, SystemClock.uptimeMillis())
+        syncLeaseBubble()
+        releaseAll()
+        controllerId = null
+        entryEdge = null
+        overshoot = 0f
+        fadeX = visX; fadeY = visY
+        fadingFrom = c
+        fadingAt = SystemClock.uptimeMillis()
+        cursor.moveTo(visX, visY)
+        cursor.fadeOut()
+    }
+
+    private var fadingFrom: String? = null
+    private var fadingAt = 0L
+    private var fadeX = 0f
+    private var fadeY = 0f
+
+    /** Visual only (nothing injected): the fading cursor follows past the edge, no clamp jump. */
+    private fun followFade(dx: Float, dy: Float) {
+        if (!cursor.fadingOut) return
+        fadeX += dx * GAIN; fadeY += dy * GAIN
+        cursor.moveTo(fadeX, fadeY)
     }
 
     private fun leaveLocal() {
         releaseAll()
         cursor.hide()
+        fadingFrom = null
         controllerId = null
         entryEdge = null
         overshoot = 0f
@@ -256,7 +402,7 @@ class TargetController(internal val service: AccessibilityService) {
     /** Pointer input from a peer that is not the edge controller = trackpad/direct mode (§8.1). */
     private fun touch(peerId: String) {
         if (controllerId == null) {
-            if (!cursor.visible) cursor.showAt(x, y)
+            if (!cursor.visible || cursor.fadingOut) cursor.showAt(x, y, fade = true)
             main.removeCallbacks(idleHide)
             main.postDelayed(idleHide, DIRECT_IDLE_HIDE_MS)
         }
@@ -275,7 +421,12 @@ class TargetController(internal val service: AccessibilityService) {
             val beyond = when (edge) { "left" -> -nx; "right" -> nx - w; "top" -> -ny; else -> ny - h }
             val towards = when (edge) { "left" -> -dx; "right" -> dx; "top" -> -dy; else -> dy }
             if (beyond > 0f) overshoot += beyond else if (towards < 0f) overshoot = 0f
-            if (overshoot > LEAVE_PX) { leaveToController(); return }
+            if (overshoot > LEAVE_PX) {
+                // Visual position continues past the edge (unclamped) so there is no snap.
+                leaveToController(clampX(x) + (nx - x).coerceIn(-LEAVE_PX * 4, LEAVE_PX * 4),
+                    clampY(y) + (ny - y).coerceIn(-LEAVE_PX * 4, LEAVE_PX * 4))
+                return
+            }
         }
         x = clampX(nx)
         y = clampY(ny)
