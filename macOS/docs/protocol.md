@@ -525,7 +525,7 @@ Platform mapping (each implementation owns a complete table):
 | name | Meaning (targets ignore what they can't do) |
 |------|------|
 | `home` `back` `recents` `last_app` `app_drawer` `notifications` `quick_settings` | Android navigation |
-| `mission_control` `app_expose` `desktop_left` `desktop_right` `spotlight` `lock` `keyboard_toggle` | macOS / desktop (`desktop_left` = switch to the desktop on the left, i.e. a three-finger swipe to the right on macOS) |
+| `mission_control` `app_expose` `desktop_left` `desktop_right` `show_desktop` `spotlight` `lock` `keyboard_toggle` | macOS / desktop (`desktop_left` = switch to the desktop on the left, i.e. a three-finger swipe to the right on macOS; `show_desktop` = move windows aside to show the desktop, the four-finger spread on macOS). The phone trackpad sends these for three- and four-finger swipes alike (up `mission_control`, down `app_expose`, right `desktop_left`, left `desktop_right`), and four-finger pinch together = `app_drawer` (Launchpad on macOS) / apart = `show_desktop` |
 | `vol_up` `vol_down` `vol_mute` `brightness_up` `brightness_down` | hardware |
 | `media_play_pause` `media_next` `media_prev` | media |
 | `assistant` `dnd_toggle` | system |
