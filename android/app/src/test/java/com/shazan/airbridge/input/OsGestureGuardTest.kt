@@ -145,10 +145,12 @@ class OsGestureGuardTest {
         assertEquals("12:3|x:", s.get(SettingsNs.SYSTEM, "k"))
     }
 
-    @Test fun tableHasNoActiveEntriesYet() {
-        // vivo keys are pending verification on a real device; nothing may be switched until then.
-        assertTrue(OemGestureSwitches.forManufacturer("vivo").isEmpty())
+    @Test fun onlyTheVerifiedVivoSwitchIsInTheTable() {
+        // Verified on a V2404 (com.vivo.upslide: smartkey_shot_switch gates every three-finger screenshot gesture).
+        assertEquals(listOf(GestureSwitch(SettingsNs.SYSTEM, "smartkey_shot_switch", "0")), OemGestureSwitches.forManufacturer("vivo"))
+        assertEquals(OemGestureSwitches.forManufacturer("vivo"), OemGestureSwitches.forManufacturer(" VIVO "))
         assertTrue(OemGestureSwitches.forManufacturer(null).isEmpty())
+        assertTrue(OemGestureSwitches.forManufacturer("Google").isEmpty())
     }
 
     // ---------------------------------------------------------------- loss detector

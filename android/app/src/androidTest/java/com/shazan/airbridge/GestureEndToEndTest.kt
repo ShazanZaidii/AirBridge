@@ -191,7 +191,7 @@ class GestureEndToEndTest {
         sent.clear(); pinch(4, inward = false, cx, cy)
         assertEquals("$label: 4-finger spread", listOf("show_desktop"), actions())
         sent.clear(); swipe(3, 0f, -step, cx, cy)
-        assertTrue("$label: three fingers must send nothing, got ${actions()}", actions().isEmpty())
+        assertEquals("$label: three-finger swipe up", listOf("mission_control"), actions())
     }
 
     // ------------------------------------------------------------------------------- tests
@@ -272,7 +272,7 @@ class GestureEndToEndTest {
         sent.clear(); pinch(5, inward = true, w / 2f, h * 0.45f)
         assertEquals("screen mode: 5-finger pinch", listOf("app_drawer"), actions())
         sent.clear(); swipe(3, 0f, -14f, w / 2f, cy + 120f)
-        assertTrue("screen mode: three fingers send nothing", actions().isEmpty())
+        assertEquals("screen mode: three-finger swipe up", listOf("mission_control"), actions())
 
         for ((desc, action) in listOf("Mission Control" to "mission_control", "Show or hide the Dock" to "dock_toggle",
             "Spotlight" to "spotlight", "Show or hide the menu bar" to "menu_bar_toggle", "Launchpad" to "app_drawer")) {

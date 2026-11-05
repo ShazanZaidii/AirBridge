@@ -136,14 +136,37 @@ class TrackpadGestureMachineTest {
         assertEquals(listOf(Click(0, 1)), out)
     }
 
-    @Test fun threeFingersDoNothingAtAll() {
-        // Swipe, tap and pinch with three fingers: Android skins own those, so the pad ignores them.
+    @Test fun threeFingerSwipeCountsButThreeFingerTapDoesNothing() {
         ev(1, DOWN, 100f, 300f, 0); ev(2, DOWN, 200f, 300f, 5); ev(3, DOWN, 300f, 300f, 10)
         for (i in 1..30) for (id in 1L..3L) ev(id, MOVE, id * 100f + i * 15f, 300f, 10L + i * 16)
         for (id in 1L..3L) ev(id, UP, id * 100f + 450f, 300f, 600)
+        assertEquals(listOf(Swipe(SwipeDir.RIGHT, 3)), out)
+        out.clear()
         ev(1, DOWN, 100f, 300f, 800); ev(2, DOWN, 200f, 300f, 805); ev(3, DOWN, 300f, 300f, 810)
         for (id in 1L..3L) ev(id, UP, id * 100f, 300f, 880)
         assertTrue("got $out", out.isEmpty())
+    }
+
+    @Test fun touchTakenByThePhoneIsRecoveredFromItsMotionSoFar() {
+        // vivo cancels a 4-finger touch after it has slid 60 px up: still Mission Control.
+        val pos = fingersDown(4)
+        moveAll(pos, 3, 0f, -20f)
+        ev(-1, CANCEL, 0f, 0f, 200)
+        assertEquals(listOf(Swipe(SwipeDir.UP, 4), ResetAll), out)
+    }
+
+    @Test fun pinchTakenByThePhoneIsRecovered() {
+        val pos = fingersDown(5)
+        moveAll(pos, 4, 0f, 0f, dr = -10f) // 40 px together
+        ev(-1, CANCEL, 0f, 0f, 200)
+        assertEquals(listOf(Pinch(spread = false), ResetAll), out)
+    }
+
+    @Test fun touchTakenBeforeItMovedRecoversNothing() {
+        val pos = fingersDown(3)
+        moveAll(pos, 1, 0f, -5f)
+        ev(-1, CANCEL, 0f, 0f, 100)
+        assertEquals(listOf(ResetAll), out)
     }
 
     @Test fun firmPressIsAForceClickInsteadOfATap() {
@@ -403,7 +426,7 @@ class TrackpadGestureMachineTest {
         assertEquals("show_desktop", TrackpadSender.pinchAction(true))
     }
 
-    @Test fun threeFingerPinchIsNotAPinch() {
+    @Test fun threeFingerPinchIsNotAPinch() { // pinch needs four or five
         val pos = fingersDown(3)
         moveAll(pos, 10, 0f, 0f, dr = -10f)
         liftAll(pos, 400)

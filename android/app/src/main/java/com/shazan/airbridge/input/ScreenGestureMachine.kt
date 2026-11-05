@@ -52,6 +52,8 @@ class ScreenGestureMachine(
         val pinchPx: Float = 80f,
         val zoomStartPx: Float = 40f,
         val zoomStepPx: Float = 56f,
+        val recoverSwipePx: Float = 40f,
+        val recoverPinchPx: Float = 30f,
         val watchdogMs: Long = 1500,
         val dragWatchdogMs: Long = 6000,
     )
@@ -282,6 +284,11 @@ class ScreenGestureMachine(
 
     private fun cancel() {
         val wasActive = ptrs.isNotEmpty() || state != State.Idle
+        if (state == State.Multi) when (val r = multi.recover(config.recoverSwipePx, config.recoverPinchPx)) {
+            is MultiFingerResult.Swipe -> emit(ScreenIntent.Swipe(r.dir, r.fingers.coerceAtMost(5)))
+            is MultiFingerResult.Pinch -> emit(ScreenIntent.Pinch(r.spread))
+            null -> Unit
+        }
         if (state == State.Dragging) {
             val p = ptrs[primary]
             emit(ScreenIntent.Release(p?.x ?: Float.NaN, p?.y ?: Float.NaN))
