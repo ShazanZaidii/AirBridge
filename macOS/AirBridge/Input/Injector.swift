@@ -119,7 +119,14 @@ nonisolated final class Injector: @unchecked Sendable {
             release(peer)
             return
         case "ptr_move", "ptr_scroll", "ptr_btn", "ptr_click", "ptr_abs", "key", "action":
-            guard admit(peer) else { return }
+            guard admit(peer) else {
+                if t != "ptr_move" && t != "ptr_abs" && t != "ptr_scroll" {
+                    InputLog.shared.log("DROPPED \(t)\((m["name"] as? String).map { " " + $0 } ?? "") from \(self.name(peer)): " +
+                        (ControlGate.shared.controlling == peer ? "this Mac is controlling it (loop guard)"
+                            : "lease held by \(lease.map { self.name($0.peer) } ?? "?")"))
+                }
+                return
+            }
         default:
             return
         }
@@ -130,8 +137,10 @@ nonisolated final class Injector: @unchecked Sendable {
             scroll(peer, Msg.num(m["dx"]) ?? 0, Msg.num(m["dy"]) ?? 0, px: Msg.bool(m["px"]) ?? true)
         case "ptr_btn":
             guard let b = Msg.int(m["b"]), let down = Msg.bool(m["down"]) else { return }
+            InputLog.shared.log("button b=\(b) \(down ? "down" : "up") from \(name(peer))")
             button(peer, b, down: down)
         case "ptr_click":
+            InputLog.shared.log("click b=\(Msg.int(m["b"]) ?? 0) n=\(Msg.int(m["n"]) ?? 1) from \(name(peer))")
             click(peer, Msg.int(m["b"]) ?? 0, count: Msg.int(m["n"]) ?? 1)
         case "ptr_abs":
             guard let x = Msg.num(m["x"]), let y = Msg.num(m["y"]) else { return }
@@ -141,7 +150,7 @@ nonisolated final class Injector: @unchecked Sendable {
             key(peer, hid: Msg.int(m["hid"]) ?? 0, down: down, mods: Msg.int(m["mods"]),
                 rep: Msg.bool(m["rep"]) ?? false, text: m["text"] as? String)
         case "action":
-            if let name = m["name"] as? String { action(name) }
+            if let name = m["name"] as? String { action(name, from: self.name(peer)) }
         default:
             break
         }
@@ -593,65 +602,165 @@ nonisolated final class Injector: @unchecked Sendable {
         }
     }
 
-    private func action(_ name: String) {
-        if let nx = KeyMap.nxKeyType(forAction: name) { pressMediaKey(nx); return }
-        switch name {
-        case "mission_control": runMissionControl([], fallback: 0x7E)
-        case "app_expose": runMissionControl(["2"], fallback: 0x7D)
-        case "desktop_left": hotkey(79, default: ([0x3B], 0x7B))   // "Move left a space", Ctrl+←
-        case "desktop_right": hotkey(81, default: ([0x3B], 0x7C))  // "Move right a space", Ctrl+→
-        case "spotlight": hotkey(64, default: ([0x37], 0x31))      // "Show Spotlight search", Cmd+Space
-        case "show_desktop": hotkey(36, default: ([], 0x67))       // "Show Desktop", F11 (4/5-finger spread)
-        case "app_drawer": openAppsGrid()                          // Launchpad / the Apps view (4/5-finger pinch)
-        case "zoom_in": chord([0x37], 0x18)        // Cmd+= (2-finger spread)
-        case "zoom_out": chord([0x37], 0x1B)       // Cmd+-  (2-finger pinch)
-        case "look_up": chord([0x3B, 0x37], 0x02)  // Ctrl+Cmd+D (firm press = force click)
-        case "copy": chord([0x37], 0x08)           // Cmd+C
-        case "paste": chord([0x37], 0x09)          // Cmd+V
-        case "lock": lockScreen()
-        case "keyboard_toggle": toggleAccessibilityKeyboard()
-        case "dock_toggle": hotkey(52, default: ([0x37, 0x3A], 0x02))   // "Turn Dock hiding on/off", Cmd+Opt+D
-        case "screenshot": hotkey(184, default: ([0x37, 0x38], 0x17))   // "Screenshot and recording options", Cmd+Shift+5
-        case "menu_bar_toggle": toggleMenuBarHiding()
-        case "notifications": showNotificationCenter()
-        default: break // Android-only and gesture actions have no Mac meaning
+    /// How an action is carried out. Logged with every action (InputLog), and forceable from the
+    /// DEBUG-only link airbridge://debug/action?name=…&via=… so each path can be tested on its own.
+    enum Via: String { case coredock, sysevents, cgevent, dockpref, applescript }
+
+    /// DEBUG builds: run `name` through `via` (or its normal path) as if a peer had sent it.
+    func debugAction(_ name: String, via: String?) {
+        queue.async { self.action(name, from: "debug link", forced: via.flatMap(Via.init(rawValue:))) }
+    }
+
+    private func action(_ name: String, from peer: String = "", forced: Via? = nil) {
+        let who = peer.isEmpty ? "" : " from \(peer)"
+        if let nx = KeyMap.nxKeyType(forAction: name) {
+            pressMediaKey(nx)
+            InputLog.shared.log("action \(name)\(who) -> media key \(nx)")
+            return
+        }
+        InputLog.shared.timed("action \(name)\(who)") { () -> String in
+            switch name {
+            // Mission Control / App Exposé / Show Desktop: the Dock's own notifications (verified on macOS 26.5 for
+            // Mission Control and App Exposé). Launching the Mission Control binary does nothing on macOS 26
+            // (verified), which is what killed swipe up / down. Dock hiding: ⌥⌘D through System Events, like v1.
+            case "mission_control": return run(name, forced ?? .coredock, hotkeyId: 32, def: (0x40000, 0x7E), dockNote: "com.apple.expose.awake")
+            case "app_expose": return run(name, forced ?? .coredock, hotkeyId: 33, def: (0x40000, 0x7D), dockNote: "com.apple.expose.front.awake")
+            case "show_desktop": return run(name, forced ?? .coredock, hotkeyId: 36, def: (0x800000, 0x67), dockNote: "com.apple.showdesktop.awake")
+            case "desktop_left": return run(name, forced ?? .cgevent, hotkeyId: 79, def: (0x40000, 0x7B))
+            case "desktop_right": return run(name, forced ?? .cgevent, hotkeyId: 81, def: (0x40000, 0x7C))
+            case "spotlight": return run(name, forced ?? .cgevent, hotkeyId: 64, def: (0x100000, 0x31))
+            case "dock_toggle": return run(name, forced ?? .sysevents, hotkeyId: 52, def: (0x180000, 0x02))
+            case "screenshot": return run(name, forced ?? .cgevent, hotkeyId: 184, def: (0x120000, 0x17))
+            case "menu_bar_toggle": return toggleMenuBarHiding()
+            case "notifications": showNotificationCenter(); return "fn+N (or the user's shortcut)"
+            case "app_drawer": openAppsGrid(); return "opened the Apps view / Launchpad"
+            case "zoom_in": chord([0x37], 0x18); return "Cmd+="
+            case "zoom_out": chord([0x37], 0x1B); return "Cmd+-"
+            case "look_up": chord([0x3B, 0x37], 0x02); return "Ctrl+Cmd+D (force click)"
+            case "copy": chord([0x37], 0x08); return "Cmd+C"
+            case "paste": chord([0x37], 0x09); return "Cmd+V"
+            case "lock": lockScreen(); return "locked"
+            case "keyboard_toggle": toggleAccessibilityKeyboard(); return "Accessibility Keyboard toggled"
+            default: return "ignored (no Mac meaning)"
+            }
         }
     }
 
-    /// Posts the user's configured shortcut for a system symbolic hotkey (com.apple.symbolichotkeys),
-    /// so Spaces/Spotlight work even when the defaults were remapped. No AppleScript involved.
-    private func hotkey(_ id: Int, default def: ([UInt16], UInt16)) {
-        let all = UserDefaults(suiteName: "com.apple.symbolichotkeys")?.dictionary(forKey: "AppleSymbolicHotKeys")
-        guard let entry = all?[String(id)] as? [String: Any] else { chord(def.0, def.1); return }
-        if let on = Msg.bool(entry["enabled"]), !on {
-            NSLog("[AirBridge] inject: system shortcut %d is disabled in Keyboard Shortcuts; using the default", id)
-            chord(def.0, def.1)
-            return
+    /// One system shortcut through the chosen path. `def` = (modifier mask as in symbolichotkeys, keycode).
+    private func run(_ name: String, _ via: Via, hotkeyId: Int, def: (Int, Int), dockNote: String? = nil) -> String {
+        switch via {
+        case .coredock:
+            guard let note = dockNote, let send = Self.coreDockSend else {
+                return run(name, .sysevents, hotkeyId: hotkeyId, def: def) + " (no Dock call; fell back)"
+            }
+            send(note as CFString, 0)
+            return "Dock notification \(note)"
+        case .dockpref:
+            guard name == "dock_toggle", let get = Self.coreDockGetAutoHide, let set = Self.coreDockSetAutoHide else {
+                return run(name, .sysevents, hotkeyId: hotkeyId, def: def)
+            }
+            let was = get()
+            set(!was)
+            return "Dock auto-hide \(was) -> \(!was) (CoreDock)"
+        case .sysevents:
+            let (kc, mask, from) = resolveHotkey(hotkeyId, def)
+            systemEventsKey(kc, mask, label: "\(name) [\(from)]")
+            return "System Events key code \(kc) mods \(Self.modNames(mask)) [\(from)] (queued; result logged next)"
+        case .cgevent, .applescript:
+            let (kc, mask, from) = resolveHotkey(hotkeyId, def)
+            var mods: [UInt16] = []
+            if mask & 0x40000 != 0 { mods.append(0x3B) }   // control
+            if mask & 0x80000 != 0 { mods.append(0x3A) }   // option
+            if mask & 0x20000 != 0 { mods.append(0x38) }   // shift
+            if mask & 0x100000 != 0 { mods.append(0x37) }  // command
+            chord(mods, UInt16(kc)) // F-keys and arrows carry fn (+ keypad) automatically (KeyMap.extraFlags)
+            return "posted keycode \(kc) mods \(Self.modNames(mask)) [\(from)]"
         }
-        guard let value = entry["value"] as? [String: Any], let params = value["parameters"] as? [Any], params.count >= 3,
-              let kc = Msg.int(params[1]), kc >= 0, kc < 0xFFFF, let m = Msg.int(params[2]) else {
-            chord(def.0, def.1)
-            return
-        }
-        var mods: [UInt16] = []
-        if m & 0x40000 != 0 { mods.append(0x3B) }   // control
-        if m & 0x80000 != 0 { mods.append(0x3A) }   // option
-        if m & 0x20000 != 0 { mods.append(0x38) }   // shift
-        if m & 0x100000 != 0 { mods.append(0x37) }  // command
-        chord(mods, UInt16(kc))
     }
+
+    /// The user's shortcut for a symbolic hotkey (com.apple.symbolichotkeys), else the macOS default.
+    private func resolveHotkey(_ id: Int, _ def: (Int, Int)) -> (kc: Int, mask: Int, from: String) {
+        let all = UserDefaults(suiteName: "com.apple.symbolichotkeys")?.dictionary(forKey: "AppleSymbolicHotKeys")
+        guard let entry = all?[String(id)] as? [String: Any] else { return (def.1, def.0, "default") }
+        if let on = Msg.bool(entry["enabled"]), !on { return (def.1, def.0, "default; user's shortcut \(id) is OFF") }
+        guard let value = entry["value"] as? [String: Any], let params = value["parameters"] as? [Any], params.count >= 3,
+              let kc = Msg.int(params[1]), kc >= 0, kc < 0xFFFF, let m = Msg.int(params[2]) else { return (def.1, def.0, "default") }
+        return (kc, m, "user's shortcut")
+    }
+
+    private static func modNames(_ m: Int) -> String {
+        var n: [String] = []
+        if m & 0x40000 != 0 { n.append("ctrl") }
+        if m & 0x80000 != 0 { n.append("opt") }
+        if m & 0x20000 != 0 { n.append("shift") }
+        if m & 0x100000 != 0 { n.append("cmd") }
+        if m & 0x800000 != 0 { n.append("fn") }
+        return n.isEmpty ? "none" : n.joined(separator: "+")
+    }
+
+    /// The path v1 used: System Events types the shortcut (asks once for Automation permission).
+    /// Its own serial queue, so a slow first run never stalls pointer input.
+    private static let sysEventsQueue = DispatchQueue(label: "com.airbridge.sysevents", qos: .userInitiated)
+    private func systemEventsKey(_ kc: Int, _ mask: Int, label: String) {
+        var parts: [String] = []
+        if mask & 0x40000 != 0 { parts.append("control down") }
+        if mask & 0x80000 != 0 { parts.append("option down") }
+        if mask & 0x20000 != 0 { parts.append("shift down") }
+        if mask & 0x100000 != 0 { parts.append("command down") }
+        let using = parts.isEmpty ? "" : " using {\(parts.joined(separator: ", "))}"
+        let src = "tell application \"System Events\" to key code \(kc)\(using)"
+        Self.sysEventsQueue.async {
+            let t0 = CFAbsoluteTimeGetCurrent()
+            var err: NSDictionary?
+            NSAppleScript(source: src)?.executeAndReturnError(&err)
+            let ms = Int((CFAbsoluteTimeGetCurrent() - t0) * 1000)
+            if let err {
+                InputLog.shared.log("  \(label): System Events FAILED \(err[NSAppleScript.errorNumber] ?? "?") \(err[NSAppleScript.errorMessage] ?? "") (\(ms) ms)")
+                if (err[NSAppleScript.errorNumber] as? Int) == -1743 { Self.tellAutomationDenied() }
+            } else {
+                InputLog.shared.log("  \(label): System Events ok (\(ms) ms)")
+            }
+        }
+    }
+
+    private static func tellAutomationDenied() {
+        DispatchQueue.main.async {
+            let n = NSUserNotification()
+            n.title = "AirBridge can't use System Events"
+            n.informativeText = "Allow it in System Settings › Privacy & Security › Automation so phone shortcuts can reach the Dock."
+            NSUserNotificationCenter.default.deliver(n)
+        }
+    }
+
+    /// Dock private calls (HIServices). Mission Control through CoreDockSendNotification is verified on macOS 26.
+    private static let hiServices = dlopen("/System/Library/Frameworks/ApplicationServices.framework/Frameworks/HIServices.framework/HIServices", RTLD_LAZY)
+    private typealias CoreDockSendFn = @convention(c) (CFString, Int32) -> Void
+    private typealias CoreDockGetFn = @convention(c) () -> Bool
+    private typealias CoreDockSetFn = @convention(c) (Bool) -> Void
+    private static let coreDockSend: CoreDockSendFn? = dlsym(hiServices, "CoreDockSendNotification").map { unsafeBitCast($0, to: CoreDockSendFn.self) }
+    private static let coreDockGetAutoHide: CoreDockGetFn? = dlsym(hiServices, "CoreDockGetAutoHideEnabled").map { unsafeBitCast($0, to: CoreDockGetFn.self) }
+    private static let coreDockSetAutoHide: CoreDockSetFn? = dlsym(hiServices, "CoreDockSetAutoHideEnabled").map { unsafeBitCast($0, to: CoreDockSetFn.self) }
 
     /// Flips "Automatically hide and show the menu bar" through System Events (asks once for Automation
     /// permission). Off the injector queue: the first run waits for the user's answer.
-    private func toggleMenuBarHiding() {
-        DispatchQueue.global(qos: .userInitiated).async {
+    private func toggleMenuBarHiding() -> String {
+        Self.sysEventsQueue.async {
             let src = """
-            tell application "System Events" to tell dock preferences to set autohide menu bar to not autohide menu bar
+            tell application "System Events" to tell dock preferences
+                set autohide menu bar to not autohide menu bar
+                return autohide menu bar
+            end tell
             """
             var err: NSDictionary?
-            NSAppleScript(source: src)?.executeAndReturnError(&err)
-            if let err { NSLog("[AirBridge] inject: menu bar toggle failed: %@", err) }
+            let r = NSAppleScript(source: src)?.executeAndReturnError(&err)
+            if let err {
+                InputLog.shared.log("  menu_bar_toggle: System Events FAILED \(err[NSAppleScript.errorNumber] ?? "?") \(err[NSAppleScript.errorMessage] ?? "")")
+                if (err[NSAppleScript.errorNumber] as? Int) == -1743 { Self.tellAutomationDenied() }
+            } else {
+                InputLog.shared.log("  menu_bar_toggle: autohide menu bar is now \(r?.booleanValue ?? false)")
+            }
         }
+        return "System Events dock preferences (queued; result logged next)"
     }
 
     /// Notification Center: the user's shortcut if they set one ("Show Notification Center"), else
@@ -659,7 +768,7 @@ nonisolated final class Injector: @unchecked Sendable {
     private func showNotificationCenter() {
         let all = UserDefaults(suiteName: "com.apple.symbolichotkeys")?.dictionary(forKey: "AppleSymbolicHotKeys")
         if let entry = all?["163"] as? [String: Any], Msg.bool(entry["enabled"]) == true {
-            hotkey(163, default: ([], 0x2D))
+            _ = run("notifications", .cgevent, hotkeyId: 163, def: (0x800000, 0x2D))
             return
         }
         let fn = CGEventFlags.maskSecondaryFn
@@ -674,15 +783,6 @@ nonisolated final class Injector: @unchecked Sendable {
         usleep(10_000)
         keyEvent(0x2D, down: false, flags: fn)
         fnKey(false)
-    }
-
-    /// Mission Control binary: no argument = Mission Control, "2" = App Exposé (current app's windows).
-    /// Independent of the user's keyboard-shortcut settings; falls back to Ctrl+arrow.
-    private func runMissionControl(_ args: [String], fallback: UInt16) {
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/System/Applications/Mission Control.app/Contents/MacOS/Mission Control")
-        p.arguments = args
-        do { try p.run() } catch { chord([0x3B], fallback) }
     }
 
     private func lockScreen() {

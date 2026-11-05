@@ -8,7 +8,7 @@ final class EdgeIndicator {
     static let shared = EdgeIndicator()
 
     nonisolated static let thickness: CGFloat = 4
-    private static let color = NSColor(srgbRed: 0x22 / 255, green: 0xC5 / 255, blue: 0x5E / 255, alpha: 1) // accent
+    private static let color = NSColor(srgbRed: 0x5B / 255, green: 0x9D / 255, blue: 0xFF / 255, alpha: 1) // accent (blue, as on the phone)
 
     private var panel: NSPanel?
     private var flashSerial = 0

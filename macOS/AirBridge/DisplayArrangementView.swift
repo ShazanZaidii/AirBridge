@@ -8,23 +8,23 @@ final class PeerDirectory: ObservableObject {
     @Published var peers: [PeerInfo] = []
 }
 
-/// Design tokens.
+/// Design tokens: neutral graphite + one blue accent, matching the phone app.
 private enum Tok {
     static func hex(_ v: UInt32) -> Color {
         Color(.sRGB, red: Double((v >> 16) & 0xFF) / 255, green: Double((v >> 8) & 0xFF) / 255,
               blue: Double(v & 0xFF) / 255, opacity: 1)
     }
-    static let background = hex(0x0F172A)
-    static let card = hex(0x1B2336)
-    static let muted = hex(0x272F42)
-    static let mutedFg = hex(0x94A3B8)
-    static let fg = hex(0xF8FAFC)
-    static let primary = hex(0x1E293B)
-    static let secondary = hex(0x334155)
-    static let border = hex(0x475569)
-    static let accent = hex(0x22C55E)
-    static let onAccent = hex(0x0F172A)
-    static let destructive = hex(0xEF4444)
+    static let background = hex(0x0F0F11)
+    static let card = hex(0x1B1B1E)
+    static let muted = hex(0x27272B)
+    static let mutedFg = hex(0xA1A1A8)
+    static let fg = hex(0xF4F4F6)
+    static let primary = hex(0x242428)
+    static let secondary = hex(0x34343A)
+    static let border = hex(0x4A4A50)
+    static let accent = hex(0x5B9DFF)
+    static let onAccent = hex(0x0F0F11)
+    static let destructive = hex(0xE5484D)
 
     static let xs: CGFloat = 4, sm: CGFloat = 8, md: CGFloat = 16, lg: CGFloat = 24
     static let radius: CGFloat = 8, cardRadius: CGFloat = 12
@@ -491,7 +491,7 @@ struct DisplayArrangementView: View {
                     .font(.callout)
             }
             .toggleStyle(.checkbox)
-            Text("Resting the cursor on an edge never crosses. Keep pushing outward for a moment: the green bar on the edge fills, then the cursor moves over. Come back the same way, or press Control-Option-Command-Esc.")
+            Text("Resting the cursor on an edge never crosses. Keep pushing outward for a moment: the blue bar on the edge fills, then the cursor moves over. Come back the same way, or press Control-Option-Command-Esc.")
                 .font(.caption)
                 .foregroundStyle(Tok.mutedFg)
                 .fixedSize(horizontal: false, vertical: true)

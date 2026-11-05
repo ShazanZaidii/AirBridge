@@ -57,6 +57,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
             ShareInbox.open(batch: batch)
         case "pair":
             PeerManager.shared.pair(link: url)
+        #if DEBUG
+        case "debug":
+            // airbridge://debug/action?name=mission_control&via=coredock — test one action path locally.
+            let q = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+            if url.path == "/action", let name = q.first(where: { $0.name == "name" })?.value {
+                Injector.shared.debugAction(name, via: q.first(where: { $0.name == "via" })?.value)
+            }
+        #endif
         default:
             break
         }
@@ -149,10 +157,10 @@ func formatBytes(_ n: Int64) -> String {
     ByteCountFormatter.string(fromByteCount: n, countStyle: .file)
 }
 
-/// Design tokens: 4/8/16 spacing, 8–12 pt radii.
+/// Design tokens: neutral graphite with one calm blue accent (same as the phone app), 4/8/16 spacing, 8–12 pt radii.
 /// Surfaces use system materials so the menu follows light/dark mode with native contrast.
 enum Theme {
-    static let accent = Color(red: 0x22 / 255, green: 0xC5 / 255, blue: 0x5E / 255)
+    static let accent = Color(red: 0x5B / 255, green: 0x9D / 255, blue: 0xFF / 255)
     static let destructive = Color(red: 0xEF / 255, green: 0x44 / 255, blue: 0x44 / 255)
     static let radius: CGFloat = 10
     static let xs: CGFloat = 4, sm: CGFloat = 8, md: CGFloat = 16
