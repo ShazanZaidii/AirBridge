@@ -15,12 +15,28 @@ object Protocol {
     const val WS_PATH = "/v2"
     const val PLATFORM = "android"
     val APP_VERSION: String = BuildConfig.VERSION_NAME
+    const val CAP_TARGET = "ctl_target"
+
     /**
-     * §3.1 caps. `mirror_sink` (input half, §8.7) only if the device can decode H.264; `wfd_join`
-     * (§10.1) only on API ≥ 29 with Wi-Fi hardware.
+     * §3.1 caps for the next `hello`. `ctl_target` only while the accessibility service runs (we can
+     * show a cursor and inject input), so a controller never captures its pointer for a phone that
+     * can't answer; [CapsRefresh] reconnects ready sessions when that changes.
      */
-    val CAPS: List<String> by lazy {
-        listOf("clip", "xfer", "ctl_target", "trackpad") +
+    fun caps(): List<String> = capsFor(targetAvailable())
+
+    fun capsFor(target: Boolean): List<String> =
+        if (target) STATIC_CAPS.take(2) + CAP_TARGET + STATIC_CAPS.drop(2) else STATIC_CAPS
+
+    fun targetAvailable(): Boolean = try {
+        com.shazan.airbridge.AirBridgeInputService.isRunning
+    } catch (_: Throwable) { false }
+
+    /**
+     * The caps that never change at runtime. `mirror_sink` (input half, §8.7) only if the device can
+     * decode H.264; `wfd_join` (§10.1) only on API ≥ 29 with Wi-Fi hardware.
+     */
+    private val STATIC_CAPS: List<String> by lazy {
+        listOf("clip", "xfer", "trackpad") +
             (if (hasH264Decoder()) listOf("mirror_sink") else emptyList()) +
             (if (canJoinWfd()) listOf(com.shazan.airbridge.net.link.LinkPolicy.CAP_JOIN) else emptyList())
     }
@@ -66,13 +82,14 @@ object Protocol {
 
     fun hello(
         id: String, name: String, nonce: ByteArray, pk: ByteArray, screenW: Int, screenH: Int, paired: Boolean?,
+        caps: List<String> = caps(),
     ): JSONObject = msg("hello")
         .put("v", VERSION)
         .put("id", id)
         .put("name", name)
         .put("plat", PLATFORM)
         .put("app", APP_VERSION)
-        .put("caps", JSONArray(CAPS))
+        .put("caps", JSONArray(caps))
         .put("nonce", b64(nonce))
         .put("pk", b64(pk))
         .apply {

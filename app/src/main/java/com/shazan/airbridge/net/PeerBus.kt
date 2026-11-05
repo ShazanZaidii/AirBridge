@@ -62,6 +62,14 @@ object PeerBus {
     fun sendBinary(peerId: String, frame: ByteArray): Boolean = transport?.sendBinary(peerId, frame) ?: false
     fun peers(): List<PeerInfo> = transport?.peers() ?: emptyList()
 
+    private val heard = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    /** Network half: any authenticated frame from [peerId] arrived (ping/pong included). */
+    fun heard(peerId: String) { heard[peerId] = android.os.SystemClock.uptimeMillis() }
+
+    /** `SystemClock.uptimeMillis()` of the last frame from [peerId], or null (§8.6 silence safety net). */
+    fun lastHeard(peerId: String): Long? = heard[peerId]
+
     fun dispatchControl(peerId: String, msg: JSONObject) { controlHandler?.invoke(peerId, msg) }
     fun dispatchBinary(peerId: String, frame: ByteArray) { binaryHandler?.invoke(peerId, frame) }
     fun notifyPeers(peers: List<PeerInfo>) { peersHandler?.invoke(peers) }
