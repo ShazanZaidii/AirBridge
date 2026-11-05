@@ -39,7 +39,7 @@ nonisolated final class PeerBus: @unchecked Sendable {
 
     /// Message types that belong to the input half (routed through `controlHandler`).
     static let controlTypes: Set<String> = [
-        "ctl_enter", "ctl_leave", "ctl_busy",
+        "ctl_enter", "ctl_leave", "ctl_ack", "ctl_busy",
         "ptr_move", "ptr_scroll", "ptr_btn", "ptr_click", "ptr_abs",
         "key", "key_state", "action",
         "mirror_start", "mirror_info", "mirror_key", "mirror_ack", "mirror_stop",
