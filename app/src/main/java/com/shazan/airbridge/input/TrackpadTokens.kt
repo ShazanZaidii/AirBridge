@@ -12,27 +12,30 @@ import androidx.compose.ui.unit.dp
  * (defined here; reported to the theme owner).
  */
 internal object Tp {
-    val Background = Color(0xFF0F172A)
-    val Surface = Color(0xFF1B2336) // MASTER "card"
-    val SurfaceHigh = Color(0xFF272F42) // MASTER "muted"
-    val Secondary = Color(0xFF334155)
-    val Border = Color(0xFF475569)
-    val Foreground = Color(0xFFF8FAFC)
-    val MutedForeground = Color(0xFF94A3B8)
-    val Accent = Color(0xFF22C55E)
-    val OnAccent = Color(0xFF0F172A)
-    val Destructive = Color(0xFFEF4444)
-    val Warning = Color(0xFFF59E0B) // not in MASTER
-    val OnWarning = Color(0xFF0F172A)
-    val KeyFace = Color(0xFF1E293B) // MASTER "primary" used as key cap
-    // Pressed / latched key: inverted neutral fill (MASTER muted-foreground) with a dark label
-    // (MASTER background), 6.9:1. No accent colour on keys.
-    val KeyLatched = Color(0xFF94A3B8)
-    val OnKeyLatched = Color(0xFF0F172A)
-    // Caps Lock LED: bright neutral when lit (on the latched fill), MASTER border when dim (on KeyFace).
-    val LedOn = Color(0xFFFFFFFF)
-    val LedOff = Color(0xFF475569)
-    val KeyboardBg = Color(0xFF0B1222) // not in MASTER: slightly below Background
+    // Same neutral graphite as the app (ui/theme/Color.kt), one blue accent, no green.
+    val Background = Color(0xFF0F0F11)
+    val Surface = Color(0xFF1B1B1E)
+    val SurfaceHigh = Color(0xFF27272B)
+    val Secondary = Color(0xFF34343A)
+    val Border = Color(0xFF4A4A50)
+    val Foreground = Color(0xFFF4F4F6)
+    val MutedForeground = Color(0xFFA1A1A8)
+    val Accent = Color(0xFF5B9DFF)
+    val OnAccent = Color(0xFF0F0F11)
+    val Destructive = Color(0xFFE5484D)
+    val Warning = Color(0xFFFFC53D)
+    val OnWarning = Color(0xFF0F0F11)
+    val KeyFace = Color(0xFF242428)
+    // Pressed key / Caps on: light key with a dark label, like a lit physical key. No accent on keys.
+    val KeyLatched = Color(0xFFD9D9DE)
+    val OnKeyLatched = Color(0xFF0F0F11)
+    // Caps Lock LED: bright when lit (on the light fill), dim grey when off.
+    val LedOn = Color(0xFF5B9DFF)
+    val LedOff = Color(0xFF4A4A50)
+    val KeyboardBg = Color(0xFF0A0A0C)
+    /** Shortcut tiles beside the mirrored screen. */
+    val Tile = Color(0xFF1B1B1E)
+    val TilePressed = Color(0xFF303036)
 
     val TouchTarget = 48.dp
     val BarHeight = 56.dp

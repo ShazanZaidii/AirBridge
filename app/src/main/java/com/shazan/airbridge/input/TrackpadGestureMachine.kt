@@ -17,14 +17,14 @@ sealed interface GestureIntent {
     data class Click(val button: Int, val count: Int) : GestureIntent
     data object DragStart : GestureIntent
     data object DragEnd : GestureIntent
-    /** Three- or four-finger swipe: direction the fingers moved; same meaning for both counts. */
-    data class ThreeFingerSwipe(val dir: SwipeDir, val fingers: Int = 3) : GestureIntent
+    /** Four- or five-finger swipe: direction the fingers moved on screen; same meaning for both counts. */
+    data class Swipe(val dir: SwipeDir, val fingers: Int = 4) : GestureIntent
     /** Four- or five-finger pinch: [spread] = fingers moved apart (show desktop), else together (Launchpad). */
     data class Pinch(val spread: Boolean) : GestureIntent
     /** Two-finger pinch: one zoom step each time the fingers have moved [Config.zoomStepPx] apart/together. */
     data class Zoom(val inward: Boolean) : GestureIntent
-    /** Quick tap with three fingers (Mac: Look Up). */
-    data class MultiTap(val fingers: Int) : GestureIntent
+    /** One finger pressed down firmly without moving (Mac: force click). Replaces the tap. */
+    data object FirmPress : GestureIntent
     /** The machine dropped all state (cancel / watchdog / external reset). Release anything held. */
     data object ResetAll : GestureIntent
 }
@@ -46,12 +46,10 @@ sealed interface GestureIntent {
  *   [Config.zoomStartPx] and more than the centroid travelled: then it is a pinch and emits one `Zoom`
  *   per [Config.zoomStepPx] of distance change. Once any finger of a scroll/zoom lifts, the sequence is
  *   finished: nothing else happens (no click, no move) until every finger is up.
- * - Three fingers tapped quickly and lifted without moving → `MultiTap(3)`.
- * - Three or more fingers: `ThreeFingerSwipe` exactly once when the centroid travels > swipe distance
- *   (3 and 4 fingers behave the same; `fingers` is the maximum that were down at once).
- * - Four or more fingers: `Pinch` exactly once when the mean finger distance from the centroid
- *   changes by ≥ [Config.pinchPx] and more than the centroid travelled (pinch vs swipe: whichever
- *   dominates). A finger joining or leaving re-baselines the spread.
+ * - Firm press: one finger, not moved, touch pressure ≥ [firmPressAt] → `FirmPress` once, and the
+ *   touch then does nothing else (no tap, no drag). Off while [firmPressAt] is infinite.
+ * - Three fingers do nothing (Android skins take them for screenshots / split screen).
+ * - Four or five fingers: `Swipe` or `Pinch` exactly once per touch, see [MultiFingerGesture].
  * - Taps beginning within [Config.multiCooldownMs] of the end of a multi-finger sequence are ignored.
  * - CANCEL, the watchdog (no event for a pointer that is down) and [reset] emit `DragEnd` if a drag
  *   was active, then `ResetAll`, and never click. A pointer the machine has forgotten (after a reset)
@@ -63,12 +61,11 @@ class TrackpadGestureMachine(
 ) {
     data class Config(
         val slopPx: Float = 16f,
-        val swipePx: Float = 160f,
+        val swipePx: Float = 120f,
         val pinchPx: Float = 80f,
         /** Two-finger pinch: distance change that starts zooming, and the change per zoom step. */
         val zoomStartPx: Float = 40f,
         val zoomStepPx: Float = 56f,
-        val multiTapMaxMs: Long = 250,
         val tapMaxMs: Long = 180,
         val doubleTapMs: Long = 300,
         val doubleTapSlopPx: Float = 100f,
@@ -83,11 +80,25 @@ class TrackpadGestureMachine(
         val naturalScroll: Boolean = true,
     )
 
-    enum class State { Idle, Pending, Moving, Dragging, MultiPending, Scrolling, Zooming, Swiping, Finished }
+    enum class State { Idle, Pending, Moving, Dragging, MultiPending, Scrolling, Zooming, Multi, Finished }
 
-    private class Ptr(var x: Float, var y: Float)
+    private class Ptr(override var x: Float, override var y: Float) : FingerPos
 
     var naturalScroll: Boolean = config.naturalScroll
+
+    /** Touch pressure at which a still finger counts as a firm press; infinite = off. */
+    var firmPressAt: Float = Float.POSITIVE_INFINITY
+
+    /** Highest pressure seen on the primary finger of the current / last one-finger touch. */
+    var peakPressure: Float = 0f; private set
+
+    /** The last touch ended in a firm press (the calibrator must not learn from it). */
+    var lastWasFirm: Boolean = false; private set
+
+    /** Most fingers down at once in the last finished touch. */
+    var lastTouchFingers: Int = 0; private set
+
+    private val multi = MultiFingerGesture(config.swipePx, config.pinchPx)
 
     var state: State = State.Idle; private set
     private val ptrs = LinkedHashMap<Long, Ptr>()
@@ -101,7 +112,6 @@ class TrackpadGestureMachine(
     private var travelY = 0f
     private var multiX = 0f // accumulated centroid travel (two/three fingers)
     private var multiY = 0f
-    private var spreadStart = -1f // mean distance from the centroid when the 4-finger set formed
     private var zoomBase = 0f     // distance between the two fingers at the last zoom step (or when they landed)
     private var tapAllowed = true
     private var firstLiftAt = -1L
@@ -125,12 +135,30 @@ class TrackpadGestureMachine(
         return if (state == State.Pending) min(seqStart + config.longPressMs, wd) else wd
     }
 
-    fun onTouch(id: Long, action: TouchAction, x: Float, y: Float, t: Long) {
+    /** [pressure]: the touch's reported pressure (NaN when unknown). */
+    fun onTouch(id: Long, action: TouchAction, x: Float, y: Float, t: Long, pressure: Float = Float.NaN) {
         when (action) {
             TouchAction.DOWN -> down(id, x, y, t)
             TouchAction.MOVE -> move(id, x, y, t)
             TouchAction.UP -> up(id, x, y, t)
             TouchAction.CANCEL -> cancel(t)
+        }
+        if (action != TouchAction.CANCEL && action != TouchAction.UP) pressed(id, pressure)
+    }
+
+    /** Pressure of the only finger down, from the raw event stream ([PressureFeed]). */
+    fun onPressure(pressure: Float) {
+        if (ptrs.size == 1) pressed(primary, pressure)
+    }
+
+    private fun pressed(id: Long, pressure: Float) {
+        if (pressure.isNaN() || id != primary || ptrs.size != 1) return
+        if (pressure > peakPressure) peakPressure = pressure
+        if (state == State.Pending && pressure >= firmPressAt && hypot(travelX, travelY) < config.slopPx) {
+            state = State.Finished
+            tapCount = 0
+            lastWasFirm = true
+            emit(GestureIntent.FirmPress)
         }
     }
 
@@ -169,13 +197,17 @@ class TrackpadGestureMachine(
                 firstLiftAt = -1L; lastLiftAt = -1L
                 zoomBase = pairDistance()
             }
+            // A third finger ends scroll / zoom; from then on only 4- and 5-finger gestures count.
             State.MultiPending, State.Scrolling, State.Zooming -> if (ptrs.size >= 3) {
-                state = State.Swiping
-                multiX = 0f; multiY = 0f
-                rebaseSpread()
+                state = State.Multi
+                multi.fingersChanged(ptrs.values)
             }
-            State.Swiping -> rebaseSpread()
-            // Dragging keeps following the primary finger; Swiping/Finished ignore extra fingers.
+            State.Multi -> multi.fingersChanged(ptrs.values)
+            State.Finished -> if (ptrs.size >= 3 && !multi.fired && !lastWasFirm) {
+                state = State.Multi
+                multi.fingersChanged(ptrs.values)
+            }
+            // Dragging keeps following the primary finger.
             else -> Unit
         }
     }
@@ -192,6 +224,9 @@ class TrackpadGestureMachine(
         multiX = 0f; multiY = 0f
         firstLiftAt = -1L; lastLiftAt = -1L
         tapAllowed = !adopted && t - lastMultiEnd >= config.multiCooldownMs
+        multi.reset()
+        peakPressure = 0f
+        lastWasFirm = false
         state = if (adopted) State.Moving else State.Pending
     }
 
@@ -236,22 +271,10 @@ class TrackpadGestureMachine(
             }
             State.Scrolling -> scroll(dx / n, dy / n)
             State.Zooming -> if (ptrs.size == 2) zoomSteps()
-            State.Swiping -> {
-                multiX += dx / n; multiY += dy / n
-                val travel = hypot(multiX, multiY)
-                val pinch = if (ptrs.size >= 4 && spreadStart > 0f) spread() - spreadStart else 0f
-                if (abs(pinch) >= config.pinchPx && abs(pinch) > travel) {
-                    state = State.Finished // exactly once per sequence
-                    emit(GestureIntent.Pinch(spread = pinch > 0f))
-                } else if (travel > config.swipePx && travel > abs(pinch)) {
-                    val dir = if (abs(multiX) > abs(multiY)) {
-                        if (multiX > 0) SwipeDir.RIGHT else SwipeDir.LEFT
-                    } else {
-                        if (multiY > 0) SwipeDir.DOWN else SwipeDir.UP
-                    }
-                    state = State.Finished // exactly once per sequence
-                    emit(GestureIntent.ThreeFingerSwipe(dir, maxFingers.coerceAtMost(4)))
-                }
+            State.Multi -> when (val r = multi.onMove(dx, dy, ptrs.values)) {
+                is MultiFingerResult.Swipe -> { state = State.Finished; emit(GestureIntent.Swipe(r.dir, r.fingers.coerceAtMost(5))) }
+                is MultiFingerResult.Pinch -> { state = State.Finished; emit(GestureIntent.Pinch(r.spread)) }
+                null -> Unit
             }
             State.Finished, State.Idle -> Unit
         }
@@ -291,13 +314,7 @@ class TrackpadGestureMachine(
                 }
             }
             State.Scrolling, State.Zooming -> state = State.Finished // lifting one finger never clicks or moves
-            State.Swiping -> {
-                if (remaining == 0 && maxFingers == 3 && t - seqStart <= config.multiTapMaxMs &&
-                    hypot(multiX, multiY) < config.slopPx
-                ) {
-                    emit(GestureIntent.MultiTap(3))
-                } else rebaseSpread()
-            }
+            State.Multi -> multi.fingersChanged(ptrs.values)
             State.Finished, State.Idle -> Unit
         }
 
@@ -305,6 +322,7 @@ class TrackpadGestureMachine(
     }
 
     private fun endSequence(t: Long) {
+        lastTouchFingers = maxFingers
         if (maxFingers >= 2) {
             lastMultiEnd = t
             tapCount = 0
@@ -326,16 +344,6 @@ class TrackpadGestureMachine(
         if (wasActive) emit(GestureIntent.ResetAll)
     }
 
-    /** Mean distance of the fingers from their centroid. */
-    private fun spread(): Float {
-        var cx = 0f; var cy = 0f
-        for (p in ptrs.values) { cx += p.x; cy += p.y }
-        cx /= ptrs.size; cy /= ptrs.size
-        var d = 0f
-        for (p in ptrs.values) d += hypot(p.x - cx, p.y - cy)
-        return d / ptrs.size
-    }
-
     private fun pairDistance(): Float {
         if (ptrs.size != 2) return 0f
         val (a, b) = ptrs.values.toList()
@@ -347,10 +355,6 @@ class TrackpadGestureMachine(
         val d = pairDistance()
         while (d - zoomBase >= config.zoomStepPx) { emit(GestureIntent.Zoom(inward = false)); zoomBase += config.zoomStepPx }
         while (zoomBase - d >= config.zoomStepPx) { emit(GestureIntent.Zoom(inward = true)); zoomBase -= config.zoomStepPx }
-    }
-
-    private fun rebaseSpread() {
-        spreadStart = if (ptrs.size >= 4) spread() else -1f
     }
 
     private fun scroll(fingerDx: Float, fingerDy: Float) {

@@ -48,6 +48,7 @@ import androidx.compose.material.icons.filled.Gesture
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Compress
 import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.DesktopWindows
 import androidx.compose.material.icons.filled.ExpandMore
@@ -78,6 +79,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.motionEventSpy
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
@@ -97,6 +99,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import com.shazan.airbridge.input.FirmPress
 import com.shazan.airbridge.input.InputRouter
 import com.shazan.airbridge.input.MirrorRouting
 import com.shazan.airbridge.input.MirrorScreen
@@ -106,6 +109,9 @@ import com.shazan.airbridge.input.Notice
 import com.shazan.airbridge.input.OsGestureGuard
 import com.shazan.airbridge.input.RemoteKeyboard
 import com.shazan.airbridge.input.RemoteKeyboardController
+import com.shazan.airbridge.input.ScreenShortcuts
+import com.shazan.airbridge.input.ShortcutRail
+import com.shazan.airbridge.input.ShortcutStrip
 import com.shazan.airbridge.input.Tp
 import com.shazan.airbridge.input.TrackpadPrefs
 import com.shazan.airbridge.input.TrackpadSender
@@ -131,10 +137,13 @@ class TrackpadActivity : ComponentActivity() {
     companion object {
         /** Peer id to drive (from the device card's "Use as trackpad"). */
         const val EXTRA_PEER = "peer"
+        /** [Mode] name to open in (the device card's Trackpad / Keyboard / Screen buttons). */
+        const val EXTRA_MODE = "mode"
         private val DESKTOPS = setOf("macos", "windows", "linux")
         private const val PREF_PEER = "TRACKPAD_PEER"
         private const val PREF_NATURAL = "TP_NATURAL_SCROLL"
         private const val PREF_MODE = "TP_MODE"
+        private const val PREF_FIRM = "TP_FIRM_PRESS"
         private const val BUSY_SHOW_MS = 3000L
     }
 
@@ -145,16 +154,19 @@ class TrackpadActivity : ComponentActivity() {
     private var resumeCount by mutableStateOf(0)
     /** Peer picked by the user (or passed in [EXTRA_PEER]); input only ever goes to this one. */
     private var chosenId by mutableStateOf<String?>(null)
+    /** Mode asked for by an intent that arrived while open. */
+    private var modeRequest by mutableStateOf<Mode?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         InputRouter.install(this)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        // Used held sideways. Orientation requests may be ignored (Android 16 large screens,
-        // multi-window); the layout adapts to the real window size either way.
+        // Follows the phone, as the user holds it (and their rotation lock): portrait stays portrait.
+        // Touch coordinates are the window's, so every swipe direction matches what is on screen.
+        // The layout adapts to the real window size (portrait, landscape, multi-window).
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) setTranslucent(false)
         if (Build.VERSION.SDK_INT != Build.VERSION_CODES.O) {
-            try { requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE } catch (_: Throwable) {}
+            try { requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_FULL_USER } catch (_: Throwable) {}
         }
         WindowCompat.setDecorFitsSystemWindows(window, false)
         // Edge to edge with the bars hidden: the window always reaches into the cutout band on the
@@ -172,6 +184,9 @@ class TrackpadActivity : ComponentActivity() {
         OsGestureGuard.startSession()
         chosenId = prefs.getString(PREF_PEER, null)
         takePeerExtra(intent, prefs)
+        intent?.getStringExtra(EXTRA_MODE)?.let { m -> Mode.entries.firstOrNull { it.name == m } }
+            ?.let { prefs.edit().putString(PREF_MODE, it.name).apply() }
+        FirmPress.calibrator.load(prefs)
         setContent {
             MaterialTheme(colorScheme = darkColorScheme(primary = Tp.Accent, surface = Tp.Surface, background = Tp.Background)) {
                 TrackpadScreen(prefs)
@@ -182,6 +197,7 @@ class TrackpadActivity : ComponentActivity() {
     override fun onNewIntent(intent: android.content.Intent) {
         super.onNewIntent(intent)
         takePeerExtra(intent, getSharedPreferences("AirBridgePrefs", Context.MODE_PRIVATE))
+        intent.getStringExtra(EXTRA_MODE)?.let { m -> Mode.entries.firstOrNull { it.name == m } }?.let { modeRequest = it }
     }
 
     private fun takePeerExtra(i: android.content.Intent?, prefs: SharedPreferences) {
@@ -215,6 +231,7 @@ class TrackpadActivity : ComponentActivity() {
         NetHooks.setBubbleSuppressed("trackpad", false)
         NetHooks.setBubbleSuppressed("mirror", false)
         OsGestureGuard.restore(this)
+        FirmPress.calibrator.save(getSharedPreferences("AirBridgePrefs", Context.MODE_PRIVATE))
     }
 
     override fun onStop() {
@@ -259,12 +276,14 @@ class TrackpadActivity : ComponentActivity() {
             mutableStateOf(Mode.entries.firstOrNull { it.name == prefs.getString(PREF_MODE, null) } ?: Mode.Trackpad)
         }
         var natural by remember { mutableStateOf(prefs.getBoolean(PREF_NATURAL, true)) }
+        var firm by remember { mutableStateOf(prefs.getBoolean(PREF_FIRM, true)) }
         var screenKeyboard by remember { mutableStateOf(false) }
         var showStats by remember { mutableStateOf(false) }
         var mirrorRun by remember { mutableStateOf(0) } // bump to restart the stream
-        val trackpadPrefs by rememberUpdatedState(TrackpadPrefs(naturalScroll = natural))
+        val trackpadPrefs by rememberUpdatedState(TrackpadPrefs(naturalScroll = natural, firmPress = firm))
 
         SideEffect {
+            FirmPress.enabled = firm
             InputRouter.driving = if (resumed) active?.id else null
             if (sender.peerId != active?.id) {
                 keyboard.releaseAll() // to the previous peer, before switching
@@ -302,6 +321,10 @@ class TrackpadActivity : ComponentActivity() {
             view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
         }
 
+        LaunchedEffect(modeRequest) {
+            modeRequest?.let { switchMode(it); modeRequest = null }
+        }
+
         BackHandler(enabled = mode == Mode.Screen && screenKeyboard) {
             keyboard.releaseAll()
             screenKeyboard = false
@@ -310,6 +333,7 @@ class TrackpadActivity : ComponentActivity() {
         BoxWithConstraints(Modifier.fillMaxSize().background(Tp.Background)) {
             val landscape = maxWidth > maxHeight
             val compact = maxWidth < 600.dp
+            val narrow = maxWidth < 480.dp
             val portraitKeyboardHeight = min(maxWidth * 0.75f, maxHeight * 0.55f)
             val windowW = constraints.maxWidth
             val windowH = constraints.maxHeight
@@ -337,7 +361,9 @@ class TrackpadActivity : ComponentActivity() {
                     controlledBy = controlledBy,
                     mode = mode,
                     compact = compact,
+                    narrow = narrow,
                     natural = natural,
+                    firm = firm,
                     screenKeyboard = screenKeyboard,
                     onChoose = { p ->
                         chosenId = p.id
@@ -348,6 +374,10 @@ class TrackpadActivity : ComponentActivity() {
                     onToggleNatural = {
                         natural = !natural
                         prefs.edit().putBoolean(PREF_NATURAL, natural).apply()
+                    },
+                    onToggleFirm = {
+                        firm = !firm
+                        prefs.edit().putBoolean(PREF_FIRM, firm).apply()
                     },
                     onToggleScreenKeyboard = {
                         if (screenKeyboard) keyboard.releaseAll()
@@ -368,16 +398,41 @@ class TrackpadActivity : ComponentActivity() {
                             )
                         }
                         Mode.Screen -> Column(Modifier.fillMaxSize().then(if (screenKeyboard) Modifier else Modifier.windowInsetsPadding(safeSides))) {
-                            MirrorScreen(
-                                sink = mirror,
-                                sender = sender,
-                                peerName = active?.name,
-                                supported = active?.let { "mirror_source" in it.caps } ?: false,
-                                showStats = showStats,
-                                onRetry = { mirrorRun++ },
-                                modifier = Modifier.fillMaxWidth().weight(1f)
+                            val platform = active?.platform ?: "macos"
+                            val left = remember(platform) { ScreenShortcuts.left(platform) }
+                            val right = remember(platform) { ScreenShortcuts.right(platform) }
+                            val onShortcut: (String) -> Unit = { a -> sender.action(a) }
+                            val mirrorInfo by mirror.info.collectAsState()
+                            val picture: @Composable (Modifier) -> Unit = { m ->
+                                MirrorScreen(
+                                    sink = mirror,
+                                    sender = sender,
+                                    peerName = active?.name,
+                                    supported = active?.let { "mirror_source" in it.caps } ?: false,
+                                    showStats = showStats,
+                                    onRetry = { mirrorRun++ },
+                                    modifier = m,
+                                )
+                            }
+                            BoxWithConstraints(
+                                Modifier.fillMaxWidth().weight(1f)
                                     .then(if (screenKeyboard) Modifier.windowInsetsPadding(safeSides.only(WindowInsetsSides.Horizontal)) else Modifier),
-                            )
+                            ) {
+                                val aspect = mirrorInfo?.let { it.w.toFloat() / it.h } ?: (16f / 10f)
+                                if (maxWidth > maxHeight) {
+                                    // The picture is letterboxed left and right: the shortcuts fill those bands.
+                                    val gap = (maxWidth - maxHeight * aspect) / 2
+                                    val railW = gap.coerceIn(76.dp, 112.dp)
+                                    Row(Modifier.fillMaxSize()) {
+                                        ShortcutRail(left, railW, active != null, onShortcut)
+                                        picture(Modifier.weight(1f).fillMaxHeight())
+                                        ShortcutRail(right, railW, active != null, onShortcut)
+                                    }
+                                } else Column(Modifier.fillMaxSize()) {
+                                    picture(Modifier.fillMaxWidth().weight(1f))
+                                    ShortcutStrip(left + right, active != null, onShortcut)
+                                }
+                            }
                             if (screenKeyboard) KeyboardPanel(active, Modifier.fillMaxWidth().fillMaxHeight(0.5f), safeSides)
                         }
                     }
@@ -424,10 +479,12 @@ class TrackpadActivity : ComponentActivity() {
         }
     }
 
+    @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
     @Composable
     private fun TrackpadSurface(active: PeerInfo?, wanted: String?, blocker: PeerInfo?, prefs: TrackpadPrefs, modifier: Modifier) {
         val view = LocalView.current
         val current by rememberUpdatedState(prefs)
+        val pressure = remember { com.shazan.airbridge.input.PressureFeed() }
         Box(
             modifier.clip(RoundedCornerShape(16.dp)).background(Tp.Surface)
                 .border(1.dp, Tp.SurfaceHigh, RoundedCornerShape(16.dp))
@@ -435,11 +492,13 @@ class TrackpadActivity : ComponentActivity() {
                 // Keeps edge back/home swipes off the pad where Android allows it (≤ 200 dp per edge).
                 // It cannot stop OEM three-finger gestures; see OsGestureGuard.
                 .systemGestureExclusion()
+                .motionEventSpy(pressure::onMotionEvent) // raw pressure for firm press
                 .pointerInput(Unit) {
                     trackpadGestures(
                         sender, { current },
                         haptic = { view.performHapticFeedback(it) },
                         onSystemTookGesture = OsGestureGuard::onLoss,
+                        pressure = pressure,
                     )
                 },
             contentAlignment = Alignment.Center,
@@ -457,8 +516,9 @@ class TrackpadActivity : ComponentActivity() {
                 Notice("No computer connected", "Connect a computer from the AirBridge home screen.")
             } else {
                 Text(
-                    "Tap to click · two-finger tap to right-click · hold, then move to drag\n" +
-                        "Two fingers to scroll · three or four fingers: swipe for Mission Control and desktops, pinch for Launchpad",
+                    "Tap to click · two-finger tap to right-click · hold, then move to drag · press firmly to force click\n" +
+                        "Two fingers: scroll, pinch to zoom · Four or five fingers: swipe up for Mission Control, " +
+                        "down for App Exposé, left / right for spaces, pinch for Launchpad, spread for the desktop",
                     color = Tp.MutedForeground.copy(alpha = 0.6f),
                     fontSize = 13.sp, lineHeight = 19.sp, textAlign = TextAlign.Center,
                     modifier = Modifier.widthIn(max = 520.dp).padding(24.dp),
@@ -493,11 +553,11 @@ class TrackpadActivity : ComponentActivity() {
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f, fill = false)) {
                 Text(
-                    "Android is using 3-finger swipes for itself. Turn them off for AirBridge",
+                    "Your phone took that touch for itself",
                     color = Tp.Foreground, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, lineHeight = 18.sp,
                 )
                 Text(
-                    "In Settings, search for “three-finger” and turn off the screenshot and split-screen gestures.",
+                    "AirBridge uses four and five fingers. If those are taken too, search Settings for “three-finger” and turn off the screenshot and split-screen gestures.",
                     color = Tp.MutedForeground, fontSize = 12.sp, lineHeight = 16.sp,
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -558,12 +618,15 @@ class TrackpadActivity : ComponentActivity() {
         controlledBy: String?,
         mode: Mode,
         compact: Boolean,
+        narrow: Boolean,
         natural: Boolean,
+        firm: Boolean,
         screenKeyboard: Boolean,
         onChoose: (PeerInfo) -> Unit,
         onMode: (Mode) -> Unit,
         onToggleStats: () -> Unit,
         onToggleNatural: () -> Unit,
+        onToggleFirm: () -> Unit,
         onToggleScreenKeyboard: () -> Unit,
         onClose: () -> Unit,
     ) {
@@ -572,10 +635,14 @@ class TrackpadActivity : ComponentActivity() {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            TargetChip(desktops, active, wanted, controlledBy, compact, onChoose, Modifier.weight(1f, fill = false))
+            TargetChip(desktops, active, wanted, controlledBy, compact, narrow, onChoose, Modifier.weight(1f, fill = false))
             Spacer(Modifier.weight(0.01f))
             ModeSwitcher(mode, compact, onMode, onToggleStats)
             Spacer(Modifier.weight(0.01f))
+            if (mode != Mode.Keyboard) ToggleButton(
+                icon = Icons.Default.Compress, label = if (compact || mode == Mode.Screen) null else "Firm press",
+                on = firm, description = "Firm press for force click", onClick = onToggleFirm,
+            )
             when (mode) {
                 Mode.Trackpad -> ToggleButton(
                     icon = Icons.Default.SwapVert, label = if (compact) null else "Natural scroll",
@@ -600,6 +667,7 @@ class TrackpadActivity : ComponentActivity() {
         wanted: String?,
         controlledBy: String?,
         compact: Boolean,
+        narrow: Boolean,
         onChoose: (PeerInfo) -> Unit,
         modifier: Modifier,
     ) {
@@ -607,7 +675,7 @@ class TrackpadActivity : ComponentActivity() {
         Box(modifier) {
             Row(
                 Modifier.height(Tp.TouchTarget).clip(RoundedCornerShape(Tp.Radius)).background(Tp.Surface)
-                    .clickable(enabled = desktops.size > 1, role = Role.DropdownList) { menu = true }
+                    .clickable(enabled = desktops.size > 1 || narrow, role = Role.DropdownList) { menu = true }
                     .semantics(mergeDescendants = true) {
                         contentDescription = active?.let { "Controlling ${it.name}" }
                             ?: wanted?.let { "Not connected to $it" } ?: "No computer connected"
@@ -626,8 +694,9 @@ class TrackpadActivity : ComponentActivity() {
                             .background(if (active != null) Tp.Accent else Tp.Destructive),
                     )
                 }
-                Spacer(Modifier.width(10.dp))
-                Text(
+                // Narrow (portrait phone): the icon and its status dot only; the name is in the menu.
+                if (!narrow) Spacer(Modifier.width(10.dp))
+                if (!narrow) Text(
                     active?.name ?: wanted ?: "No computer",
                     color = if (active != null) Tp.Foreground else Tp.MutedForeground,
                     fontSize = 15.sp, fontWeight = FontWeight.Medium,
@@ -688,7 +757,7 @@ class TrackpadActivity : ComponentActivity() {
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.Center,
                 ) {
-                    Icon(m.icon, contentDescription = null, tint = if (selected) Tp.Accent else Tp.MutedForeground, modifier = Modifier.size(20.dp))
+                    Icon(m.icon, contentDescription = null, tint = if (selected) Tp.Foreground else Tp.MutedForeground, modifier = Modifier.size(20.dp))
                     if (!compact) {
                         Spacer(Modifier.width(8.dp))
                         Text(

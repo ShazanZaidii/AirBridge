@@ -187,19 +187,21 @@ class RemoteKeyboardControllerTest {
         assertTrue(actions.isEmpty())
     }
 
-    @Test fun fnInvertsTheFRowForOneKey() {
-        c.tapModifier(ModKey.Fn)
+    @Test fun heldFnInvertsTheFRowWhileHeld() {
+        c.modifierDown(ModKey.Fn)
         assertTrue(c.fRowIsFKeys)
         val h = c.pressFunctionRow(4)
         assertEquals(Hid.F1 + 4, h)
         c.release(h!!)
-        assertEquals(ModState.Off, c.state(ModKey.Fn))
+        assertTrue("still held", c.fRowIsFKeys)
+        c.modifierUp(ModKey.Fn)
         assertFalse(c.fRowIsFKeys)
         c.fKeysMode = true
-        c.tapModifier(ModKey.Fn)
+        c.modifierDown(ModKey.Fn)
         assertNull(c.pressFunctionRow(9))
+        c.modifierUp(ModKey.Fn)
         assertEquals(listOf("vol_mute"), actions)
-        assertEquals(ModState.Off, c.state(ModKey.Fn))
+        assertTrue(sent.none { it.hid == 0 }) // fn has no HID usage
     }
 
     @Test fun lockKeySendsLockAction() {
@@ -226,23 +228,24 @@ class RemoteKeyboardControllerTest {
         assertEquals("1", downOf(Hid.ONE).text)
     }
 
-    @Test fun shiftShowsUppercaseAndShiftedSymbols() {
-        c.tapModifier(ModKey.Shift)
+    @Test fun heldShiftShowsUppercaseAndShiftedSymbols() {
+        c.modifierDown(ModKey.Shift)
         assertTrue(c.upperLetters)
         assertEquals("Q", c.faceLabel(Hid.A + ('Q' - 'A')))
         assertEquals("!", c.faceLabel(Hid.ONE))
         assertEquals("?", c.faceLabel(Hid.SLASH))
         tapKey(Hid.A + ('Q' - 'A'))
         assertEquals("Q", sent.first { it.hid == Hid.A + ('Q' - 'A') && it.down }.text)
-        // one-shot: back to lower case after the key
-        assertEquals(ModState.Off, c.state(ModKey.Shift))
+        tapKey(Hid.A + ('W' - 'A'))
+        assertEquals("W", sent.first { it.hid == Hid.A + ('W' - 'A') && it.down }.text)
+        c.modifierUp(ModKey.Shift)
         assertEquals("q", c.faceLabel(Hid.A + ('Q' - 'A')))
         assertEquals("1", c.faceLabel(Hid.ONE))
     }
 
     @Test fun shiftWithCapsGivesLowercase() {
         c.capsLock()
-        c.tapModifier(ModKey.Shift)
+        c.modifierDown(ModKey.Shift)
         assertFalse(c.upperLetters)
         assertEquals("a", c.faceLabel(Hid.A))
         assertEquals("@", c.faceLabel(Hid.ONE + 1))
@@ -251,53 +254,54 @@ class RemoteKeyboardControllerTest {
         assertEquals(Sent(Hid.A, true, Mods.CAPS or Mods.SHIFT, false, "a"), downOf(Hid.A))
     }
 
-    // ---------------------------------------------------------------- sticky modifiers
+    // ---------------------------------------------------------------- modifiers behave like hardware keys
 
-    @Test fun oneShotWrapsNextKeyThenClears() {
-        c.tapModifier(ModKey.Gui)
-        assertEquals(ModState.OneShot, c.state(ModKey.Gui))
-        assertTrue(sent.isEmpty()) // nothing held on the peer until a key is pressed
-        timer.advance(1_000)
-        tapKey(Hid.C)
-        assertEquals(
-            listOf(
-                Sent(Hid.LGUI, true, Mods.GUI, false, null),
-                Sent(Hid.C, true, Mods.GUI, false, null),
-                Sent(Hid.C, false, Mods.GUI, false, null),
-                Sent(Hid.LGUI, false, 0, false, null),
-            ),
-            sent,
-        )
-        assertEquals(ModState.Off, c.state(ModKey.Gui))
+    @Test fun tappingAModifierAloneIsJustDownThenUp() {
+        c.modifierDown(ModKey.Gui)
+        c.modifierUp(ModKey.Gui)
+        assertEquals(listOf(Sent(Hid.LGUI, true, Mods.GUI, false, null), Sent(Hid.LGUI, false, 0, false, null)), sent)
+        assertFalse(c.isDown(ModKey.Gui))
+        sent.clear()
+        tapKey(Hid.C) // nothing latched: a plain c
+        assertEquals(listOf(Sent(Hid.C, true, 0, false, "c"), Sent(Hid.C, false, 0, false, null)), sent)
     }
 
-    @Test fun doubleTapLocksAndThirdTapUnlocks() {
-        c.tapModifier(ModKey.Shift)
-        timer.advance(100)
-        c.tapModifier(ModKey.Shift)
-        assertEquals(ModState.Locked, c.state(ModKey.Shift))
-        assertEquals(Sent(Hid.LSHIFT, true, Mods.SHIFT, false, null), sent.single())
-        tapKey(Hid.A); tapKey(Hid.A + 1)
-        assertEquals(ModState.Locked, c.state(ModKey.Shift))
-        assertEquals("B", downOf(Hid.A + 1).text)
-        c.tapModifier(ModKey.Shift)
-        assertEquals(ModState.Off, c.state(ModKey.Shift))
+    @Test fun commandHeldAcrossSeveralTabsIsTheAppSwitcher() {
+        c.modifierDown(ModKey.Gui)
+        tapKey(Hid.TAB); tapKey(Hid.TAB); tapKey(Hid.TAB)
+        assertTrue("⌘ stays down between tabs", c.isDown(ModKey.Gui))
+        assertEquals(1, sent.count { it.hid == Hid.LGUI && it.down })
+        assertTrue(sent.none { it.hid == Hid.LGUI && !it.down })
+        assertTrue(sent.filter { it.hid == Hid.TAB }.all { it.mods == Mods.GUI })
+        c.modifierUp(ModKey.Gui) // lifting ⌘ picks the app
+        assertEquals(Sent(Hid.LGUI, false, 0, false, null), sent.last())
+    }
+
+    @Test fun twoFingersOnBothShiftKeysReleaseOnlyWhenBothLift() {
+        c.modifierDown(ModKey.Shift)
+        c.modifierDown(ModKey.Shift)
+        c.modifierUp(ModKey.Shift)
+        assertTrue(c.isDown(ModKey.Shift))
+        assertEquals(1, sent.size)
+        c.modifierUp(ModKey.Shift)
+        assertFalse(c.isDown(ModKey.Shift))
         assertEquals(Sent(Hid.LSHIFT, false, 0, false, null), sent.last())
+        c.modifierUp(ModKey.Shift) // extra up: ignored
+        assertEquals(2, sent.size)
     }
 
-    @Test fun slowSecondTapTurnsOneShotOff() {
-        c.tapModifier(ModKey.Alt)
-        timer.advance(RemoteKeyboardController.LOCK_WINDOW_MS + 50)
-        c.tapModifier(ModKey.Alt)
-        assertEquals(ModState.Off, c.state(ModKey.Alt))
-        assertTrue(sent.isEmpty())
+    @Test fun chordsCarryEveryHeldModifier() {
+        c.modifierDown(ModKey.Ctrl)
+        c.modifierDown(ModKey.Gui)
+        tapKey(Hid.A + ('Q' - 'A'))
+        assertEquals(Mods.CTRL or Mods.GUI, downOf(Hid.A + ('Q' - 'A')).mods)
     }
 
-    @Test fun fnLayerMapsArrowsAndClears() {
-        c.tapModifier(ModKey.Fn)
+    @Test fun fnLayerMapsArrowsOnlyWhileHeld() {
+        c.modifierDown(ModKey.Fn)
         tapKey(Hid.LEFT)
         assertEquals(Hid.HOME, sent.first().hid)
-        assertEquals(ModState.Off, c.state(ModKey.Fn))
+        c.modifierUp(ModKey.Fn)
         tapKey(Hid.LEFT)
         assertEquals(Hid.LEFT, sent.last().hid)
     }
@@ -312,10 +316,10 @@ class RemoteKeyboardControllerTest {
         assertEquals(n, sent.size)
     }
 
-    @Test fun releaseAllLiftsHeldKeysAndLockedModifiersButKeepsCaps() {
+    @Test fun releaseAllLiftsHeldKeysAndModifiersButKeepsCaps() {
         c.capsLock()
-        c.tapModifier(ModKey.Ctrl); timer.advance(50); c.tapModifier(ModKey.Ctrl) // locked
-        c.tapModifier(ModKey.Gui) // one-shot
+        c.modifierDown(ModKey.Ctrl)
+        c.modifierDown(ModKey.Gui)
         c.press(Hid.X)
         sent.clear()
         c.releaseAll()
@@ -323,8 +327,11 @@ class RemoteKeyboardControllerTest {
         assertTrue(sent.any { it.hid == Hid.LGUI && !it.down })
         assertTrue(sent.any { it.hid == Hid.LCTRL && !it.down })
         assertTrue(sent.none { it.down })
-        for (m in ModKey.entries) assertEquals(ModState.Off, c.state(m))
+        for (m in ModKey.entries) assertFalse(c.isDown(m))
         assertTrue(c.capsOn)
+        val n = sent.size
+        c.modifierUp(ModKey.Gui) // the finger lifting later changes nothing
+        assertEquals(n, sent.size)
         timer.advance(1_000)
         assertNull(sent.firstOrNull { it.rep })
     }

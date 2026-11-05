@@ -5,29 +5,34 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 
 /**
- * AirBridge palette (design-system/airbridge/MASTER.md: "dark tech + status green").
+ * AirBridge palette: neutral graphite (no blue-slate tint), white primary actions, one calm blue
+ * accent used sparingly (selection, links, "connected"). No green anywhere.
  * Raw ARGB values live only here; screens use MaterialTheme.colorScheme / [AbTheme.status].
- * Contrast (WCAG) on Surface #1B2336: OnSurface 15:1, OnSurfaceMuted 6.1:1, Accent 6.9:1,
- * Danger 5.7:1, Warning 9.4:1, Info 6.2:1.
+ * Contrast (WCAG) on Surface #1B1B1E: OnSurface 16:1, OnSurfaceMuted 7.0:1, Accent 6.3:1,
+ * Danger 6.0:1, Warning 11:1.
  */
 object Palette {
-    const val BACKGROUND = 0xFF0F172A
-    const val SURFACE = 0xFF1B2336
-    const val SURFACE_HIGH = 0xFF272F42
-    const val SECONDARY = 0xFF334155
-    const val ON_SURFACE = 0xFFF8FAFC
-    const val ON_SURFACE_MUTED = 0xFF94A3B8
+    const val BACKGROUND = 0xFF0F0F11
+    const val SURFACE = 0xFF1B1B1E
+    const val SURFACE_HIGH = 0xFF27272B
+    const val SECONDARY = 0xFF34343A
+    const val ON_SURFACE = 0xFFF4F4F6
+    const val ON_SURFACE_MUTED = 0xFFA1A1A8
     /** Control boundaries (3.3:1 on Surface). */
-    const val OUTLINE = 0xFF64748B
+    const val OUTLINE = 0xFF6B6B73
     /** Decorative dividers. */
-    const val OUTLINE_VARIANT = 0xFF334155
-    const val ACCENT = 0xFF22C55E
-    const val ON_ACCENT = 0xFF0F172A
-    const val DANGER = 0xFFF87171
-    const val DANGER_FILL = 0xFFEF4444
-    const val WARNING = 0xFFFBBF24
-    const val INFO = 0xFF60A5FA
-    const val SCRIM = 0xCC0F172A
+    const val OUTLINE_VARIANT = 0xFF2F2F34
+    /** Filled primary buttons: light on dark, like the system's own. */
+    const val PRIMARY = 0xFFF4F4F6
+    const val ON_PRIMARY = 0xFF0F0F11
+    /** The one accent: selection, links, switches, "connected". */
+    const val ACCENT = 0xFF5B9DFF
+    const val ON_ACCENT = 0xFF0F0F11
+    const val DANGER = 0xFFFF7A7A
+    const val DANGER_FILL = 0xFFE5484D
+    const val WARNING = 0xFFFFC53D
+    const val INFO = 0xFF5B9DFF
+    const val SCRIM = 0xCC0F0F11
 
     fun argb(v: Long): Int = v.toInt()
 }
@@ -40,6 +45,8 @@ val OnSurface = Color(Palette.ON_SURFACE)
 val OnSurfaceMuted = Color(Palette.ON_SURFACE_MUTED)
 val Outline = Color(Palette.OUTLINE)
 val OutlineVariant = Color(Palette.OUTLINE_VARIANT)
+val Primary = Color(Palette.PRIMARY)
+val OnPrimary = Color(Palette.ON_PRIMARY)
 val Accent = Color(Palette.ACCENT)
 val OnAccent = Color(Palette.ON_ACCENT)
 val Danger = Color(Palette.DANGER)

@@ -52,11 +52,56 @@ class ScreenGestureMachineTest {
         assertTrue(out.none { it is Tap })
     }
 
-    @Test fun pinchIsIgnored() {
+    @Test fun twoFingerSpreadZoomsIn() {
         ev(1, DOWN, 100f, 300f, 0); ev(2, DOWN, 200f, 300f, 0)
-        for (i in 1..5) { ev(1, MOVE, 100f - i * 10, 300f, i * 16L); ev(2, MOVE, 200f + i * 10, 300f, i * 16L) }
-        ev(1, UP, 50f, 300f, 200); ev(2, UP, 250f, 300f, 210)
-        assertTrue(out.isEmpty())
+        for (i in 1..8) { ev(1, MOVE, 100f - i * 10, 300f, i * 16L); ev(2, MOVE, 200f + i * 10, 300f, i * 16L) }
+        ev(1, UP, 20f, 300f, 200); ev(2, UP, 280f, 300f, 210)
+        val zooms = out.filterIsInstance<ScreenIntent.Zoom>()
+        assertTrue("got $out", zooms.isNotEmpty() && zooms.all { !it.inward })
+        assertTrue(out.none { it is Tap || it is Scroll })
+    }
+
+    private fun hand(n: Int, cx: Float = 500f, cy: Float = 400f, r: Float = 150f): List<Pair<Float, Float>> =
+        (0 until n).map { k -> val a = Math.PI * 2 * k / n; (cx + r * Math.cos(a).toFloat()) to (cy + r * Math.sin(a).toFloat()) }
+
+    @Test fun fourFingerSwipesWorkInScreenModeToo() {
+        for (d in SwipeDir.entries) {
+            out.clear()
+            val mm = ScreenGestureMachine(ScreenGestureMachine.Config(slopPx = 16f)) { out += it }
+            val h = hand(4)
+            h.forEachIndexed { i, p -> mm.onTouch(i + 1L, DOWN, p.first, p.second, i * 5L) }
+            val (dx, dy) = when (d) { SwipeDir.UP -> 0f to -20f; SwipeDir.DOWN -> 0f to 20f; SwipeDir.LEFT -> -20f to 0f; SwipeDir.RIGHT -> 20f to 0f }
+            for (s in 1..10) h.forEachIndexed { i, p -> mm.onTouch(i + 1L, MOVE, p.first + dx * s, p.second + dy * s, 30 + s * 16L) }
+            h.forEachIndexed { i, _ -> mm.onTouch(i + 1L, UP, 0f, 0f, 400) }
+            assertEquals("$d", listOf(ScreenIntent.Swipe(d, 4)), out.filterNot { it is Hover })
+        }
+    }
+
+    @Test fun fiveFingerPinchInScreenModeIsLaunchpad() {
+        val h = hand(5)
+        h.forEachIndexed { i, p -> ev(i + 1L, DOWN, p.first, p.second, i * 5L) }
+        for (s in 1..10) h.forEachIndexed { i, p ->
+            val k = (150f - s * 10f) / 150f
+            ev(i + 1L, MOVE, 500f + (p.first - 500f) * k, 400f + (p.second - 400f) * k, 30 + s * 16L)
+        }
+        h.forEachIndexed { i, _ -> ev(i + 1L, UP, 0f, 0f, 400) }
+        assertEquals(listOf(ScreenIntent.Pinch(spread = false)), out.filterNot { it is Hover })
+    }
+
+    @Test fun threeFingersDoNothingInScreenMode() {
+        val h = hand(3)
+        h.forEachIndexed { i, p -> ev(i + 1L, DOWN, p.first, p.second, i * 5L) }
+        for (s in 1..15) h.forEachIndexed { i, p -> ev(i + 1L, MOVE, p.first, p.second - s * 20f, 30 + s * 16L) }
+        h.forEachIndexed { i, _ -> ev(i + 1L, UP, 0f, 0f, 400) }
+        assertTrue("got $out", out.none { it is ScreenIntent.Swipe || it is ScreenIntent.Pinch || it is Tap })
+    }
+
+    @Test fun firmPressForceClicksAtTheTouchPoint() {
+        m.firmPressAt = 0.6f
+        m.onTouch(1, DOWN, 300f, 200f, 0, 0.3f)
+        m.onTouch(1, MOVE, 301f, 200f, 50, 0.75f)
+        m.onTouch(1, UP, 301f, 200f, 120, 0.2f)
+        assertEquals(listOf(ScreenIntent.FirmPress(300f, 200f)), out)
     }
 
     @Test fun twoFingerTapIsRightClick() {
