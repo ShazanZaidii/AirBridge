@@ -175,13 +175,17 @@
         </receiver>
 
         <!-- Exported only because System UI opens it from the tile (QS_TILE_PREFERENCES).
-             Not shown over the lock screen: it controls the computer. -->
+             Always landscape (either side, by the sensor, whatever auto-rotate says), and usable from
+             the lock screen like v1: showWhenLocked + turnScreenOn. -->
         <activity
             android:name=".TrackpadActivity"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
             android:excludeFromRecents="true"
             android:exported="true"
             android:launchMode="singleTop"
+            android:screenOrientation="sensorLandscape"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
             android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen">
             <intent-filter>
                 <action android:name="android.service.quicksettings.action.QS_TILE_PREFERENCES" />

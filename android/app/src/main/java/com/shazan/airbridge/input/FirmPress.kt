@@ -82,7 +82,7 @@ object FirmPress {
  * place, rising pressure. Only one-finger events are passed on (that is all a firm press uses).
  */
 class PressureFeed {
-    var listener: ((pressure: Float) -> Unit)? = null
+    var listener: ((pressure: Float, t: Long) -> Unit)? = null
 
     fun onMotionEvent(e: android.view.MotionEvent) {
         val l = listener ?: return
@@ -91,6 +91,6 @@ class PressureFeed {
         if (a != android.view.MotionEvent.ACTION_MOVE && a != android.view.MotionEvent.ACTION_DOWN) return
         var p = e.getPressure(0)
         for (h in 0 until e.historySize) p = maxOf(p, e.getHistoricalPressure(0, h))
-        l(p)
+        l(p, e.eventTime)
     }
 }

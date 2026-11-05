@@ -36,7 +36,7 @@ import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.SpaceDashboard
-import androidx.compose.material.icons.outlined.Wallpaper
+import androidx.compose.material.icons.outlined.Keyboard
 import androidx.compose.material.icons.outlined.WebAsset
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -67,26 +67,30 @@ import androidx.compose.ui.unit.sp
 /** One shortcut beside the mirrored screen: a §8.5 action with its icon and a short label. */
 data class Shortcut(val action: String, val label: String, val icon: ImageVector, val description: String = label)
 
+/** Not sent to the computer: shows / hides the phone's full keyboard over the mirrored screen. */
+const val KEYBOARD_TOGGLE = "@keyboard"
+
 /**
- * The two shortcut groups shown in the empty bands beside the mirrored screen: desktops and windows
- * on the left, system on the right. Only actions the target understands are listed.
+ * The two shortcut groups shown in the empty bands beside the mirrored screen: the keyboard toggle
+ * first (always reachable, even when the keyboard makes the rail scroll), desktops and windows on
+ * the left, system on the right. Only actions the target understands are listed.
  */
 object ScreenShortcuts {
     fun left(platform: String): List<Shortcut> = when (platform) {
         "windows" -> listOf(
+            Shortcut(KEYBOARD_TOGGLE, "Keyboard", Icons.Outlined.Keyboard, "Show or hide the keyboard"),
             Shortcut("mission_control", "Task View", Icons.Outlined.SpaceDashboard),
             Shortcut("app_expose", "Switch", Icons.Outlined.FilterNone, "Switch windows"),
             Shortcut("desktop_left", "Desktop", Icons.Outlined.KeyboardDoubleArrowLeft, "Previous desktop"),
             Shortcut("desktop_right", "Desktop", Icons.Outlined.KeyboardDoubleArrowRight, "Next desktop"),
-            Shortcut("show_desktop", "Desktop", Icons.Outlined.Wallpaper, "Show desktop"),
             Shortcut("app_drawer", "Start", Icons.Outlined.Apps, "Start menu"),
         )
         else -> listOf(
+            Shortcut(KEYBOARD_TOGGLE, "Keyboard", Icons.Outlined.Keyboard, "Show or hide the keyboard"),
             Shortcut("mission_control", "Mission", Icons.Outlined.SpaceDashboard, "Mission Control"),
             Shortcut("app_expose", "Windows", Icons.Outlined.FilterNone, "App Exposé"),
             Shortcut("desktop_left", "Space", Icons.Outlined.KeyboardDoubleArrowLeft, "Space on the left"),
             Shortcut("desktop_right", "Space", Icons.Outlined.KeyboardDoubleArrowRight, "Space on the right"),
-            Shortcut("show_desktop", "Desktop", Icons.Outlined.Wallpaper, "Show desktop"),
             Shortcut("app_drawer", "Apps", Icons.Outlined.Apps, "Launchpad"),
         )
     }
@@ -114,7 +118,7 @@ object ScreenShortcuts {
  * evenly (up to 72 dp each); when even 44 dp each does not fit (keyboard open), the rail scrolls.
  */
 @Composable
-fun ShortcutRail(items: List<Shortcut>, width: Dp, enabled: Boolean, onAction: (String) -> Unit, modifier: Modifier = Modifier) {
+fun ShortcutRail(items: List<Shortcut>, width: Dp, enabled: Boolean, onAction: (String) -> Unit, modifier: Modifier = Modifier, active: Set<String> = emptySet()) {
     BoxWithConstraints(modifier.width(width).fillMaxHeight()) {
         val gap = 6.dp
         val pad = 8.dp
@@ -127,19 +131,19 @@ fun ShortcutRail(items: List<Shortcut>, width: Dp, enabled: Boolean, onAction: (
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             val h = if (fits) each.coerceAtMost(72.dp) else 56.dp
-            for (s in items) ShortcutTile(s, enabled, onAction, Modifier.fillMaxWidth().height(h), compact = h < 52.dp)
+            for (s in items) ShortcutTile(s, enabled || s.action == KEYBOARD_TOGGLE, onAction, Modifier.fillMaxWidth().height(h), compact = h < 52.dp, on = s.action in active)
         }
     }
 }
 
 /** A horizontal strip of shortcut tiles (portrait: under the picture). */
 @Composable
-fun ShortcutStrip(items: List<Shortcut>, enabled: Boolean, onAction: (String) -> Unit, modifier: Modifier = Modifier) {
+fun ShortcutStrip(items: List<Shortcut>, enabled: Boolean, onAction: (String) -> Unit, modifier: Modifier = Modifier, active: Set<String> = emptySet()) {
     Row(
         modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp, vertical = 6.dp),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        for (s in items) ShortcutTile(s, enabled, onAction, Modifier.width(72.dp))
+        for (s in items) ShortcutTile(s, enabled || s.action == KEYBOARD_TOGGLE, onAction, Modifier.width(72.dp), on = s.action in active)
     }
 }
 
@@ -148,18 +152,21 @@ fun ShortcutStrip(items: List<Shortcut>, enabled: Boolean, onAction: (String) ->
  * and a pressed fill; works with other fingers on the mirror.
  */
 @Composable
-private fun ShortcutTile(s: Shortcut, enabled: Boolean, onAction: (String) -> Unit, modifier: Modifier, compact: Boolean = false) {
+private fun ShortcutTile(s: Shortcut, enabled: Boolean, onAction: (String) -> Unit, modifier: Modifier, compact: Boolean = false, on: Boolean = false) {
     val view = LocalView.current
     val context = LocalContext.current
     val noMotion = remember { reducedMotion(context) }
     val fire by rememberUpdatedState { if (enabled) onAction(s.action) }
     var pressed by remember { mutableStateOf(false) }
-    val bg by animateColorAsState(if (pressed) Tp.TilePressed else Tp.Tile, if (noMotion) snap() else tween(90), label = "tile")
-    val fg: Color = if (enabled) Tp.Foreground else Tp.MutedForeground.copy(alpha = 0.5f)
+    val bg by animateColorAsState(
+        when { pressed -> Tp.TilePressed; on -> Tp.Accent.copy(alpha = 0.22f); else -> Tp.Tile },
+        if (noMotion) snap() else tween(90), label = "tile",
+    )
+    val fg: Color = when { !enabled -> Tp.MutedForeground.copy(alpha = 0.5f); on -> Tp.Accent; else -> Tp.Foreground }
     Column(
         modifier.heightIn(min = 44.dp).clip(RoundedCornerShape(12.dp)).background(bg)
             .semantics(mergeDescendants = true) {
-                role = Role.Button
+                role = if (s.action == KEYBOARD_TOGGLE) Role.Switch else Role.Button
                 contentDescription = s.description
                 onClick { fire(); true }
             }
