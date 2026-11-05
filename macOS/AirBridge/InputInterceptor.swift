@@ -50,8 +50,11 @@ nonisolated final class InputInterceptor: @unchecked Sendable {
         switch t {
         case "ctl_leave":
             let rel = msg["edge"] == nil ? nil : Msg.num(msg["rel"])
-            Controller.shared.perform { Controller.shared.remoteLeave(peer: peer, rel: rel) }
+            let reason = msg["reason"] as? String
+            Controller.shared.perform { Controller.shared.remoteLeave(peer: peer, rel: rel, reason: reason) }
             Injector.shared.submit(peer, msg)
+        case "ctl_ack":
+            Controller.shared.perform { Controller.shared.remoteAck(peer: peer) }
         case "ctl_enter":
             Controller.shared.perform { Controller.shared.peerTookOver(peer) }
             Injector.shared.submit(peer, msg)

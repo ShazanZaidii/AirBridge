@@ -259,6 +259,7 @@ nonisolated final class Injector: @unchecked Sendable {
         let along = g.span(edge, max(0, min(1, rel)), 0).0
         let p = g.edgePoint(edge, along: along, inset: 1)
         Self.post(CGEvent(mouseEventSource: source, mouseType: .mouseMoved, mouseCursorPosition: p, mouseButton: .left))
+        syncCursor(p)
         cursor = p
         lastPost = CFAbsoluteTimeGetCurrent()
     }
@@ -303,8 +304,17 @@ nonisolated final class Injector: @unchecked Sendable {
         e.setIntegerValueField(.mouseEventDeltaY, value: Int64((p.y - from.y).rounded()))
         e.flags = modifierFlags(states[peer])
         Self.post(e)
+        syncCursor(p)
         cursor = p
         lastPost = CFAbsoluteTimeGetCurrent()
+    }
+
+    /// Posting a mouse-moved event shows the cursor at `p`, but the HID layer keeps its own position. Without
+    /// this the physical trackpad's next move starts from the OLD position and the cursor snaps back.
+    private func syncCursor(_ p: CGPoint) {
+        CGWarpMouseCursorPosition(p)
+        // A warp briefly suppresses the physical trackpad; clear that for the source our own events use.
+        source?.localEventsSuppressionInterval = 0
     }
 
     private func pushedPast(_ edge: ScreenEdge, _ p: CGPoint, _ c: CGPoint, _ g: DisplayGeometry) -> Bool {

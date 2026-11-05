@@ -81,14 +81,20 @@ nonisolated final class Layout: @unchecked Sendable {
         notify()
     }
 
-    /// First-seen controllable peers get the first free edge (right, left, bottom, top).
+    /// First-seen controllable peers get a free LEFT or RIGHT edge with a middle span (§8.1: never the top or
+    /// bottom edge, which are the menu bar and the Dock). Everything else is placed by the user in Display Arrangement.
     func autoAssign(_ peers: [PeerInfo]) {
         lock.lock()
         var changed = false
+        // An earlier build auto-placed peers on the full bottom/top edge, which hijacked normal Dock use. Undo that.
+        for (id, p) in map where (p.edge == .bottom || p.edge == .top) && p.start == 0 && p.end == 1 {
+            map[id]!.edge = nil
+            changed = true
+        }
         for peer in peers where map[peer.id] == nil {
             let used = Set(map.values.compactMap(\.edge))
-            let edge = [ScreenEdge.right, .left, .bottom, .top].first { !used.contains($0) }
-            map[peer.id] = Placement(edge: edge, start: 0, end: 1, name: peer.name)
+            let edge = [ScreenEdge.right, .left].first { !used.contains($0) }
+            map[peer.id] = Placement(edge: edge, start: 0.25, end: 0.75, name: peer.name)
             changed = true
         }
         for peer in peers where map[peer.id] != nil && map[peer.id]!.name != peer.name {

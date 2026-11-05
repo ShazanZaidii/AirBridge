@@ -27,7 +27,7 @@ nonisolated struct CaptureSettings: Sendable {
     /// No capture while a drag is in progress or this long after one ends.
     static let dragCooldown: Double = 1.0
 
-    var threshold: Double = 100
+    var threshold: Double = 160
     var requireOption = false
     var disabledEdges: Set<ScreenEdge> = []
 

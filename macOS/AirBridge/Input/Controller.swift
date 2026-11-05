@@ -17,6 +17,11 @@ nonisolated final class Controller: @unchecked Sendable {
         let edge: ScreenEdge             // Mac edge the cursor left through
         let span: (CGFloat, CGFloat)     // global coordinate range of the portal along that edge
         let anchor: CGPoint              // frozen cursor position
+        let startedAt: CFAbsoluteTime
+        var acked = false                // target answered ctl_ack (§8.1); no ack within ackTimeout aborts the capture
+        var depth = 0.0                  // how far into the target the cursor is, in Mac points (our own estimate)
+        var lateral = 0.0                // sideways travel since entry, in Mac points
+        let maxDepth: Double             // target extent along the travel axis, in Mac points
     }
     private var session: Session?
     private var remoteKeys: Set<UInt16> = []      // Mac keycodes whose down was sent to the target
@@ -57,8 +62,13 @@ nonisolated final class Controller: @unchecked Sendable {
     private var settingsAt: CFAbsoluteTime = 0
     private var shownLevel: Double = -1
     private var lastEnded: (peer: String, at: CFAbsoluteTime)?
+    private var refusedUntil: [String: CFAbsoluteTime] = [:]   // peers that did not answer/refused a capture
 
     private static let moveInterval = 1.0 / 120.0
+    /// §8.1: the target must answer a ctl_enter with ctl_ack within this long, or we give the cursor back.
+    private static let ackTimeout = 0.6
+    /// Moving back this far (Mac points) through the entry edge returns control even if the target is silent.
+    private static let returnSlack = 40.0
 
     // MARK: thread / tap lifecycle
 
@@ -83,6 +93,7 @@ nonisolated final class Controller: @unchecked Sendable {
             // Lets a charging edge indicator decay when the user stops pushing (no events arrive then).
             let decay = CFRunLoopTimerCreateWithHandler(nil, CFAbsoluteTimeGetCurrent(), 0.05, 0, 0) { [weak self] _ in
                 self?.decayCharge()
+                self?.watchSession()
             }
             CFRunLoopAddTimer(rl, decay, .commonModes)
             ready.signal()
@@ -127,7 +138,7 @@ nonisolated final class Controller: @unchecked Sendable {
     func peersChanged(_ list: [PeerInfo]) {
         peers = list
         if let s = session, !list.contains(where: { $0.id == s.peer }) {
-            end(resumeAt: inward(s.anchor, s.edge), sendLeave: false)
+            end(resumeAt: returnPoint(s), sendLeave: false)
         }
         if let c = charge, !list.contains(where: { $0.id == c.peer }) { resetCharge() }
     }
@@ -137,7 +148,7 @@ nonisolated final class Controller: @unchecked Sendable {
         let name = peerName(peer)
         let who = holder.isEmpty ? "another device" : holder
         if let s = session, s.peer == peer {
-            end(resumeAt: inward(s.anchor, s.edge), sendLeave: true)
+            end(resumeAt: returnPoint(s), sendLeave: true)
             ControlStatus.shared.showNotice("\(name) is being used by \(who)")
         } else if let l = lastEnded, l.peer == peer, CFAbsoluteTimeGetCurrent() - l.at < 2 {
             ControlStatus.shared.showNotice("\(name) is being used by \(who)")
@@ -149,9 +160,13 @@ nonisolated final class Controller: @unchecked Sendable {
     }
 
     /// `ctl_leave` from the peer we control: resume at the matching point of our edge.
-    func remoteLeave(peer: String, rel: Double?) {
+    func remoteLeave(peer: String, rel: Double?, reason: String? = nil) {
         guard let s = session, s.peer == peer else { return }
-        var p = inward(s.anchor, s.edge)
+        var p = returnPoint(s)
+        if reason == "unavailable" {
+            refusedUntil[peer] = CFAbsoluteTimeGetCurrent() + 5
+            ControlStatus.shared.showNotice("\(peerName(peer)) can't be controlled right now. Turn on the AirBridge accessibility service on it.", seconds: 8)
+        }
         if let rel {
             let along = s.span.0 + (s.span.1 - s.span.0) * CGFloat(max(0, min(1, rel)))
             p = geometry().edgePoint(s.edge, along: along, inset: 3)
@@ -161,12 +176,35 @@ nonisolated final class Controller: @unchecked Sendable {
 
     /// The peer we control started controlling us (`ctl_enter`): stop without echoing a leave.
     func peerTookOver(_ peer: String) {
-        if let s = session, s.peer == peer { end(resumeAt: inward(s.anchor, s.edge), sendLeave: false) }
+        if let s = session, s.peer == peer { end(resumeAt: returnPoint(s), sendLeave: false) }
+    }
+
+    /// `ctl_ack` from the target: it showed its cursor and can inject input.
+    func remoteAck(peer: String) {
+        if session?.peer == peer { session!.acked = true }
+    }
+
+    /// No ack in time: the target can't or won't take control. Never leave the user's cursor hostage.
+    private func watchSession() {
+        guard let s = session, !s.acked else { return }
+        let now = CFAbsoluteTimeGetCurrent()
+        guard now - s.startedAt > Self.ackTimeout else { return }
+        refusedUntil[s.peer] = now + 5
+        let name = peerName(s.peer)
+        end(resumeAt: returnPoint(s), sendLeave: true)
+        ControlStatus.shared.showNotice("\(name) isn't ready to be controlled. Turn on the AirBridge accessibility service on it.", seconds: 8)
+    }
+
+    /// Where the cursor reappears: on the entry edge, at the sideways position the user had reached.
+    private func returnPoint(_ s: Session) -> CGPoint {
+        let anchorAlong = s.edge.isVertical ? s.anchor.y : s.anchor.x
+        let along = max(s.span.0, min(s.span.1, anchorAlong + CGFloat(s.lateral)))
+        return geometry().edgePoint(s.edge, along: along, inset: 8)
     }
 
     /// Local recall (hotkey / legacy call): send `ctl_leave` and return to where we left.
     func recall() {
-        if let s = session { end(resumeAt: inward(s.anchor, s.edge), sendLeave: true) }
+        if let s = session { end(resumeAt: returnPoint(s), sendLeave: true) }
     }
 
     // MARK: tap callback
@@ -270,6 +308,7 @@ nonisolated final class Controller: @unchecked Sendable {
         for edge in ScreenEdge.allCases where cfg.enabled(edge) && g.isOuter(p, of: r, edge) {
             guard let (id, pl) = Layout.shared.assignment(for: edge),
                   peers.contains(where: { $0.id == id && $0.caps.contains("ctl_target") }) else { continue }
+            if let until = refusedUntil[id], CFAbsoluteTimeGetCurrent() < until { continue }
             let span = g.span(edge, pl.start, pl.end)
             let along = edge.isVertical ? p.y : p.x
             guard along >= span.0 - 0.5, along <= span.1 + 0.5 else { continue }
@@ -382,7 +421,12 @@ nonisolated final class Controller: @unchecked Sendable {
 
         let anchor = e.location
         resetCharge()
-        session = Session(peer: peer, edge: edge, span: span, anchor: anchor)
+        let info = peers.first { $0.id == peer }
+        let gain = info?.platform == "android" ? 1.6 : 1.0       // target pixels per Mac point (see Android TargetController)
+        let extentPx = Double(edge.isVertical ? (info?.screenW ?? 0) : (info?.screenH ?? 0))
+        let maxDepth = extentPx > 0 ? extentPx / gain : 1200
+        session = Session(peer: peer, edge: edge, span: span, anchor: anchor,
+                          startedAt: CFAbsoluteTimeGetCurrent(), maxDepth: max(200, maxDepth))
         remoteKeys.removeAll()
         remoteButtons.removeAll()
         escDowns.removeAll()
@@ -392,6 +436,8 @@ nonisolated final class Controller: @unchecked Sendable {
         PeerBus.shared.send(to: peer, ["t": "ctl_enter", "edge": edge.opposite.rawValue, "rel": Msg.round(rel, 10000)])
         PeerBus.shared.send(to: peer, ["t": "key_state", "caps": capsOn])
         ControlStatus.shared.setControlling(peerName(peer))
+        let name = peerName(peer)
+        DispatchQueue.main.async { CaptureHUD.shared.show(deviceName: name, anchor: anchor) }
     }
 
     private func end(resumeAt p: CGPoint, sendLeave: Bool) {
@@ -411,7 +457,8 @@ nonisolated final class Controller: @unchecked Sendable {
         ControlStatus.shared.setControlling(nil)
         CGWarpMouseCursorPosition(p)
         CGAssociateMouseAndMouseCursorPosition(1)
-        DispatchQueue.main.async { CursorHider.show() }
+        CGWarpMouseCursorPosition(p)   // some macOS versions re-place the cursor when association comes back
+        DispatchQueue.main.async { CursorHider.show(); CaptureHUD.shared.hide() }
     }
 
     private func inward(_ p: CGPoint, _ edge: ScreenEdge) -> CGPoint {
@@ -432,7 +479,16 @@ nonisolated final class Controller: @unchecked Sendable {
         case .mouseMoved, .leftMouseDragged, .rightMouseDragged, .otherMouseDragged:
             let loc = e.location
             if abs(loc.x - s.anchor.x) > 5 || abs(loc.y - s.anchor.y) > 5 { CGWarpMouseCursorPosition(s.anchor) }
-            queueMove(e.getDoubleValueField(.mouseEventDeltaX), e.getDoubleValueField(.mouseEventDeltaY))
+            let dx = e.getDoubleValueField(.mouseEventDeltaX), dy = e.getDoubleValueField(.mouseEventDeltaY)
+            queueMove(dx, dy)
+            // Our own estimate of where the target's cursor is, so the way back never depends on the target.
+            let deeper = Self.outward(s.edge, dx, dy)
+            let side = s.edge.isVertical ? dx : dy
+            session!.depth = min(s.maxDepth, s.depth + deeper)
+            session!.lateral += side
+            if session!.depth <= -Self.returnSlack, remoteButtons.isEmpty {
+                end(resumeAt: returnPoint(session!), sendLeave: true)
+            }
         case .leftMouseDown, .rightMouseDown, .otherMouseDown:
             let b = Self.buttonNumber(type, e)
             guard b <= 2, remoteButtons.insert(b).inserted else { return false }
