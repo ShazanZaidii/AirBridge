@@ -9,19 +9,21 @@ import java.util.Locale
 
 /**
  * Live gesture diagnostics: for every touch, how many fingers were counted, what the recogniser made
- * of it (or why nothing fired) and what was actually sent. Shown on the trackpad (toggle: long-press
- * the Trackpad tab) and written to logcat under the tag [TAG]:  adb logcat -s AirBridgeGesture
+ * of it (or why nothing fired) and what was actually sent. Always written to logcat under the tag
+ * [TAG] (adb logcat -s AirBridgeGesture); shown on the trackpad only when turned on (long-press the
+ * Trackpad tab).
  */
 object GestureDebug {
     const val TAG = "AirBridgeGesture"
-    const val PREF = "TP_GESTURE_LOG"
+    /** On-screen overlay (off by default; it sits over the pad). Logcat logging is always on. */
+    const val PREF_OVERLAY = "TP_GESTURE_OVERLAY"
 
     private val _lines = MutableStateFlow<List<String>>(emptyList())
     val lines: StateFlow<List<String>> = _lines
     private val _fingers = MutableStateFlow(0)
     /** Fingers on the pad right now. */
     val fingers: StateFlow<Int> = _fingers
-    private val _enabled = MutableStateFlow(true)
+    private val _enabled = MutableStateFlow(false)
     val enabled: StateFlow<Boolean> = _enabled
 
     private val clock = SimpleDateFormat("HH:mm:ss.SSS", Locale.US)
@@ -74,8 +76,7 @@ internal class GestureTrace(private val mode: String, private val pxPerDp: Float
         val result = when {
             got.isNotEmpty() -> got.joinToString(", ")
             firm -> "firm press"
-            n >= 4 -> "nothing: moved ${dp(multiTravel)} dp (needs ${dp(swipePx)}), pinch ${dp(multiPinch)} dp (needs ${dp(pinchPx)})"
-            n == 3 -> "nothing: three fingers are ignored (Android skins use them); use four or five"
+            n >= 3 -> "nothing: moved ${dp(multiTravel)} dp (needs ${dp(swipePx)}), pinch ${dp(multiPinch)} dp (needs ${dp(pinchPx)})"
             n == 2 && scrollPx > 0f -> "scroll ${dp(scrollPx)} dp"
             n == 2 && zooms > 0 -> "zoom ×$zooms"
             n == 1 && moves > 0 -> "pointer move"
@@ -89,8 +90,12 @@ internal class GestureTrace(private val mode: String, private val pxPerDp: Float
     /** Android cancelled the touch under us (system gesture, another window took it). */
     fun cancelled() {
         val n = maxDown
-        val out = if (sent.isEmpty()) "" else "  (already sent ${sent.joinToString(", ")})"
-        GestureDebug.line("$mode: $n fingers  →  CANCELLED by Android: the phone took this touch for itself$out")
+        val out = if (sent.isEmpty()) "" else "  →  sent ${sent.joinToString(", ")}"
+        if (got.isNotEmpty()) {
+            GestureDebug.line("$mode: $n fingers  →  taken by Android, recovered as ${got.joinToString(", ")}$out")
+        } else {
+            GestureDebug.line("$mode: $n fingers  →  CANCELLED by Android before it moved enough to tell the gesture$out")
+        }
         clear()
         GestureDebug.fingersNow(0)
     }

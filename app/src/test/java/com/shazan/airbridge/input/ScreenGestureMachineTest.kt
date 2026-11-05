@@ -88,12 +88,18 @@ class ScreenGestureMachineTest {
         assertEquals(listOf(ScreenIntent.Pinch(spread = false)), out.filterNot { it is Hover })
     }
 
-    @Test fun threeFingersDoNothingInScreenMode() {
+    @Test fun threeFingerSwipeWorksInScreenModeAndATakenTouchIsRecovered() {
         val h = hand(3)
         h.forEachIndexed { i, p -> ev(i + 1L, DOWN, p.first, p.second, i * 5L) }
         for (s in 1..15) h.forEachIndexed { i, p -> ev(i + 1L, MOVE, p.first, p.second - s * 20f, 30 + s * 16L) }
         h.forEachIndexed { i, _ -> ev(i + 1L, UP, 0f, 0f, 400) }
-        assertTrue("got $out", out.none { it is ScreenIntent.Swipe || it is ScreenIntent.Pinch || it is Tap })
+        assertEquals(listOf(ScreenIntent.Swipe(SwipeDir.UP, 3)), out.filterNot { it is Hover })
+        out.clear()
+        val g = hand(4)
+        g.forEachIndexed { i, p -> ev(i + 10L, DOWN, p.first, p.second, 1000 + i * 5L) }
+        for (s in 1..3) g.forEachIndexed { i, p -> ev(i + 10L, MOVE, p.first + s * 20f, p.second, 1030 + s * 16L) }
+        ev(-1, CANCEL, 0f, 0f, 1200)
+        assertEquals(listOf(ScreenIntent.Swipe(SwipeDir.RIGHT, 4), ResetAll), out.filterNot { it is Hover })
     }
 
     @Test fun firmPressForceClicksAtTheTouchPoint() {

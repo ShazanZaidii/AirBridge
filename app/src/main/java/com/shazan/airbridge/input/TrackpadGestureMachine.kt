@@ -73,6 +73,9 @@ class TrackpadGestureMachine(
         val twoFingerLiftSpreadMs: Long = 250,
         val twoFingerTapMaxMs: Long = 400,
         val multiCooldownMs: Long = 150,
+        /** A 3+ finger touch the phone took away still counts if it had moved / pinched this far. */
+        val recoverSwipePx: Float = 40f,
+        val recoverPinchPx: Float = 30f,
         /** Reset if a pointer is down and nothing arrives for this long. */
         val watchdogMs: Long = 1500,
         /** Same while a drag holds the button: users legitimately hold still mid-drag. */
@@ -347,6 +350,12 @@ class TrackpadGestureMachine(
     private fun cancel(t: Long) {
         val wasActive = ptrs.isNotEmpty() || state != State.Idle
         if (state == State.Dragging) emit(GestureIntent.DragEnd)
+        // The system took a multi-finger touch (vivo & co.): use the motion we saw before it did.
+        if (state == State.Multi) when (val r = multi.recover(config.recoverSwipePx, config.recoverPinchPx)) {
+            is MultiFingerResult.Swipe -> emit(GestureIntent.Swipe(r.dir, r.fingers.coerceAtMost(5)))
+            is MultiFingerResult.Pinch -> emit(GestureIntent.Pinch(r.spread))
+            null -> Unit
+        }
         ptrs.clear()
         state = State.Idle
         primary = -1
