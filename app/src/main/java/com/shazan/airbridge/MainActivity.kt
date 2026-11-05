@@ -149,7 +149,12 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        intent?.dataString?.takeIf { it.startsWith("airbridge://") }?.let { pendingPairLink.value = it }
+        // A pairing link is one-shot: only a fresh launch carries it, and it is removed from the activity's intent so a
+        // process restart, rotation or recreate never re-runs an old link (which would fail and drop the connection).
+        if (savedInstanceState == null) {
+            intent?.dataString?.takeIf { it.startsWith("airbridge://") }?.let { pendingPairLink.value = it }
+        }
+        intent?.data = null
         // Browse mDNS while visible (discovery list, QR address lookup); the service keeps its own reference.
         lifecycle.addObserver(object : DefaultLifecycleObserver {
             override fun onStart(owner: LifecycleOwner) = Discovery.acquire()
@@ -165,6 +170,8 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         intent.dataString?.takeIf { it.startsWith("airbridge://") }?.let { pendingPairLink.value = it }
+        intent.data = null
+        setIntent(intent)
     }
 
     override fun onResume() {
