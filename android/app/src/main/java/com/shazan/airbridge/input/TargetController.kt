@@ -457,6 +457,9 @@ class TargetController(internal val service: AccessibilityService) {
         }
     }
 
+    /** v1 "hold D": the primary button held from the keyboard at the cursor (moves drag). */
+    internal fun keyButton(down: Boolean) { if (down) leftDown() else leftUp() }
+
     private fun leftDown() {
         if (btnDown) return
         btnDown = true
