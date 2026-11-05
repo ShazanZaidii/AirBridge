@@ -585,10 +585,14 @@ async def run_host(args):
     if not server:
         sys.exit("no free port")
     dnssd = None
-    if sys.platform == "darwin":
+    if sys.platform == "darwin" and args.bonjour:
+        import atexit, signal
         dnssd = subprocess.Popen(["dns-sd", "-R", args.name, "_airbridge._tcp", "local.", str(port),
                                   "v=2", f"id={st['id']}", f"name={args.name}", "plat=linux"],
                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        atexit.register(dnssd.terminate)
+        for _sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+            signal.signal(_sig, lambda *_: (dnssd.terminate(), os._exit(0)))
     log(f"HOST {args.name} id={st['id']} listening on :{port}/v2")
     log("QR url:", pairing.qr(st["id"], args.name, args.addr or "0.0.0.0", port))
     log("commands: accept | reject | qr | clip <text> | send <path> | peers | quit   (the QR secret rotates after each pairing; use `qr` to print the current one)")
@@ -713,6 +717,7 @@ def main():
     h.add_argument("--name", default="Probe Host")
     h.add_argument("--addr", help="IP to put in the QR url")
     h.add_argument("--auto-accept", action="store_true", help="accept confirm-mode pairings without asking")
+    h.add_argument("--bonjour", action="store_true", help="advertise over Bonjour (off by default: it shows up as a real device on other phones)")
     c = sub.add_parser("client")
     c.add_argument("target", help="ws://host:port[/v2] or an airbridge://pair?... url")
     c.add_argument("--name", default="Probe Client")
