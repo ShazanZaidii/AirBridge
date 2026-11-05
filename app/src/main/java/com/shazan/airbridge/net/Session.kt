@@ -101,8 +101,8 @@ class Session(
     @Volatile var peerScreenW = 0; private set
     @Volatile var peerScreenH = 0; private set
 
-    /** Whether our `hello` on this session advertised `ctl_target` (null until it was sent). */
-    @Volatile var advertisedTarget: Boolean? = null; private set
+    /** The [Protocol.DYNAMIC_CAPS] our `hello` on this session advertised (null until it was sent). */
+    @Volatile var advertisedDynamic: Set<String>? = null; private set
 
     /** Per-session file transfer state (§6, rule 4). */
     val xfer by lazy { FileTransfer(this) }
@@ -163,7 +163,7 @@ class Session(
     private fun sendHello(paired: Boolean?) {
         val (w, h) = Identity.screenSize()
         val caps = Protocol.caps()
-        advertisedTarget = Protocol.CAP_TARGET in caps
+        advertisedDynamic = caps.filterTo(HashSet()) { it in Protocol.DYNAMIC_CAPS }
         sendHandshake(Protocol.hello(Identity.id, Identity.name, myNonce, eph.publicRaw, w, h, paired, caps))
     }
 
