@@ -101,6 +101,9 @@ class Session(
     @Volatile var peerScreenW = 0; private set
     @Volatile var peerScreenH = 0; private set
 
+    /** Whether our `hello` on this session advertised `ctl_target` (null until it was sent). */
+    @Volatile var advertisedTarget: Boolean? = null; private set
+
     /** Per-session file transfer state (§6, rule 4). */
     val xfer by lazy { FileTransfer(this) }
 
@@ -159,7 +162,9 @@ class Session(
 
     private fun sendHello(paired: Boolean?) {
         val (w, h) = Identity.screenSize()
-        sendHandshake(Protocol.hello(Identity.id, Identity.name, myNonce, eph.publicRaw, w, h, paired))
+        val caps = Protocol.caps()
+        advertisedTarget = Protocol.CAP_TARGET in caps
+        sendHandshake(Protocol.hello(Identity.id, Identity.name, myNonce, eph.publicRaw, w, h, paired, caps))
     }
 
     // ---- receiving ----
@@ -187,6 +192,7 @@ class Session(
         val ch = channel ?: return
         if ((data[0].toInt() and 0xFF) != Envelope.KIND) { violation("unencrypted binary frame after ready"); return }
         val opened = ch.open(data) ?: run { violation("bad envelope (seq/tag)"); return }
+        peerId?.let { PeerBus.heard(it) }
         try {
             when (opened.innerKind) {
                 Envelope.INNER_TEXT -> onInnerText(opened.payload)
