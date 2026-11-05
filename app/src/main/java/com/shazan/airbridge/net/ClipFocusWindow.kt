@@ -11,8 +11,10 @@ import android.view.WindowManager
 /**
  * Takes window focus for a moment without starting an activity, so the clipboard can be read
  * (Android 10+ only lets the focused app read it). A 1×1 transparent, untouchable overlay window
- * (needs "Display over other apps") is added focusable; when it gains focus, [onFocus] runs and the
- * window is removed. Overlay windows are not subject to background-activity-start rules, nor to OEM
+ * (needs "Display over other apps"; it draws nothing) is added focusable; when it gains focus,
+ * [onFocus] runs and the window is removed. Taking focus hides the keyboard of the app in front.
+ * Apps that set HIDE_NON_SYSTEM_OVERLAY_WINDOWS (e.g. Google Contacts) hide it, so it never gets
+ * focus there; the caller then falls back to the activity. Overlay windows are not subject to background-activity-start rules, nor to OEM
  * "pop-ups in the background" switches (vivo/MIUI), unlike [com.shazan.airbridge.SyncActivity].
  *
  * Main thread only.
@@ -44,7 +46,7 @@ internal class ClipFocusWindow(private val ctx: Context) {
             PixelFormat.TRANSLUCENT,
         ).apply {
             gravity = Gravity.TOP or Gravity.START
-            alpha = 0f
+            // Not alpha = 0: input treats fully transparent layers as invisible and never delivers focus.
             softInputMode = WindowManager.LayoutParams.SOFT_INPUT_STATE_UNCHANGED
             title = "AirBridge clipboard"
         }
