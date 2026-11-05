@@ -156,11 +156,16 @@ import UserNotifications
         pendingShare += freshFiles
     }
 
-    func sendPendingShare(to peerId: String) {
+    /// Sends the shared files to every device in `peerIds` at once. The staged copies are deleted
+    /// only after the last of those transfers has ended, since each one reads the files as it goes.
+    func sendPendingShare(to peerIds: [String]) {
         let batches = pendingBatches
-        PeerManager.shared.sendFiles(pendingShare, to: peerId) { ShareInbox.remove(batches) }
+        let files = pendingShare
         pendingBatches = []
         pendingShare = []
+        guard !peerIds.isEmpty, !files.isEmpty else { ShareInbox.remove(batches); return }
+        let left = Countdown(peerIds.count) { ShareInbox.remove(batches) }
+        for id in peerIds { PeerManager.shared.sendFiles(files, to: id) { left.tick() } }
     }
 
     func cancelPendingShare() {
@@ -199,6 +204,18 @@ import UserNotifications
         content.userInfo = ["filePaths": urls.map(\.path)]
         UNUserNotificationCenter.current().add(
             UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
+    }
+}
+
+/// Runs `done` once after `tick()` has been called `count` times, from any thread.
+nonisolated final class Countdown: @unchecked Sendable {
+    private let lock = NSLock()
+    private var left: Int
+    private let done: () -> Void
+    init(_ count: Int, done: @escaping () -> Void) { left = count; self.done = done }
+    func tick() {
+        lock.lock(); left -= 1; let fire = left == 0; lock.unlock()
+        if fire { done() }
     }
 }
 

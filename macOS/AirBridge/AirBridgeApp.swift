@@ -64,6 +64,19 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
             if url.path == "/action", let name = q.first(where: { $0.name == "name" })?.value {
                 Injector.shared.debugAction(name, via: q.first(where: { $0.name == "via" })?.value)
             }
+            // airbridge://debug/accept_pairing — answer every open pairing prompt with Accept (test rigs).
+            if url.path == "/accept_pairing" {
+                for p in AppModel.shared.pairPrompts { AppModel.shared.respond(to: p, accept: true) }
+            }
+            // airbridge://debug/share_send?to=id1,id2 — the share window's Send with exactly those devices
+            // picked (always name them: a real phone may be connected too).
+            if url.path == "/share_send", let to = q.first(where: { $0.name == "to" })?.value {
+                let wanted = Set(to.split(separator: ",").map(String.init))
+                let ids = AppModel.shared.readyPeers.filter { $0.caps.contains("xfer") && wanted.contains($0.id) }.map(\.id)
+                InputLog.shared.log("debug share_send: \(AppModel.shared.pendingShare.count) file(s) to \(ids.count) device(s)")
+                AppModel.shared.sendPendingShare(to: ids)
+                closeTargetSelection()
+            }
         #endif
         default:
             break
@@ -647,48 +660,79 @@ struct TransferRowView: View {
 
 struct TargetSelectionView: View {
     @ObservedObject var model: AppModel
+    /// Empty = normal mode (a click sends). Press and hold (or ⌘-click) a device to pick several.
+    @State private var chosen: Set<String> = []
 
     private var targets: [PeerInfo] { model.readyPeers.filter { $0.caps.contains("xfer") } }
+    private var picking: Bool { !chosen.isEmpty }
 
     var body: some View {
         VStack(spacing: 16) {
             Text("Send to Device").font(.title3).fontWeight(.bold)
-            Text("\(model.pendingShare.count) file(s) ready to send").font(.subheadline).foregroundStyle(.secondary)
+            Text(picking ? "\(chosen.count) selected" : "\(model.pendingShare.count) file(s) ready to send")
+                .font(.subheadline).foregroundStyle(.secondary)
 
             if targets.isEmpty {
-                Text("No devices connected.").foregroundStyle(.red).padding()
+                Text("No devices connected.").foregroundStyle(.secondary).padding()
             } else {
                 List(targets) { peer in
-                    Button {
-                        model.sendPendingShare(to: peer.id)
-                        AppDelegate.shared?.closeTargetSelection()
-                    } label: {
-                        HStack {
-                            Image(systemName: platformIcon(peer.platform))
-                            Text(peer.name)
-                            Spacer()
-                            Image(systemName: "paperplane.fill").foregroundStyle(.blue)
+                    let on = chosen.contains(peer.id)
+                    HStack {
+                        Image(systemName: platformIcon(peer.platform))
+                        Text(peer.name)
+                        Spacer()
+                        if picking {
+                            Image(systemName: on ? "checkmark.circle.fill" : "circle")
+                                .foregroundStyle(on ? Color.primary : Color.secondary)
+                        } else {
+                            Image(systemName: "paperplane.fill").foregroundStyle(.secondary)
                         }
-                        .padding(8)
-                        .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
+                    .padding(8)
+                    .contentShape(Rectangle())
+                    .onLongPressGesture(minimumDuration: 0.45) { toggle(peer.id) }
+                    .highPriorityGesture(TapGesture().modifiers(.command).onEnded { toggle(peer.id) })
+                    .onTapGesture { if picking { toggle(peer.id) } else { send([peer.id]) } }
+                    .accessibilityElement(children: .combine)
+                    .accessibilityAddTraits(picking && on ? [.isButton, .isSelected] : .isButton)
+                    .accessibilityAction { if picking { toggle(peer.id) } else { send([peer.id]) } }
+                    .accessibilityAction(named: "Choose several") { toggle(peer.id) }
                 }
                 .frame(height: 150)
                 .cornerRadius(8)
             }
 
             HStack {
+                if !picking, targets.count > 1 {
+                    Text("Hold or ⌘-click to choose several").font(.caption).foregroundStyle(.secondary)
+                }
                 Spacer()
                 Button("Cancel") {
                     model.cancelPendingShare()
                     AppDelegate.shared?.closeTargetSelection()
                 }
                 .keyboardShortcut(.cancelAction)
+                if picking {
+                    Button(chosen.count > 1 ? "Send to \(chosen.count)" : "Send") { send(Array(chosen)) }
+                        .keyboardShortcut(.defaultAction)
+                }
             }
         }
         .padding()
         .frame(width: 350)
+        .onChange(of: targets.map(\.id)) { chosen.formIntersection(targets.map(\.id)) }
+    }
+
+    private func toggle(_ id: String) {
+        if chosen.contains(id) { chosen.remove(id) } else { chosen.insert(id) }
+    }
+
+    private func send(_ ids: [String]) {
+        let live = targets.map(\.id).filter(ids.contains)
+        guard !live.isEmpty else { return }
+        model.sendPendingShare(to: live)
+        chosen = []
+        AppDelegate.shared?.closeTargetSelection()
     }
 }
 
