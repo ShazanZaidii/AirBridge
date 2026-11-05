@@ -56,6 +56,8 @@ data class PairedPeer(
     val via: String,
     val lastHost: String?,
     val lastPort: Int,
+    /** Set while the user (or the peer, with `bye user`) disconnected it; no redial until Connect. */
+    val disconnectedBy: DisconnectBy? = null,
 )
 
 /**
@@ -64,7 +66,7 @@ data class PairedPeer(
  * `kw` = K wrapped with an Android Keystore AES-GCM key ("ivB64:ctB64"); `k` = plain base64
  * fallback used only if the Keystore is unusable on this device.
  */
-object PairStore {
+object PairStore : PauseStore {
     private const val TAG = "AirBridge.PairStore"
     private const val PREFS = "airbridge_pairs"
     private const val KS_ALIAS = "airbridge_pair_wrap"
@@ -122,6 +124,19 @@ object PairStore {
         publish()
     }
 
+    override fun userPause(peerId: String): DisconnectBy? = get(peerId)?.disconnectedBy
+
+    /** Persisted in the peer's record as `pause` ("self" | "peer"); a new pairing ([put]) clears it. */
+    @Synchronized
+    override fun setUserPause(peerId: String, by: DisconnectBy?) {
+        val j = record(peerId) ?: return
+        val v = when (by) { DisconnectBy.SELF -> "self"; DisconnectBy.PEER -> "peer"; null -> null }
+        if (j.optString("pause").ifBlank { null } == v) return
+        if (v == null) j.remove("pause") else j.put("pause", v)
+        prefs.edit().putString(peerId, j.toString()).apply()
+        publish()
+    }
+
     private fun record(id: String): JSONObject? = prefs.getString(id, null)?.let { parseJson(it) }
 
     private fun publish() {
@@ -134,6 +149,7 @@ object PairStore {
                 via = j.optString("via", "lan"),
                 lastHost = j.optString("host").takeIf { it.isNotBlank() },
                 lastPort = j.optInt("port", 0),
+                disconnectedBy = when (j.optString("pause")) { "self" -> DisconnectBy.SELF; "peer" -> DisconnectBy.PEER; else -> null },
             ) to j.optLong("added")
         }.sortedBy { it.second }.map { it.first }
     }
