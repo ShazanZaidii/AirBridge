@@ -11,6 +11,7 @@ import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
+import android.view.accessibility.AccessibilityNodeInfo
 import com.shazan.airbridge.SyncActivity
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -47,6 +48,7 @@ object ClipboardSync {
     private const val EXTRA_IS_REMOTE_DEVICE = "android.content.extra.IS_REMOTE_DEVICE"
     /** How long the overlay focus window may take before we fall back to [SyncActivity]. */
     private const val WINDOW_FOCUS_TIMEOUT_MS = 1_000L
+    private const val SYSTEM_UI = "com.android.systemui"
 
     /** Reasons for which the user explicitly asked to push (send even if unchanged, show feedback). */
     private val FORCED = setOf("tile", "bubble", "share", "manual")
@@ -114,26 +116,39 @@ object ClipboardSync {
 
     /**
      * Accessibility events that mean "the user just copied", for ROMs where the clipboard listener is
-     * not delivered to background apps (stock Android 10+): the system clipboard overlay (Android 13+)
-     * appearing, or a tap on a "Copy"/"Cut" action. Cheap; called for every event. Main thread.
+     * not delivered to background apps (stock Android 10+): the SystemUI clipboard overlay (Android 13+)
+     * appearing, or a tap on a "Copy"/"Cut" action. Only text-free signals are inspected (window root
+     * content description, click label). Cheap; called for every event. Main thread.
      */
     fun onAccessibilityEvent(e: AccessibilityEvent) {
         val pkg = e.packageName?.toString() ?: return
         if (pkg == Hub.app.packageName) return
-        if (pkg == "com.android.systemui" || e.eventType == AccessibilityEvent.TYPE_VIEW_CLICKED) Log.v(TAG, "DBG a11y type=${e.eventType} pkg=$pkg cls=${e.className} text=${e.text} desc=${e.contentDescription}")
         val copied = when (e.eventType) {
-            AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ->
-                pkg == "com.android.systemui" && (e.className?.contains("Clipboard", ignoreCase = true) == true ||
-                    e.text.any { it?.contains("clipboard", ignoreCase = true) == true })
+            AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> pkg == SYSTEM_UI && isClipboardOverlay(e)
             AccessibilityEvent.TYPE_VIEW_CLICKED -> {
                 val label = (e.text.firstOrNull() ?: e.contentDescription)?.toString()?.trim()
-                label != null && (label.equals(copyLabel, ignoreCase = true) || label.equals(cutLabel, ignoreCase = true))
+                label != null && label.length <= 16 && (label.equals(copyLabel, ignoreCase = true) || label.equals(cutLabel, ignoreCase = true))
             }
             else -> false
         }
         if (copied) onChangeSignal("a11y")
     }
 
+    /** AOSP `clipboard_overlay.xml`: the root `clipboard_ui` carries `@string/clipboard_overlay_window_name`. */
+    private fun isClipboardOverlay(e: AccessibilityEvent): Boolean = try {
+        val root = e.source
+        root != null && (isOverlayNode(root) || (0 until minOf(root.childCount, 3)).any { i -> root.getChild(i)?.let { isOverlayNode(it) } == true })
+    } catch (_: Exception) { false }
+
+    private fun isOverlayNode(n: AccessibilityNodeInfo) =
+        n.contentDescription?.toString()?.equals(overlayName, ignoreCase = true) == true
+
+    private val overlayName by lazy {
+        try {
+            val res = Hub.app.packageManager.getResourcesForApplication(SYSTEM_UI)
+            res.getString(res.getIdentifier("clipboard_overlay_window_name", "string", SYSTEM_UI))
+        } catch (_: Exception) { "Clipboard" }
+    }
     private val copyLabel by lazy { Resources.getSystem().getString(android.R.string.copy) }
     private val cutLabel by lazy { Resources.getSystem().getString(android.R.string.cut) }
 
