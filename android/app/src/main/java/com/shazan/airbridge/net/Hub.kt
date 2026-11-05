@@ -293,7 +293,7 @@ object Hub : PeerBus.Transport {
                     if (t == "ctl_enter") s.send(Protocol.withReason("ctl_leave", "unavailable"))
                     if (t in PeerBus.CONTROL_TYPES && !accessibilityToastShown) {
                         accessibilityToastShown = true
-                        toast("Enable Accessibility Service in Android Settings to simulate Mouse (or from the App)", long = true)
+                        toast("Turn on \"AirBridge Universal Control\" in Accessibility settings so your computer can control this phone", long = true)
                     }
                 } else {
                     try { PeerBus.dispatchControl(id, m) } catch (e: Exception) { Log.w(TAG, "controlHandler", e) }

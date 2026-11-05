@@ -767,8 +767,9 @@ private fun DeviceCard(
 }
 
 /**
- * Top-of-list warning while the accessibility service is off: the computer would otherwise try to
- * move its cursor onto a phone that can't show it (§8.1 `unavailable`).
+ * Top-of-list warning while the core accessibility service ("AirBridge Universal Control") is off:
+ * the computer would otherwise try to move its cursor onto a phone that can't show it (§8.1
+ * `unavailable`). The optional typing service is never mentioned here.
  */
 @Composable
 private fun RemoteControlSetupCard(noun: String, onOpen: () -> Unit, onDismiss: () -> Unit) {
@@ -780,7 +781,7 @@ private fun RemoteControlSetupCard(noun: String, onOpen: () -> Unit, onDismiss: 
             Spacer(Modifier.width(Dimens.md))
             Column(Modifier.weight(1f).semantics(mergeDescendants = true) {}, verticalArrangement = Arrangement.spacedBy(Dimens.xs)) {
                 Text("$noun can't control this phone yet", style = MaterialTheme.typography.titleMedium)
-                Text("Turn on the AirBridge accessibility service so the cursor can appear and your clicks and typing reach this phone.",
+                Text("Turn on \"AirBridge Universal Control\" in Accessibility settings so the cursor can appear and your clicks reach this phone. It can't read your screen.",
                     style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             IconButton(onClick = onDismiss) { Icon(Icons.Outlined.Close, contentDescription = "Dismiss") }
@@ -905,10 +906,6 @@ private fun SettingsScreen(onBack: () -> Unit, onOpenLinkDebug: () -> Unit) {
     var visible by remember { mutableStateOf(prefs.getBoolean(NearbyTransport.PREF_VISIBLE, false)) }
     var renaming by remember { mutableStateOf(false) }
 
-    val accessibilityOn = remember(resumeTick) {
-        (Settings.Secure.getString(ctx.contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES) ?: "")
-            .split(':').any { it.startsWith(ctx.packageName + "/") }
-    }
     val canWriteSettings = remember(resumeTick) { Settings.System.canWrite(ctx) }
     val dndAccess = remember(resumeTick) { ctx.getSystemService(NotificationManager::class.java)?.isNotificationPolicyAccessGranted == true }
     val notificationsOn = remember(resumeTick) { ctx.getSystemService(NotificationManager::class.java)?.areNotificationsEnabled() == true }
@@ -984,9 +981,7 @@ private fun SettingsScreen(onBack: () -> Unit, onOpenLinkDebug: () -> Unit) {
 
             SectionHeader("Remote control")
             AbCard {
-                AccessRow("Control from your computer", "Accessibility service for the cursor, taps and typing", accessibilityOn) {
-                    open(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-                }
+                com.shazan.airbridge.ui.RemoteControlServiceRows()
                 RowDivider()
                 SwitchRow("Invert left/right arrows", null, invertX, { invertX = it; prefs.edit().putBoolean("INVERT_X", it).apply() })
                 RowDivider()
