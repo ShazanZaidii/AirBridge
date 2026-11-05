@@ -79,7 +79,10 @@ class TargetKeys(private val host: TargetController) {
             else if (!rep) soloKey = -1
         } else if (hid == soloKey) {
             soloKey = -1
-            if (now - soloAt <= SOLO_TAP_MS) soloTap(hid)
+            // Ctrl is pressed and let go all the time while writing: while typing, only ⌘ / Win / Menu
+            // taps are shortcuts (they are never part of writing).
+            val ctrl = hid == Hid.LCTRL || hid == Hid.RCTRL
+            if (now - soloAt <= SOLO_TAP_MS && !(ctrl && typing())) soloTap(hid)
         }
         if (!down) {
             pressed.remove(hid)
