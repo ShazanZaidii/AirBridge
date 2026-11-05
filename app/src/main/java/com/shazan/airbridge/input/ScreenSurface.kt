@@ -253,12 +253,12 @@ suspend fun PointerInputScope.screenGestures(
             }
             is ScreenIntent.Swipe -> {
                 loss.markHandled()
-                sender.action(TrackpadSender.swipeAction(i.dir))
+                sender.action(TrackpadSender.swipeAction(i.dir, sender.targetPlatform))
                 haptic(HapticFeedbackConstants.CONFIRM)
             }
             is ScreenIntent.Pinch -> {
                 loss.markHandled()
-                sender.action(TrackpadSender.pinchAction(i.spread))
+                sender.action(TrackpadSender.pinchAction(i.spread, sender.targetPlatform))
                 haptic(HapticFeedbackConstants.CONFIRM)
             }
             is ScreenIntent.FirmPress -> {
