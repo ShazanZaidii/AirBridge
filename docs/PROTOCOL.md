@@ -541,6 +541,26 @@ connected; the last choice is remembered and shown on screen).
 | Input from peer B while A holds the lease | Dropped. B receives `{"t":"ctl_busy","holder":"<A's name>"}` at most once per 2 s and shows "Being controlled by A". Exception: `ctl_enter` from B pre-empts as above. |
 | `ctl_leave` from the holder, holder disconnects, or implicit lease expires | Lease released; held keys/buttons released. |
 
+**No loops.** A device never controls a peer that is currently controlling it, and a device that holds a lease for
+some peer never captures onward (no chaining). Concretely: (a) a target that is driving peer P (its own mouse,
+keyboard, trackpad or mirror input is being sent to P) answers a `ctl_enter` from P with
+`{"t":"ctl_leave","reason":"loop"}` and answers P's `ptr_*`/`key`/`action` with `ctl_busy` (holder = its own name);
+(b) a device that is controlled by P must not offer P as a trackpad/mirror target (the UI shows it disabled with
+"Being controlled by P") and must not start a capture of anyone while the lease lasts.
+
+**No stray state.** When the lease holder's session ends for any reason (bye, socket error, liveness timeout,
+Disconnect, app quit) a target immediately hides its virtual cursor, releases every held key and button, drops the
+lease and clears its "Controlled by" status; as a safety net it does the same if it receives no message at all from
+the holder for 10 s. A controller likewise restores its own cursor, input and status immediately when the target's
+session ends.
+
+**Smooth hand-off.** Entering: the controller keeps its own cursor visible (frozen at the edge) until `ctl_ack`
+arrives, then hides it; the target fades its virtual cursor in over about 120 ms at the matching edge position and
+applies the first `ptr_move` deltas without discarding any. Leaving: the target sends `ctl_leave` as soon as the
+cursor is pushed past the entry edge and fades its cursor out over about 120 ms while it keeps following the motion;
+the controller shows its cursor at the matching edge point plus the sideways travel at once. There is no moment at
+which the user has no cursor on any device.
+
 Targets show their state ("Controlled by Shazan's MacBook"); controllers show theirs ("Controlling Pixel 9 ·
 press Ctrl+Opt+Cmd+Esc to return"). `key_state`, `clip` and file transfers are never affected by leases.
 A controller that receives `ctl_busy` stops forwarding and restores its local cursor without sending
