@@ -14,14 +14,20 @@
                             types into fields ACTION_SET_TEXT can't handle (browsers, Compose, apps
                             with input filters), sends real Enter/Tab/arrow/Backspace key events and
                             keeps the editor's undo and composition intact.
+  flagRetrieveInteractiveWindows
+                            ClipboardSync: the SystemUI clipboard overlay is never the active window,
+                            and its TYPE_WINDOW_STATE_CHANGED event carries no text or description, so
+                            without this getSource() is null and copies made with Ctrl+C or an app's
+                            own "copy" button are missed (verified on an API 37 emulator). Only the
+                            overlay root's content description is inspected.
 
-  Deliberately absent: flagRetrieveInteractiveWindows, flagIncludeNotImportantViews,
+  Deliberately absent: flagIncludeNotImportantViews, flagReportViewIds,
   flagRequestFilterKeyEvents / canRequestFilterKeyEvents, touch exploration, isAccessibilityTool.
 -->
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
     android:accessibilityEventTypes="typeViewClicked|typeWindowStateChanged"
     android:accessibilityFeedbackType="feedbackGeneric"
-    android:accessibilityFlags="flagDefault|flagInputMethodEditor"
+    android:accessibilityFlags="flagDefault|flagInputMethodEditor|flagRetrieveInteractiveWindows"
     android:canRetrieveWindowContent="true"
     android:description="@string/text_service_description"
     android:notificationTimeout="100" />

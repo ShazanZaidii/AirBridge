@@ -71,7 +71,7 @@ class AccessibilityConfigTest {
     @Test fun textServiceIsMinimal() {
         val a = load("text_service_config.xml").attrs()
         assertEquals(setOf("typeViewClicked", "typeWindowStateChanged"), flags(a["accessibilityEventTypes"]))
-        assertEquals(setOf("flagDefault", "flagInputMethodEditor"), flags(a["accessibilityFlags"]))
+        assertEquals(setOf("flagDefault", "flagInputMethodEditor", "flagRetrieveInteractiveWindows"), flags(a["accessibilityFlags"]))
         assertEquals("true", a["canRetrieveWindowContent"])
         for (k in listOf("canPerformGestures", "canRequestFilterKeyEvents", "canRequestTouchExplorationMode", "isAccessibilityTool")) {
             assertFalse("text service must not declare $k", k in a)

@@ -137,8 +137,8 @@ object ClipboardSync {
 
     /**
      * AOSP `clipboard_overlay.xml`: the root `clipboard_ui` carries `@string/clipboard_overlay_window_name`.
-     * The event's own description/text is checked first: the overlay is not the active window and the
-     * text service doesn't ask for interactive-windows access, so [AccessibilityEvent.getSource] may be null.
+     * The overlay is not the active window: [AccessibilityEvent.getSource] needs the text service's
+     * flagRetrieveInteractiveWindows. The event's own description/text is checked first in case a ROM fills it.
      */
     private fun isClipboardOverlay(e: AccessibilityEvent): Boolean {
         if (matchesOverlay(e.contentDescription) || e.text.any { matchesOverlay(it) }) return true
