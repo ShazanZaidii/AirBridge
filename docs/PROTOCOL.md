@@ -404,6 +404,18 @@ controller→target {"t":"ctl_leave"}
   `ctl_leave` (no edge) to recall the cursor.
 - On `ctl_leave` in either direction, **both** sides release anything held: the target synthesises key-up for
   every pressed key, button-up for every pressed button; the controller resets its modifier tracking.
+- **Acknowledgement (required).** A target answers `ctl_enter` with `{"t":"ctl_ack"}` as soon as its virtual cursor
+  is shown and it can inject input. If it cannot (for example Android's accessibility service is off) it answers
+  `{"t":"ctl_leave","reason":"unavailable"}` instead. A controller that has no `ctl_ack` within **600 ms** of
+  `ctl_enter` ends the capture itself: it puts its cursor back at the entry point, tells the user the device is not
+  ready for remote control, and does not capture that peer again for 5 s.
+- **Escape is the controller's job.** A controller never depends on the target to give the cursor back. It also
+  tracks the depth of the target's cursor from the deltas it sends and returns control when the user moves back
+  through the entry edge, on `ctl_leave`, on the recall hotkey, and when the peer disappears. While captured it
+  shows a visible hint how to return. On return the cursor reappears where the user's motion left it (the entry edge
+  point plus the sideways travel), never at a stale earlier position.
+- **Edge assignment is explicit.** A controller must not place a peer on an edge by itself except on a left or right
+  edge with a middle span; top and bottom edges (menu bar, Dock) are never auto-assigned.
 - A target controlled by one session that receives `ctl_enter` from another session accepts the new one and
   sends `ctl_leave` (with the old controller's entry edge and the current `rel`) to the old one.
 - With several displays, `rel` is measured along the bounding box of **all** displays combined; a controller
@@ -700,7 +712,7 @@ so the halves can be developed in parallel. The exact shapes are in each repo's 
 
 The network half **implements** `send/broadcast/sendBinary/peers` and **calls** the registered handlers; the
 input half **registers** the handlers and **calls** `send/broadcast/sendBinary`. Control-type messages routed
-to the input half are exactly: `ctl_enter`, `ctl_leave`, `ctl_busy`, `ptr_move`, `ptr_scroll`, `ptr_btn`,
+to the input half are exactly: `ctl_enter`, `ctl_leave`, `ctl_ack`, `ctl_busy`, `ptr_move`, `ptr_scroll`, `ptr_btn`,
 `ptr_click`, `ptr_abs`, `key`, `key_state`, `action`, `mirror_start`, `mirror_info`, `mirror_key`,
 `mirror_ack`, `mirror_stop`, plus `error` messages whose `code` starts with `mirror_`. Inner binary frames of
 kind `0x03` (video) are routed to the input half's binary handler; kind `0x01` (file chunks) stays in the
