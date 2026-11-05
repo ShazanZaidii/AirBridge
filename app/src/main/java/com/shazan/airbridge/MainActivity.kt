@@ -529,6 +529,13 @@ private fun AddDeviceScreen(
         if (nearbyOk) NearbyTransport.acquireUi()
         onDispose { if (nearbyOk) NearbyTransport.releaseUi() }
     }
+    // While this screen is open: this phone is listening + announced on Wi-Fi (LanHost, held by the
+    // activity) and visible over Nearby (above), and it also sweeps the Wi-Fi subnet for devices whose
+    // announcements the network drops (LanSweep).
+    DisposableEffect(Unit) {
+        Discovery.acquireSweep()
+        onDispose { Discovery.releaseSweep() }
+    }
     val cameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
         if (ok) onOpenScanner() else toast(ctx, "Camera permission is needed to scan the QR code")
     }
@@ -538,7 +545,14 @@ private fun AddDeviceScreen(
     val androidList = androids.filter { (it.peerId == null || it.peerId !in pairedIds) && it.peerId !in hosts.keys }
     var askAddress by remember { mutableStateOf(false) }
     var showQr by remember { mutableStateOf(false) }
-    if (showQr) ShowQrDialog(onDismiss = { showQr = false })
+    if (showQr) {
+        if (com.shazan.airbridge.net.EmulatorHost.isEmulator) AlertDialog(
+            onDismissRequest = { showQr = false },
+            title = { Text("Scan from this emulator instead") },
+            text = { Text("An emulator's address only exists inside the computer it runs on, so a phone that scans its code can't reach it. Show the code on the phone and scan it here, or pick the phone under On this Wi-Fi.") },
+            confirmButton = { TextButton(onClick = { showQr = false }) { Text("OK") } },
+        ) else ShowQrDialog(onDismiss = { showQr = false })
+    }
     if (askAddress) AddressDialog(onDismiss = { askAddress = false }, onConnect = { h, p -> askAddress = false; onPickAddress(h, p) })
 
     AbScaffold(

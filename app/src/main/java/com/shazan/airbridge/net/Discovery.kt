@@ -86,6 +86,34 @@ object Discovery {
 
     private fun stopEmulatorScan() { emuScan?.cancel(false); emuScan = null }
 
+    // ---- subnet sweep (LanSweep): while "Add a device" is open, for networks that drop multicast ----
+
+    private var sweepRefs = 0
+    private var sweepTask: java.util.concurrent.ScheduledFuture<*>? = null
+
+    @Synchronized fun acquireSweep() {
+        if (sweepRefs++ > 0) return
+        sweepTask = emuExecutor.scheduleWithFixedDelay({
+            val known = synchronized(this) { _hosts.value.keys.toSet() }
+            val got = try { LanSweep.sweep(skipIds = known) } catch (e: Exception) { Log.w(TAG, "sweep", e); emptyList() }
+            synchronized(this) {
+                if (sweepTask == null) return@synchronized
+                val fresh = got.filter { _hosts.value[it.id] == null } // mDNS answers win
+                if (fresh.isEmpty()) return@synchronized
+                _hosts.value = _hosts.value + fresh.associateBy { it.id }
+                fresh.forEach { WsClient.onDiscovered(it.id) }
+            }
+        }, 0, 20, TimeUnit.SECONDS)
+    }
+
+    @Synchronized fun releaseSweep() {
+        if (sweepRefs == 0) return
+        if (--sweepRefs == 0) {
+            sweepTask?.cancel(false); sweepTask = null
+            _hosts.value = _hosts.value.filterValues { !it.serviceName.startsWith("sweep:") }
+        }
+    }
+
     @Synchronized private fun startBrowse() {
         startEmulatorScan()
         val mgr = nsd ?: return
