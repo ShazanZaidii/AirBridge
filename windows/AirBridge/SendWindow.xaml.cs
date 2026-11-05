@@ -17,9 +17,16 @@ namespace AirBridge
     {
         private readonly string[] _files;
         private readonly CancellationTokenSource _cts = new();
-        private readonly Dictionary<string, CheckBox> _boxes = new();
+        /// <summary>Devices picked for a multi-device send. Empty = normal mode: a click sends to that device.</summary>
+        private readonly HashSet<string> _chosen = new();
+        private readonly Dictionary<string, (Button Row, TextBlock Mark, PeerInfo Peer)> _rows = new();
+        private readonly System.Windows.Threading.DispatcherTimer _hold = new() { Interval = TimeSpan.FromMilliseconds(450) };
+        private string? _holdId;
+        private bool _holdFired;
         private bool _sending;
         private bool _closed;
+
+        private const string Hint = "Click a device to send. Hold, or Ctrl+click, to choose several.";
 
         public SendWindow(string[] paths)
         {
@@ -37,6 +44,13 @@ namespace AirBridge
                 if (App.Peers != null) App.Peers.StateChanged -= OnStateChanged;
                 _cts.Cancel();
             };
+            _hold.Tick += (_, _) =>
+            {
+                _hold.Stop();
+                if (_holdId == null) return;
+                _holdFired = true;
+                Toggle(_holdId);
+            };
             PopulateTargets();
         }
 
@@ -49,10 +63,10 @@ namespace AirBridge
 
         private void PopulateTargets()
         {
-            var checkedIds = _boxes.Where(kv => kv.Value.IsChecked == true).Select(kv => kv.Key).ToHashSet();
             var targets = (App.Peers?.Peers() ?? Array.Empty<PeerInfo>()).Where(p => p.Caps.Contains("xfer")).ToList();
+            _chosen.IntersectWith(targets.Select(t => t.Id));
             DeviceList.Children.Clear();
-            _boxes.Clear();
+            _rows.Clear();
 
             if (targets.Count == 0)
             {
@@ -61,40 +75,100 @@ namespace AirBridge
                     Text = "No connected devices. Waiting…", Style = (Style)FindResource("AB.Text.Caption"),
                     HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 20, 0, 0),
                 });
-                SendButton.IsEnabled = false;
+                UpdatePicking();
                 return;
             }
 
             foreach (var p in targets)
             {
-                var content = new StackPanel { Orientation = Orientation.Horizontal };
-                content.Children.Add(new TextBlock { Style = (Style)FindResource("AB.Glyph"), Text = (string)FindResource(HostDiscoveryWindow.PeerGlyphKey(p.Platform)), Margin = new Thickness(4, 0, 10, 0) });
-                content.Children.Add(new TextBlock { Text = p.Name, Style = (Style)FindResource("AB.Text"), FontSize = 14, VerticalAlignment = VerticalAlignment.Center });
-                var cb = new CheckBox
+                var btn = new Button
                 {
-                    Content = content, Foreground = (Brush)FindResource("AB.Foreground"), Cursor = Cursors.Hand,
-                    IsChecked = checkedIds.Contains(p.Id) || targets.Count == 1,
-                    Margin = new Thickness(4, 4, 4, 8), VerticalContentAlignment = VerticalAlignment.Center,
-                    Tag = p,
+                    Style = (Style)FindResource("AB.Button.Ghost"), Background = Res("AB.Card"),
+                    Height = 56, Margin = new Thickness(0, 0, 0, 8), Tag = p, IsEnabled = _files.Length > 0,
                 };
-                _boxes[p.Id] = cb;
-                DeviceList.Children.Add(cb);
+                var grid = new Grid();
+                grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                grid.Children.Add(new Border
+                {
+                    Width = 36, Height = 36, CornerRadius = new CornerRadius(8), Background = Res("AB.Muted"),
+                    Child = new TextBlock { Style = (Style)FindResource("AB.Glyph"), Text = (string)FindResource(HostDiscoveryWindow.PeerGlyphKey(p.Platform)) },
+                });
+                var name = new TextBlock
+                {
+                    Text = p.Name, Style = (Style)FindResource("AB.Text"), FontSize = 14, FontWeight = FontWeights.SemiBold,
+                    VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 8, 0),
+                    TextWrapping = TextWrapping.NoWrap, TextTrimming = TextTrimming.CharacterEllipsis,
+                };
+                Grid.SetColumn(name, 1);
+                grid.Children.Add(name);
+                // Muted tick, shown only while picking several.
+                var mark = new TextBlock { Style = (Style)FindResource("AB.Glyph"), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 4, 0) };
+                Grid.SetColumn(mark, 2);
+                grid.Children.Add(mark);
+                btn.Content = grid;
+
+                string id = p.Id;
+                btn.PreviewMouseLeftButtonDown += (_, _) => { _holdId = id; _holdFired = false; _hold.Stop(); _hold.Start(); };
+                btn.PreviewMouseLeftButtonUp += (_, _) => _hold.Stop();
+                btn.MouseLeave += (_, _) => { if (!_holdFired) _hold.Stop(); };
+                btn.Click += (_, _) =>
+                {
+                    if (_holdFired) { _holdFired = false; return; } // the hold already picked it
+                    if (_chosen.Count > 0 || (Keyboard.Modifiers & ModifierKeys.Control) != 0) Toggle(id);
+                    else StartSend(new List<PeerInfo> { p });
+                };
+                _rows[id] = (btn, mark, p);
+                DeviceList.Children.Add(btn);
             }
-            SendButton.IsEnabled = _files.Length > 0;
             FastBox.IsEnabled = targets.Any(t => t.Caps.Contains(LinkWire.CapJoin));
             if (!FastBox.IsEnabled) FastBox.IsChecked = false;
+            UpdatePicking();
         }
 
-        private async void Send_Click(object sender, RoutedEventArgs e)
+        private Brush Res(string key) => (Brush)FindResource(key);
+
+        private void Toggle(string id)
+        {
+            if (!_chosen.Remove(id)) _chosen.Add(id);
+            UpdatePicking();
+        }
+
+        /// <summary>Ticks, subtitle and the Send button follow the picked devices.</summary>
+        private void UpdatePicking()
+        {
+            bool picking = _chosen.Count > 0;
+            foreach (var (id, row) in _rows)
+            {
+                bool on = _chosen.Contains(id);
+                row.Mark.Text = picking ? (on ? "\uEC61" : "\uEA3A") : "";
+                row.Mark.Foreground = Res(on ? "AB.Foreground" : "AB.MutedForeground");
+                AutomationPropertiesHelper.SetName(row.Row, picking ? $"{row.Peer.Name}, {(on ? "selected" : "not selected")}" : $"Send to {row.Peer.Name}");
+            }
+            if (!_sending) SubtitleText.Text = picking ? $"{_chosen.Count} selected" : Hint;
+            SendButton.Visibility = picking ? Visibility.Visible : Visibility.Collapsed;
+            SendButton.Content = _chosen.Count > 1 ? $"Send to {_chosen.Count}" : "Send";
+            SendButton.IsEnabled = picking && _files.Length > 0;
+            Grid.SetColumnSpan(CancelButton, picking ? 1 : 3);
+        }
+
+        private void Send_Click(object sender, RoutedEventArgs e) =>
+            StartSend(_rows.Where(kv => _chosen.Contains(kv.Key)).Select(kv => kv.Value.Peer).ToList());
+
+        /// <summary>Sends the files to every device in <paramref name="selected"/> side by side, one progress row each.</summary>
+        private async void StartSend(List<PeerInfo> selected)
         {
             var peers = App.Peers;
-            var selected = _boxes.Values.Where(b => b.IsChecked == true).Select(b => (PeerInfo)b.Tag).ToList();
-            if (peers == null || selected.Count == 0) { StatusText.Text = "Select at least one device."; return; }
+            if (peers == null || selected.Count == 0 || _sending || _files.Length == 0) return;
 
             _sending = true;
+            _hold.Stop();
+            SubtitleText.Text = selected.Count == 1 ? $"To {selected[0].Name}" : $"To {selected.Count} devices";
             bool fast = FastBox.IsChecked == true;
             FastBox.IsEnabled = false;
-            SendButton.IsEnabled = false;
+            SendButton.Visibility = Visibility.Collapsed;
+            Grid.SetColumnSpan(CancelButton, 3);
             StatusText.Text = "";
             DeviceList.Children.Clear();
 

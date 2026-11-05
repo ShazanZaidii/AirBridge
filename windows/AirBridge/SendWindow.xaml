@@ -16,7 +16,7 @@
             </Grid.RowDefinitions>
             <StackPanel Grid.Row="0" Margin="0,0,0,14">
                 <TextBlock x:Name="TitleText" Style="{StaticResource AB.Text.Title}" Text="Send files" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"/>
-                <TextBlock x:Name="SubtitleText" Style="{StaticResource AB.Text.Caption}" Text="Choose the devices to send to." Margin="0,4,0,0"/>
+                <TextBlock x:Name="SubtitleText" Style="{StaticResource AB.Text.Caption}" Text="Click a device to send. Hold, or Ctrl+click, to choose several." Margin="0,4,0,0"/>
             </StackPanel>
 
             <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Focusable="False">
