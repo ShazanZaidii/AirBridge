@@ -138,6 +138,12 @@ Client                                   Host
   - `xfer` – sends/accepts file transfers
   - `ctl_source` – can control others (has a physical pointer that can leave the screen)
   - `ctl_target` – can be controlled (shows a virtual cursor, injects input)
+  - `type_target` – can type text into the focused field (`key` messages with `text`, editing keys and
+    copy/cut/paste/select-all shortcuts reach a text field). Only ever sent together with `ctl_target`. Android
+    advertises it only while its optional "AirBridge Typing & Clipboard" accessibility service runs; without it a
+    `ctl_target` phone still takes pointer input, actions, Esc/arrows/Page Up/Down, but drops text and editing
+    keys. Controllers may use it for UI hints only; they must keep sending `key` as usual and ignore caps they
+    don't know.
   - `trackpad` – can act as a direct input device (phone trackpad/keyboard mode)
   - `mirror_source` – can stream its screen (§8.7)
   - `mirror_sink` – can display a streamed screen and send absolute input (§8.7)
@@ -299,7 +305,8 @@ An active attacker cannot pair (confirm digits mismatch) nor hijack an existing 
   a controller (§8.5) and when the app comes to the foreground with changed content.
 - Android automatic sync (setting "Send copies to my computers automatically", default on): while the service
   runs, a local copy (clipboard listener where the ROM delivers it in the background; on stock Android 10+ only
-  via the accessibility service, from the system clipboard overlay or a "Copy"/"Cut" tap) is debounced (400 ms),
+  via the optional "AirBridge Typing & Clipboard" accessibility service, from the system clipboard overlay or a
+  "Copy"/"Cut" tap; without that service only the bubble / tile / share / foreground paths remain) is debounced (400 ms),
   then read by briefly taking focus (a 1×1 overlay window, else the invisible activity) and sent as `clip`.
   Never sent automatically: clips flagged `android.content.extra.IS_SENSITIVE`, clips from another device
   (`IS_REMOTE_DEVICE`), file lists, and AirBridge's own clips (label `AirBridge`, 2 s echo window, hash). If the
