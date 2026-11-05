@@ -8,7 +8,7 @@ import androidx.compose.ui.unit.dp
 /**
  * Local design tokens for the trackpad / keyboard / screen UI, taken from
  * the design tokens ("dark theme"). `ui/theme` does not define these
- * yet; when it does, point these at it. [Warning] and [KeyFace]/[KeyPressed] are not in the shared tokens
+ * yet; when it does, point these at it. [Warning] and [KeyboardBg] are not in the shared tokens
  * (defined here; reported to the theme owner).
  */
 internal object Tp {
@@ -25,7 +25,13 @@ internal object Tp {
     val Warning = Color(0xFFF59E0B) // not in the shared tokens
     val OnWarning = Color(0xFF0F172A)
     val KeyFace = Color(0xFF1E293B) // token "primary" used as key cap
-    val KeyPressed = Color(0xFF334155)
+    // Pressed / latched key: inverted neutral fill (the shared muted-foreground) with a dark label
+    // (the shared background), 6.9:1. No accent colour on keys.
+    val KeyLatched = Color(0xFF94A3B8)
+    val OnKeyLatched = Color(0xFF0F172A)
+    // Caps Lock LED: bright neutral when lit (on the latched fill), the shared border when dim (on KeyFace).
+    val LedOn = Color(0xFFFFFFFF)
+    val LedOff = Color(0xFF475569)
     val KeyboardBg = Color(0xFF0B1222) // not in the shared tokens: slightly below Background
 
     val TouchTarget = 48.dp
