@@ -44,6 +44,8 @@ class AirBridgeService : Service() {
         const val ACTION_SEND_FILES = "com.shazan.airbridge.action.SEND_FILES"
         const val ACTION_REFRESH_BUBBLE = "com.shazan.airbridge.action.REFRESH_BUBBLE"
         const val EXTRA_PEER = "peer"
+        /** [ACTION_SEND_FILES]: every device to send the same files to (String array). */
+        const val EXTRA_PEERS = "peers"
 
         @Volatile var isRunning = false
             private set
@@ -121,11 +123,20 @@ class AirBridgeService : Service() {
                 if (peer != null) Hub.readySession(peer)?.xfer?.cancelLocal(intent.getIntExtra("id", -1), intent.getBooleanExtra("incoming", false))
             }
             ACTION_SEND_FILES -> {
-                val peer = intent.getStringExtra(EXTRA_PEER)
+                val peers = intent.getStringArrayExtra(EXTRA_PEERS)?.toList()
+                    ?: listOfNotNull(intent.getStringExtra(EXTRA_PEER))
                 val clip = intent.clipData
                 val uris = (0 until (clip?.itemCount ?: 0)).mapNotNull { clip?.getItemAt(it)?.uri }
-                val session = peer?.let { Hub.readySession(it) }
-                if (session == null) Hub.toast("Device is not connected") else session.xfer.send(uris)
+                // Each device gets its own transfer; they run side by side.
+                val gone = peers.filter { id ->
+                    val session = Hub.readySession(id)
+                    session?.xfer?.send(uris)
+                    session == null
+                }
+                if (gone.isNotEmpty()) {
+                    val names = gone.map { id -> PairStore.all().firstOrNull { it.id == id }?.name ?: "Device" }
+                    Hub.toast("${names.joinToString(", ")} ${if (names.size == 1) "is" else "are"} not connected")
+                }
             }
             ACTION_REFRESH_BUBBLE -> refreshBubble()
             else -> {
