@@ -603,6 +603,9 @@ nonisolated final class Injector: @unchecked Sendable {
         case "spotlight": hotkey(64, default: ([0x37], 0x31))      // "Show Spotlight search", Cmd+Space
         case "show_desktop": hotkey(36, default: ([], 0x67))       // "Show Desktop", F11 (4-finger spread)
         case "app_drawer": openAppsGrid()                          // Launchpad / the Apps view (4-finger pinch)
+        case "zoom_in": chord([0x37], 0x18)        // Cmd+= (2-finger spread)
+        case "zoom_out": chord([0x37], 0x1B)       // Cmd+-  (2-finger pinch)
+        case "look_up": chord([0x3B, 0x37], 0x02)  // Ctrl+Cmd+D (3-finger tap)
         case "copy": chord([0x37], 0x08)           // Cmd+C
         case "paste": chord([0x37], 0x09)          // Cmd+V
         case "lock": lockScreen()
