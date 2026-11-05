@@ -435,6 +435,7 @@ class TrackpadActivity : ComponentActivity() {
                                     peerName = active?.name,
                                     supported = active?.let { "mirror_source" in it.caps } ?: false,
                                     showStats = showStats,
+                                    platform = active?.platform ?: "",
                                     onRetry = { mirrorRun++ },
                                     modifier = m,
                                 )

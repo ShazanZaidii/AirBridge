@@ -40,6 +40,8 @@ import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PowerSettingsNew
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
@@ -80,6 +82,8 @@ enum class ModKey(val bit: Int, val hid: Int) {
     Ctrl(Mods.CTRL, Hid.LCTRL),
     Alt(Mods.ALT, Hid.LALT),
     Gui(Mods.GUI, Hid.LGUI),
+    /** The right ⌘ / Win key: same modifier bit, its own key (a phone target maps a lone tap to the shade). */
+    RGui(Mods.GUI, Hid.RGUI),
     Fn(0, 0), // local layer only (arrows → Home/End/PgUp/PgDn, delete → forward delete): no HID usage
 }
 
@@ -335,12 +339,13 @@ fun RemoteKeyboard(
     platform: String,
     modifier: Modifier = Modifier,
 ) {
-    val mac = platform == "macos" || platform == "ios"
+    // Mac layout for Mac / iPhone / Android targets, PC layout for Windows and Linux.
+    val mac = platform != "windows" && platform != "linux"
+    val phone = platform == "android"
     val l = remember(platform) {
         when (platform) {
-            "macos", "ios" -> Labels("⌃" to "control", "⌥" to "option", "⌘" to "command", "delete", "return")
-            "windows" -> Labels("" to "ctrl", "" to "alt", "" to "win", "backspace", "enter")
-            else -> Labels("" to "ctrl", "" to "alt", "" to "super", "backspace", "enter")
+            "windows", "linux" -> Labels("" to "ctrl", "" to "alt", "⊞" to "win", "backspace", "enter")
+            else -> Labels("⌃" to "control", "⌥" to "option", "⌘" to "command", "delete", "return")
         }
     }
     val c = controller
@@ -389,13 +394,28 @@ fun RemoteKeyboard(
             ModifierKey(c, ModKey.Shift, 2.3f, "shift", "⇧")
         }
         KeyRow {
-            ModifierKey(c, ModKey.Fn, 1f, "fn")
-            ModifierKey(c, ModKey.Ctrl, 1.2f, l.ctrl.second, l.ctrl.first)
-            ModifierKey(c, ModKey.Alt, 1.2f, l.alt.second, l.alt.first)
-            ModifierKey(c, ModKey.Gui, 1.5f, l.gui.second, l.gui.first)
-            HidKey(c, Hid.SPACE, if (mac) 5f else 6.2f, "", description = "space")
-            ModifierKey(c, ModKey.Gui, 1.5f, l.gui.second, l.gui.first)
-            if (mac) ModifierKey(c, ModKey.Alt, 1.2f, l.alt.second, l.alt.first)
+            if (mac) {
+                // MacBook order: fn ⌃ ⌥ ⌘ space ⌘ ⌥. Driving a phone, ⌘ keys keep their job as modifiers
+                // and a lone tap is Home (left) / the notification shade (right), so they say so.
+                ModifierKey(c, ModKey.Fn, 1f, "fn")
+                ModifierKey(c, ModKey.Ctrl, 1.2f, l.ctrl.second, l.ctrl.first)
+                ModifierKey(c, ModKey.Alt, 1.2f, l.alt.second, l.alt.first)
+                if (phone) ModifierKey(c, ModKey.Gui, 1.5f, "home", icon = Icons.Default.Home, description = "command; tap alone for Home")
+                else ModifierKey(c, ModKey.Gui, 1.5f, l.gui.second, l.gui.first)
+                HidKey(c, Hid.SPACE, 5f, "", description = "space")
+                if (phone) ModifierKey(c, ModKey.RGui, 1.5f, "alerts", icon = Icons.Default.Notifications, description = "command; tap alone for notifications, again for quick settings")
+                else ModifierKey(c, ModKey.RGui, 1.5f, l.gui.second, l.gui.first)
+                ModifierKey(c, ModKey.Alt, 1.2f, l.alt.second, l.alt.first)
+            } else {
+                // PC order: ctrl fn ⊞ alt space alt ctrl.
+                ModifierKey(c, ModKey.Ctrl, 1.3f, l.ctrl.second, l.ctrl.first)
+                ModifierKey(c, ModKey.Fn, 1f, "fn")
+                ModifierKey(c, ModKey.Gui, 1.3f, l.gui.second, l.gui.first)
+                ModifierKey(c, ModKey.Alt, 1.2f, l.alt.second, l.alt.first)
+                HidKey(c, Hid.SPACE, 5.2f, "", description = "space")
+                ModifierKey(c, ModKey.Alt, 1.2f, l.alt.second, l.alt.first)
+                ModifierKey(c, ModKey.Ctrl, 1.3f, l.ctrl.second, l.ctrl.first)
+            }
             // Inverted T in the last row, like a MacBook: ← and → half height at the bottom,
             // ↑ above ↓ in the middle column.
             Row(Modifier.weight(3f).fillMaxHeight(), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
@@ -545,14 +565,26 @@ private fun ArrowKey(c: RemoteKeyboardController, hid: Int, icon: ImageVector, d
 }
 
 @Composable
-private fun RowScope.ModifierKey(c: RemoteKeyboardController, m: ModKey, weight: Float, label: String, symbol: String = "") {
+private fun RowScope.ModifierKey(
+    c: RemoteKeyboardController, m: ModKey, weight: Float, label: String, symbol: String = "",
+    icon: ImageVector? = null, description: String? = null,
+) {
     // Held only while touched, like a hardware key: the key's own pressed look is the whole state.
     KeyCap(
-        Modifier.weight(weight).fillMaxHeight().semantics { role = Role.Button },
+        Modifier.weight(weight).fillMaxHeight().semantics {
+            role = Role.Button
+            if (description != null) contentDescription = description
+        },
         haptic = HapticFeedbackConstants.VIRTUAL_KEY,
         onDown = { c.modifierDown(m) },
         onUp = { c.modifierUp(m) },
-    ) { fg -> WordFace(label, fg, symbol) }
+    ) { fg ->
+        if (icon == null) WordFace(label, fg, symbol)
+        else Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Icon(icon, contentDescription = null, tint = fg, modifier = Modifier.size(if (LocalDense.current) 15.dp else 18.dp))
+            if (!LocalDense.current) Text(label, color = fg, fontSize = 11.sp, lineHeight = 12.sp, fontWeight = FontWeight.Medium, maxLines = 1, softWrap = false)
+        }
+    }
 }
 
 @Composable
