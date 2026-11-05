@@ -25,6 +25,7 @@ class VirtualCursor(private val ctx: Context) {
 
     private companion object {
         const val SMOOTHING = 0.45f // owner-tuned feel
+        const val FADE_MS = 120L // §8.6 smooth hand-off
     }
 
     private val wm = ctx.getSystemService(WindowManager::class.java)
@@ -44,6 +45,8 @@ class VirtualCursor(private val ctx: Context) {
     private var curX = 0f
     private var curY = 0f
     var visible = false; private set
+    /** Fading out after a hand-back: still follows [moveTo], gone when the fade ends. */
+    var fadingOut = false; private set
     private var framePending = false
 
     private val choreographer: Choreographer = Choreographer.getInstance()
@@ -61,6 +64,12 @@ class VirtualCursor(private val ctx: Context) {
             schedule()
         }
     }
+
+    /** The overlay window exists (addView succeeded). */
+    val attached: Boolean get() = container != null && dot != null
+
+    /** The cursor is on screen (or fading in): overlay attached, dot visible, not on its way out. */
+    val shown: Boolean get() = visible && !fadingOut && attached && dot?.visibility == View.VISIBLE && container?.isAttachedToWindow != false
 
     fun attach() {
         if (container != null) return
@@ -106,7 +115,16 @@ class VirtualCursor(private val ctx: Context) {
         dot = null
     }
 
+    /** True display size in the current orientation (the overlay covers all of it, bars and cutout included). */
     fun updateScreen() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val b = try { wm.maximumWindowMetrics.bounds } catch (_: Throwable) { null }
+            if (b != null && b.width() > 0 && b.height() > 0) {
+                screenW = b.width()
+                screenH = b.height()
+                return
+            }
+        }
         val m = DisplayMetrics()
         val display = ctx.getSystemService(DisplayManager::class.java)?.getDisplay(Display.DEFAULT_DISPLAY)
         @Suppress("DEPRECATION")
@@ -117,13 +135,38 @@ class VirtualCursor(private val ctx: Context) {
         }
     }
 
-    /** Show at (x, y), jumping there without animation. */
-    fun showAt(x: Float, y: Float) {
+    /** Show at (x, y), jumping there; fades in over [FADE_MS] when it wasn't already on screen. */
+    fun showAt(x: Float, y: Float, fade: Boolean = false) {
         targetX = x; targetY = y; curX = x; curY = y
+        val d = dot
+        val wasShown = visible && !fadingOut
+        val wasFading = fadingOut
+        fadingOut = false
         visible = true
-        dot?.visibility = View.VISIBLE
+        if (d != null) {
+            d.animate().cancel()
+            d.visibility = View.VISIBLE
+            if (fade && !wasShown && animationsOn()) {
+                if (!wasFading) d.alpha = 0f // re-entry mid fade-out: continue from the current alpha
+                d.animate().alpha(1f).setDuration(FADE_MS).start()
+            } else d.alpha = 1f
+        }
         apply()
     }
+
+    /** Fade out over [FADE_MS] while still following [moveTo]; then hidden for good. */
+    fun fadeOut() {
+        val d = dot
+        if (!visible || fadingOut) return
+        if (d == null || !animationsOn()) { hide(); return }
+        fadingOut = true
+        d.animate().cancel()
+        d.animate().alpha(0f).setDuration(FADE_MS).withEndAction { if (fadingOut) hide() }.start()
+        // Backstop: the overlay never stays visible if the animation is skipped or cancelled.
+        d.postDelayed({ if (fadingOut) hide() }, FADE_MS + 80)
+    }
+
+    private fun animationsOn(): Boolean = try { android.animation.ValueAnimator.areAnimatorsEnabled() } catch (_: Throwable) { true }
 
     fun moveTo(x: Float, y: Float) {
         targetX = x; targetY = y
@@ -132,8 +175,9 @@ class VirtualCursor(private val ctx: Context) {
 
     fun hide() {
         visible = false
+        fadingOut = false
         if (framePending) { choreographer.removeFrameCallback(frame); framePending = false }
-        dot?.visibility = View.GONE
+        dot?.let { it.animate().cancel(); it.alpha = 1f; it.visibility = View.GONE }
     }
 
     fun setPressed(pressed: Boolean) { dot?.setPressedLook(pressed) }
