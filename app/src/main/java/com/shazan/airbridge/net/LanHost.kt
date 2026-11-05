@@ -51,13 +51,22 @@ object LanHost {
         unregister(); register(ss.localPort)
     }
 
-    /** IPv4 addresses of this phone on its local networks, for "connect by address". */
+    /**
+     * IPv4 addresses of this phone on its local networks, best first, for "connect by address": Wi-Fi
+     * and Ethernet first; mobile data (rmnet/ccmni), VPN tunnels and other virtual links are left out,
+     * since nobody on the Wi-Fi can reach them.
+     */
     fun localAddresses(): List<String> = try {
+        fun rank(name: String): Int = when {
+            name.startsWith("wlan") || name.startsWith("eth") -> 0
+            name.startsWith("ap") || name.startsWith("swlan") || name.startsWith("p2p") -> 1 // hotspot / Wi-Fi Direct
+            else -> 2
+        }
+        val mobileOrVirtual = listOf("rmnet", "ccmni", "tun", "ppp", "v4-", "dummy", "ipsec", "clat", "radio")
         NetworkInterface.getNetworkInterfaces().toList()
-            .filter { it.isUp && !it.isLoopback }
-            .flatMap { it.inetAddresses.toList() }
-            .filterIsInstance<Inet4Address>()
-            .map { it.hostAddress ?: "" }
+            .filter { it.isUp && !it.isLoopback && mobileOrVirtual.none { p -> it.name.startsWith(p) } }
+            .sortedBy { rank(it.name) }
+            .flatMap { ni -> ni.inetAddresses.toList().filterIsInstance<Inet4Address>().map { it.hostAddress ?: "" } }
             .filter { it.isNotBlank() }
     } catch (_: Exception) { emptyList() }
 
@@ -89,6 +98,9 @@ object LanHost {
     // ---------------------------------------------------------------- mDNS
 
     private fun register(port: Int) {
+        // An emulator's address (10.0.2.x) is unreachable from the real network: announcing it would only
+        // list a device nobody can reach. It can still dial out ("Connect by address").
+        if (EmulatorHost.isEmulator) { Log.i(TAG, "emulator: not announcing (unreachable from outside)"); return }
         val nsd = Hub.app.getSystemService(NsdManager::class.java) ?: return
         val info = NsdServiceInfo().apply {
             serviceName = Identity.name.take(60).ifBlank { "AirBridge phone" }

@@ -40,7 +40,19 @@ data class PairProgress(
     val stage: PairStage,
     /** Mode `confirm`: the 6 digits both screens must show. */
     val digits: String? = null,
+    /** Where the other device is, e.g. "10.145.158.115" (shown so it is clear who is asking). */
+    val address: String? = null,
+    /** True when the other device dialled this one (this phone is the host). */
+    val incoming: Boolean = false,
 )
+
+/** "Android phone", "Mac", "Linux computer"… for pairing prompts. */
+fun deviceKind(plat: String): String = when (plat) {
+    "android" -> "Android phone"; "ios" -> "iPhone or iPad"; "macos" -> "Mac"; "windows" -> "Windows PC"
+    "linux" -> "Linux computer"; else -> "Unknown device"
+}
+
+private fun addressOf(s: Session): String = s.link.label.substringBefore(" (").substringBeforeLast(':')
 
 /** One-shot UI notifications from the network layer. */
 sealed class NetEvent {
@@ -221,7 +233,7 @@ object Hub : PeerBus.Transport {
         pairingSession?.takeIf { it !== s }?.close(Outcome.Ended("superseded"), "user")
         if (s.isClosed) return
         pairingSession = s
-        _pairing.value = PairProgress(name, plat, mode, PairStage.CONNECTING)
+        _pairing.value = PairProgress(name, plat, mode, PairStage.CONNECTING, address = addressOf(s))
         if (s.confirmDigits != null) onPairPrompt(s) // digits arrived before we got here
     }
 
@@ -236,11 +248,14 @@ object Hub : PeerBus.Transport {
             return
         }
         pairingSession = s
-        _pairing.value = PairProgress(s.peerName.ifBlank { "A phone" }, s.peerPlat, "confirm", PairStage.CONFIRM, s.confirmDigits)
+        val addr = addressOf(s)
+        _pairing.value = PairProgress(s.peerName.ifBlank { "Unnamed device" }, s.peerPlat, "confirm", PairStage.CONFIRM, s.confirmDigits,
+            address = addr, incoming = true)
+        val who = "${s.peerName.ifBlank { "Unnamed device" }} (${deviceKind(s.peerPlat)}, $addr)"
         val n = androidx.core.app.NotificationCompat.Builder(app, Notifs.CH_PAIR)
             .setSmallIcon(com.shazan.airbridge.R.drawable.ic_stat_name)
-            .setContentTitle("Pair with ${s.peerName.ifBlank { "a phone" }}?")
-            .setContentText("Check that both screens show ${s.confirmDigits ?: "the same code"}. Tap to confirm.")
+            .setContentTitle("$who wants to pair")
+            .setContentText("Only accept if it shows ${s.confirmDigits ?: "the same code"}. Tap to see the code.")
             .setPriority(androidx.core.app.NotificationCompat.PRIORITY_HIGH)
             .setCategory(androidx.core.app.NotificationCompat.CATEGORY_CALL)
             .setAutoCancel(true)

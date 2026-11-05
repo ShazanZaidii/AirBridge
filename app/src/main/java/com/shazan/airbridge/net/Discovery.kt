@@ -63,7 +63,31 @@ object Discovery {
         startBrowse()
     }
 
+    /** Emulator only: the periodic ask-the-host-computer scan ([EmulatorHost]), on its own thread (it blocks). */
+    private var emuScan: java.util.concurrent.ScheduledFuture<*>? = null
+    private val emuExecutor by lazy {
+        java.util.concurrent.Executors.newSingleThreadScheduledExecutor { r -> Thread(r, "airbridge-emuhost").apply { isDaemon = true } }
+    }
+
+    private fun startEmulatorScan() {
+        if (!EmulatorHost.isEmulator || emuScan != null) return
+        emuScan = emuExecutor.scheduleWithFixedDelay({
+            val got = try { EmulatorHost.scan() } catch (e: Exception) { Log.w(TAG, "emulator scan", e); emptyList() }
+            synchronized(this) {
+                if (emuScan == null) return@synchronized
+                // mDNS results win (they are real network addresses); the host-computer answer fills the gap.
+                val keep = _hosts.value.filterValues { !it.serviceName.startsWith("emulator-host:") || got.any { g -> g.id == it.id } }
+                val fresh = got.filter { keep[it.id] == null }
+                _hosts.value = keep + fresh.associateBy { it.id }
+                fresh.forEach { WsClient.onDiscovered(it.id) }
+            }
+        }, 0, 15, TimeUnit.SECONDS)
+    }
+
+    private fun stopEmulatorScan() { emuScan?.cancel(false); emuScan = null }
+
     @Synchronized private fun startBrowse() {
+        startEmulatorScan()
         val mgr = nsd ?: return
         if (listener != null) return
         val l = object : NsdManager.DiscoveryListener {
@@ -93,6 +117,7 @@ object Discovery {
     }
 
     @Synchronized private fun stopBrowse(clear: Boolean) {
+        stopEmulatorScan()
         val mgr = nsd ?: return
         val l = listener
         listener = null
@@ -189,6 +214,8 @@ object Discovery {
         val id = txt("id")?.takeIf { it.isNotBlank() } ?: return
         if (id == Identity.id) return
         val addr = pickAddress(si) ?: return
+        // An emulator's own NAT address leaks into mDNS but can't be reached from a real network.
+        if (EmulatorHost.unreachableFromHere(addr)) { Log.i(TAG, "ignored ${txt("name")}: $addr is inside an emulator"); return }
         val port = si.port.takeIf { it in 1..65535 } ?: return
         val host = DiscoveredHost(id, txt("name") ?: si.serviceName, txt("plat") ?: "", addr, port, serviceName)
         val before = _hosts.value

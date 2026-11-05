@@ -423,7 +423,17 @@ private fun PairingDialog(p: PairProgress, onConfirm: () -> Unit, onCancel: () -
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     PairStage.CONFIRM -> {
-                        Text("Make sure your $noun shows the same code.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        // Who is this, exactly: kind of device and where it is.
+                        Text(
+                            listOfNotNull(com.shazan.airbridge.net.deviceKind(p.plat), p.address?.let { "at $it" }).joinToString(" "),
+                            style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurface,
+                        )
+                        Spacer(Modifier.height(Dimens.sm))
+                        Text(
+                            if (p.incoming) "It is asking to pair with this phone. Only confirm if it shows the same code and you started this."
+                            else "Make sure your $noun shows the same code.",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                         Spacer(Modifier.height(Dimens.lg))
                         DigitsText(p.digits ?: "")
                         Spacer(Modifier.height(Dimens.lg))
