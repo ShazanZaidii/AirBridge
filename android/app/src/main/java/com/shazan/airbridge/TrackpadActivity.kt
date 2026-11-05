@@ -32,6 +32,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -100,7 +101,7 @@ import com.shazan.airbridge.input.NetHooks
 import com.shazan.airbridge.input.Notice
 import com.shazan.airbridge.input.RemoteKeyboard
 import com.shazan.airbridge.input.RemoteKeyboardController
-import com.shazan.airbridge.input.RemoteKeyboardHeader
+import com.shazan.airbridge.input.RemoteKeyboardMinHeight
 import com.shazan.airbridge.input.Tp
 import com.shazan.airbridge.input.TrackpadPrefs
 import com.shazan.airbridge.input.TrackpadSender
@@ -217,7 +218,7 @@ class TrackpadActivity : ComponentActivity() {
                 keyboard.releaseAll() // to the previous peer, before switching
                 sender.peerId = active?.id
             }
-            keyboard.reportedCaps = active?.let { capsMap[it.id] }
+            keyboard.onPeerCaps(active?.let { capsMap[it.id] })
             keyboard.onCapsToggled = { on -> active?.let { InputRouter.setCapsOptimistic(it.id, on) } }
         }
 
@@ -315,7 +316,7 @@ class TrackpadActivity : ComponentActivity() {
                                 onRetry = { mirrorRun++ },
                                 modifier = Modifier.fillMaxWidth().weight(1f),
                             )
-                            if (screenKeyboard) KeyboardPanel(active, Modifier.fillMaxWidth().fillMaxHeight(0.5f))
+                            if (screenKeyboard) KeyboardPanel(active, Modifier.fillMaxWidth().heightIn(min = RemoteKeyboardMinHeight).fillMaxHeight(0.5f))
                         }
                     }
                     // Non-blocking lease banner: no pointer handlers, touches pass through.
@@ -360,7 +361,6 @@ class TrackpadActivity : ComponentActivity() {
     @Composable
     private fun KeyboardPanel(active: PeerInfo?, modifier: Modifier) {
         Column(modifier.background(Tp.KeyboardBg)) {
-            RemoteKeyboardHeader(keyboard)
             RemoteKeyboard(
                 controller = keyboard,
                 platform = active?.platform ?: "macos",
