@@ -106,6 +106,7 @@ import com.shazan.airbridge.input.TrackpadPrefs
 import com.shazan.airbridge.input.TrackpadSender
 import com.shazan.airbridge.input.reducedMotion
 import com.shazan.airbridge.input.trackpadGestures
+import com.shazan.airbridge.net.PairStore
 import com.shazan.airbridge.net.PeerInfo
 import kotlinx.coroutines.delay
 
@@ -122,12 +123,14 @@ class TrackpadActivity : ComponentActivity() {
         Screen("Screen", Icons.AutoMirrored.Filled.ScreenShare),
     }
 
-    private companion object {
-        val DESKTOPS = setOf("macos", "windows", "linux")
-        const val PREF_PEER = "TRACKPAD_PEER"
-        const val PREF_NATURAL = "TP_NATURAL_SCROLL"
-        const val PREF_MODE = "TP_MODE"
-        const val BUSY_SHOW_MS = 3000L
+    companion object {
+        /** Peer id to drive (from the device card's "Use as trackpad"). */
+        const val EXTRA_PEER = "peer"
+        private val DESKTOPS = setOf("macos", "windows", "linux")
+        private const val PREF_PEER = "TRACKPAD_PEER"
+        private const val PREF_NATURAL = "TP_NATURAL_SCROLL"
+        private const val PREF_MODE = "TP_MODE"
+        private const val BUSY_SHOW_MS = 3000L
     }
 
     private val sender = TrackpadSender()
@@ -135,6 +138,8 @@ class TrackpadActivity : ComponentActivity() {
     private val mirror = MirrorSink()
     private var resumed by mutableStateOf(false)
     private var resumeCount by mutableStateOf(0)
+    /** Peer picked by the user (or passed in [EXTRA_PEER]); input only ever goes to this one. */
+    private var chosenId by mutableStateOf<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -150,11 +155,24 @@ class TrackpadActivity : ComponentActivity() {
         hideSystemBars()
 
         val prefs = getSharedPreferences("AirBridgePrefs", Context.MODE_PRIVATE)
+        chosenId = prefs.getString(PREF_PEER, null)
+        takePeerExtra(intent, prefs)
         setContent {
             MaterialTheme(colorScheme = darkColorScheme(primary = Tp.Accent, surface = Tp.Surface, background = Tp.Background)) {
                 TrackpadScreen(prefs)
             }
         }
+    }
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        takePeerExtra(intent, getSharedPreferences("AirBridgePrefs", Context.MODE_PRIVATE))
+    }
+
+    private fun takePeerExtra(i: android.content.Intent?, prefs: SharedPreferences) {
+        val id = i?.getStringExtra(EXTRA_PEER)?.takeIf { it.isNotBlank() } ?: return
+        chosenId = id
+        prefs.edit().putString(PREF_PEER, id).apply()
     }
 
     override fun onResume() {
@@ -173,6 +191,7 @@ class TrackpadActivity : ComponentActivity() {
     override fun onPause() {
         super.onPause()
         resumed = false
+        InputRouter.driving = null
         keyboard.releaseAll()
         sender.releaseAll()
         mirror.stop() // §8.7: mirror_stop on pause (restarted by the effect on resume)
@@ -200,9 +219,18 @@ class TrackpadActivity : ComponentActivity() {
         val peers by InputRouter.peers.collectAsState()
         val capsMap by InputRouter.capsByPeer.collectAsState()
         val busyMap by InputRouter.busyByPeer.collectAsState()
+        val controlledBy by InputRouter.controlledBy.collectAsState()
+        val paired by PairStore.peers.collectAsState()
+        // Ready desktops only (PeerBus lists ready sessions).
         val desktops = peers.filter { it.platform in DESKTOPS }
-        var chosenId by remember { mutableStateOf(prefs.getString(PREF_PEER, null)) }
-        val active = desktops.firstOrNull { it.id == chosenId } ?: desktops.firstOrNull()
+        val chosenPaired = paired.firstOrNull { it.id == chosenId && it.plat in DESKTOPS }
+        // §8.6 "No loops": never drive the peer that is controlling this phone. Input only goes to the
+        // chosen peer while it is ready; without a (still paired) choice, the first ready desktop.
+        val active = if (chosenPaired != null) desktops.firstOrNull { it.id == chosenPaired.id && it.id != controlledBy }
+        else desktops.firstOrNull { it.id != controlledBy }
+        val wanted: String? = chosenPaired?.name ?: desktops.firstOrNull()?.name
+        val blocker: PeerInfo? = desktops.firstOrNull { it.id == controlledBy }
+            ?.takeIf { active == null && (chosenPaired == null || it.id == chosenPaired.id) }
         var mode by remember {
             mutableStateOf(Mode.entries.firstOrNull { it.name == prefs.getString(PREF_MODE, null) } ?: Mode.Trackpad)
         }
@@ -213,6 +241,7 @@ class TrackpadActivity : ComponentActivity() {
         val trackpadPrefs by rememberUpdatedState(TrackpadPrefs(naturalScroll = natural))
 
         SideEffect {
+            InputRouter.driving = if (resumed) active?.id else null
             if (sender.peerId != active?.id) {
                 keyboard.releaseAll() // to the previous peer, before switching
                 sender.peerId = active?.id
@@ -274,6 +303,8 @@ class TrackpadActivity : ComponentActivity() {
                 TopBar(
                     desktops = desktops,
                     active = active,
+                    wanted = wanted,
+                    controlledBy = controlledBy,
                     mode = mode,
                     compact = compact,
                     natural = natural,
@@ -296,9 +327,9 @@ class TrackpadActivity : ComponentActivity() {
                 )
                 Box(Modifier.fillMaxWidth().weight(1f)) {
                     when (mode) {
-                        Mode.Trackpad -> TrackpadSurface(active, trackpadPrefs, Modifier.fillMaxSize().padding(12.dp))
+                        Mode.Trackpad -> TrackpadSurface(active, wanted, blocker, trackpadPrefs, Modifier.fillMaxSize().padding(12.dp))
                         Mode.Keyboard -> Column(Modifier.fillMaxSize()) {
-                            if (!landscape) TrackpadSurface(active, trackpadPrefs, Modifier.fillMaxWidth().weight(1f).padding(12.dp))
+                            if (!landscape) TrackpadSurface(active, wanted, blocker, trackpadPrefs, Modifier.fillMaxWidth().weight(1f).padding(12.dp))
                             KeyboardPanel(
                                 active,
                                 if (landscape) Modifier.fillMaxWidth().weight(1f)
@@ -318,6 +349,17 @@ class TrackpadActivity : ComponentActivity() {
                             if (screenKeyboard) KeyboardPanel(active, Modifier.fillMaxWidth().fillMaxHeight(0.5f))
                         }
                     }
+                    // Keyboard / Screen modes: say clearly that nothing is being sent.
+                    if (active == null && mode != Mode.Trackpad && !(mode == Mode.Keyboard && !landscape)) {
+                        StatusBanner(
+                            when {
+                                blocker != null -> "Being controlled by ${blocker.name}"
+                                wanted != null -> "Not connected to $wanted"
+                                else -> "No computer connected"
+                            },
+                            Modifier.align(Alignment.TopCenter).padding(top = 8.dp),
+                        )
+                    }
                     // Non-blocking lease banner: no pointer handlers, touches pass through.
                     androidx.compose.animation.AnimatedVisibility(
                         visible = busy != null,
@@ -333,7 +375,7 @@ class TrackpadActivity : ComponentActivity() {
     }
 
     @Composable
-    private fun TrackpadSurface(active: PeerInfo?, prefs: TrackpadPrefs, modifier: Modifier) {
+    private fun TrackpadSurface(active: PeerInfo?, wanted: String?, blocker: PeerInfo?, prefs: TrackpadPrefs, modifier: Modifier) {
         val view = LocalView.current
         val current by rememberUpdatedState(prefs)
         Box(
@@ -343,7 +385,16 @@ class TrackpadActivity : ComponentActivity() {
                 .pointerInput(Unit) { trackpadGestures(sender, { current }) { view.performHapticFeedback(it) } },
             contentAlignment = Alignment.Center,
         ) {
-            if (active == null) {
+            if (active == null && blocker != null) {
+                Notice(
+                    "Being controlled by ${blocker.name}",
+                    "${blocker.name} is controlling this phone, so this phone can't control it back.",
+                    actionLabel = "Stop being controlled",
+                    onAction = { InputRouter.stopBeingControlled() },
+                )
+            } else if (active == null && wanted != null) {
+                Notice("Not connected to $wanted", "Open AirBridge on $wanted and make sure both are on the same Wi-Fi. Input is sent only while it's connected.")
+            } else if (active == null) {
                 Notice("No computer connected", "Connect a computer from the AirBridge home screen.")
             } else {
                 Text(
@@ -370,6 +421,21 @@ class TrackpadActivity : ComponentActivity() {
     }
 
     @Composable
+    private fun StatusBanner(text: String, modifier: Modifier) {
+        Row(
+            modifier.clip(RoundedCornerShape(Tp.Radius)).background(Tp.Surface)
+                .border(1.dp, Tp.SurfaceHigh, RoundedCornerShape(Tp.Radius))
+                .semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite }
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(Modifier.size(9.dp).clip(CircleShape).background(Tp.Destructive))
+            Spacer(Modifier.width(10.dp))
+            Text(text, color = Tp.Foreground, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+        }
+    }
+
+    @Composable
     private fun BusyBanner(holder: String) {
         Row(
             Modifier.clip(RoundedCornerShape(Tp.Radius)).background(Tp.Warning)
@@ -387,6 +453,8 @@ class TrackpadActivity : ComponentActivity() {
     private fun TopBar(
         desktops: List<PeerInfo>,
         active: PeerInfo?,
+        wanted: String?,
+        controlledBy: String?,
         mode: Mode,
         compact: Boolean,
         natural: Boolean,
@@ -403,7 +471,7 @@ class TrackpadActivity : ComponentActivity() {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            TargetChip(desktops, active, compact, onChoose, Modifier.weight(1f, fill = false))
+            TargetChip(desktops, active, wanted, controlledBy, compact, onChoose, Modifier.weight(1f, fill = false))
             Spacer(Modifier.weight(0.01f))
             ModeSwitcher(mode, compact, onMode, onToggleStats)
             Spacer(Modifier.weight(0.01f))
@@ -428,6 +496,8 @@ class TrackpadActivity : ComponentActivity() {
     private fun TargetChip(
         desktops: List<PeerInfo>,
         active: PeerInfo?,
+        wanted: String?,
+        controlledBy: String?,
         compact: Boolean,
         onChoose: (PeerInfo) -> Unit,
         modifier: Modifier,
@@ -438,7 +508,8 @@ class TrackpadActivity : ComponentActivity() {
                 Modifier.height(Tp.TouchTarget).clip(RoundedCornerShape(Tp.Radius)).background(Tp.Surface)
                     .clickable(enabled = desktops.size > 1, role = Role.DropdownList) { menu = true }
                     .semantics(mergeDescendants = true) {
-                        contentDescription = active?.let { "Controlling ${it.name}" } ?: "No computer connected"
+                        contentDescription = active?.let { "Controlling ${it.name}" }
+                            ?: wanted?.let { "Not connected to $it" } ?: "No computer connected"
                     }
                     .padding(horizontal = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -456,7 +527,7 @@ class TrackpadActivity : ComponentActivity() {
                 }
                 Spacer(Modifier.width(10.dp))
                 Text(
-                    active?.name ?: "No computer",
+                    active?.name ?: wanted ?: "No computer",
                     color = if (active != null) Tp.Foreground else Tp.MutedForeground,
                     fontSize = 15.sp, fontWeight = FontWeight.Medium,
                     maxLines = 1, overflow = TextOverflow.Ellipsis,
@@ -469,12 +540,17 @@ class TrackpadActivity : ComponentActivity() {
             }
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }, containerColor = Tp.Surface) {
                 desktops.forEach { p ->
+                    val controlling = p.id == controlledBy
                     DropdownMenuItem(
+                        enabled = !controlling,
                         leadingIcon = { Icon(platformIcon(p.platform), contentDescription = null, tint = Tp.Foreground) },
                         text = {
                             Column {
                                 Text(p.name, color = Tp.Foreground, fontWeight = if (p.id == active?.id) FontWeight.SemiBold else FontWeight.Normal)
-                                Text(platformLabel(p.platform), color = Tp.MutedForeground, fontSize = 12.sp)
+                                Text(
+                                    if (controlling) "Being controlled by ${p.name}" else platformLabel(p.platform),
+                                    color = Tp.MutedForeground, fontSize = 12.sp,
+                                )
                             }
                         },
                         trailingIcon = if (p.id == active?.id) {

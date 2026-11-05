@@ -1,10 +1,9 @@
 package com.shazan.airbridge.input
 
 import android.content.Context
-import android.os.Handler
-import android.os.Looper
 import android.util.Log
-import android.widget.Toast
+import com.shazan.airbridge.AirBridgeInputService
+import com.shazan.airbridge.RemoteControlSetup
 import com.shazan.airbridge.net.PeerBus
 import com.shazan.airbridge.net.PeerInfo
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -38,12 +37,32 @@ object InputRouter {
     private val _busy = MutableStateFlow<Map<String, BusyInfo>>(emptyMap())
     val busyByPeer: StateFlow<Map<String, BusyInfo>> = _busy
 
+    private val _controlledBy = MutableStateFlow<String?>(null)
+    /** Peer holding this phone's control lease right now (§8.6), or null. Drives "Controlling you". */
+    val controlledBy: StateFlow<String?> = _controlledBy
+
+    /**
+     * Peer this phone is driving right now (trackpad / keyboard / screen mode in front), or null.
+     * §8.6 "No loops": that peer's `ctl_enter` is refused with `reason=loop`, its input gets `ctl_busy`.
+     */
+    @Volatile var driving: String? = null
+
+    internal fun setControlledBy(peerId: String?) { _controlledBy.value = peerId }
+
+    /** "Stop being controlled": send `ctl_leave` to the holder and drop its lease. */
+    fun stopBeingControlled() {
+        val t = target
+        if (t != null) t.main.post { try { t.releaseControl("user") } catch (e: Throwable) { Log.w(TAG, "release", e) } }
+        else _controlledBy.value?.let { h ->
+            try { PeerBus.send(h, JSONObject().put("t", "ctl_leave")) } catch (_: Throwable) {}
+            _controlledBy.value = null
+        }
+    }
+
     /** Screen-mirror sink (controller side): `mirror_info` / `mirror_stop` from a source. */
     @Volatile var mirrorControl: ((peerId: String, msg: JSONObject) -> Unit)? = null
     /** Screen-mirror sink: inner binary frames of kind 0x03. */
     @Volatile var mirrorFrames: ((peerId: String, frame: ByteArray) -> Unit)? = null
-
-    @Volatile private var warnedNoService = false
 
     /** Message types handled by the target role. */
     private val TARGET_TYPES = setOf(
@@ -92,8 +111,8 @@ object InputRouter {
                 // We never advertise mirror_source: mirror_start/key/ack addressed to us are ignored.
                 in TARGET_TYPES -> {
                     val t = target
-                    if (t != null) t.onControl(peerId, msg)
-                    else if (type == "ctl_enter") warnNoService()
+                    if (t != null && AirBridgeInputService.isRunning) t.onControl(peerId, msg)
+                    else if (type == "ctl_enter") refuseUnavailable(peerId)
                 }
             }
         } catch (t: Throwable) {
@@ -116,18 +135,25 @@ object InputRouter {
             val ids = list.mapTo(HashSet()) { it.id }
             _caps.update { m -> m.filterKeys { it in ids } }
             _busy.update { m -> m.filterKeys { it in ids } }
+            // No service = no lease table; never leave a stale "Controlling you".
+            if (target == null) _controlledBy.value?.let { if (it !in ids) _controlledBy.value = null }
             target?.onPeers(list)
         } catch (t: Throwable) {
             Log.w(TAG, "peers update failed", t)
         }
     }
 
-    private fun warnNoService() {
-        if (warnedNoService) return
-        warnedNoService = true
+    /**
+     * §8.1: the accessibility service is off, so we can neither show a cursor nor inject input.
+     * Answer at once so the controller releases its pointer, never take the lease, and tell the user.
+     */
+    private fun refuseUnavailable(peerId: String) {
+        val sent = try {
+            PeerBus.send(peerId, JSONObject().put("t", "ctl_leave").put("reason", TargetAck.UNAVAILABLE))
+        } catch (t: Throwable) { Log.w(TAG, "unavailable reply failed", t); false }
+        Log.i(TAG, "ctl_enter from $peerId refused: accessibility service off (reply sent=$sent)")
         val ctx = appContext ?: return
-        Handler(Looper.getMainLooper()).post {
-            Toast.makeText(ctx, "Enable the AirBridge accessibility service to control this phone from your computer", Toast.LENGTH_LONG).show()
-        }
+        val plat = try { _peers.value.firstOrNull { it.id == peerId }?.platform ?: PeerBus.peers().firstOrNull { it.id == peerId }?.platform } catch (_: Throwable) { null }
+        RemoteControlSetup.onRefused(ctx, plat)
     }
 }
