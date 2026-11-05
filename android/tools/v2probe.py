@@ -597,7 +597,7 @@ async def run_host(args):
             signal.signal(_sig, lambda *_: (dnssd.terminate(), os._exit(0)))
     log(f"HOST {args.name} id={st['id']} listening on :{port}/v2")
     log("QR url:", pairing.qr(st["id"], args.name, args.addr or "0.0.0.0", port))
-    log("commands: accept | reject | qr | clip <text> | send <path> | peers | quit   (the QR secret rotates after each pairing; use `qr` to print the current one)")
+    log("commands: accept | reject | qr | clip <text> | send <path> | peers | unpair | quit   (the QR secret rotates after each pairing; use `qr` to print the current one)")
     loop = asyncio.get_event_loop()
     try:
         while True:
@@ -611,6 +611,11 @@ async def run_host(args):
                 pairing.answers.put_nowait(cmd)
             elif cmd == "peers":
                 log([s.peer["name"] for s in sessions])
+            elif cmd == "unpair":
+                for s in list(sessions):
+                    await s.send({"t": "unpair"})
+                    st["peers"].pop(s.peer["id"], None)
+                save_state(st)
             elif cmd == "qr":
                 log("QR url:", pairing.qr(st["id"], args.name, args.addr or "0.0.0.0", port))
             elif cmd == "clip":
