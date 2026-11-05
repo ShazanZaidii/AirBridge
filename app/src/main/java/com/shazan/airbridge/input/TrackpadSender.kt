@@ -67,6 +67,7 @@ class TrackpadSender {
             GestureIntent.DragStart -> button(true)
             GestureIntent.DragEnd -> button(false)
             is GestureIntent.ThreeFingerSwipe -> action(swipeAction(i.dir))
+            is GestureIntent.Pinch -> action(pinchAction(i.spread))
             GestureIntent.ResetAll -> { flush(force = true); button(false) }
         }
     }
@@ -135,7 +136,13 @@ class TrackpadSender {
     }
 
     companion object {
-        /** Fingers moving right reveal the desktop on the left (macOS convention, §8.5). */
+        /** Four-finger pinch (§8.5): together = Launchpad (`app_drawer`), apart = `show_desktop`. */
+        fun pinchAction(spread: Boolean) = if (spread) "show_desktop" else "app_drawer"
+
+        /**
+         * Three- and four-finger swipes (§8.5), same for both: up = Mission Control, down = App
+         * Exposé. Fingers moving right reveal the desktop on the left (macOS convention).
+         */
         fun swipeAction(dir: SwipeDir) = when (dir) {
             SwipeDir.UP -> "mission_control"
             SwipeDir.DOWN -> "app_expose"
@@ -190,6 +197,7 @@ suspend fun PointerInputScope.trackpadGestures(
     sender: TrackpadSender,
     prefs: () -> TrackpadPrefs,
     haptic: (Int) -> Unit,
+    onSystemTookGesture: (fingers: Int) -> Unit = {},
 ) {
     val cfg = TrackpadGestureMachine.Config(
         slopPx = viewConfiguration.touchSlop,
@@ -197,18 +205,26 @@ suspend fun PointerInputScope.trackpadGestures(
         longPressMs = viewConfiguration.longPressTimeoutMillis,
         doubleTapMs = viewConfiguration.doubleTapTimeoutMillis,
         doubleTapSlopPx = 48.dp.toPx(),
+        pinchPx = 40.dp.toPx(),
         naturalScroll = prefs().naturalScroll,
     )
+    // Sees the same touches: a 3+ finger touch cancelled before we recognised anything = the system took it.
+    val loss = MultiFingerLossDetector(cfg.watchdogMs, onSystemTookGesture)
     val machine = TrackpadGestureMachine(cfg) { intent ->
         sender.onIntent(intent)
         when (intent) {
             is GestureIntent.Click -> haptic(HapticFeedbackConstants.CONTEXT_CLICK)
             GestureIntent.DragStart -> haptic(HapticFeedbackConstants.LONG_PRESS)
-            is GestureIntent.ThreeFingerSwipe -> haptic(HapticFeedbackConstants.CONTEXT_CLICK)
+            is GestureIntent.ThreeFingerSwipe, is GestureIntent.Pinch -> {
+                loss.markHandled()
+                haptic(HapticFeedbackConstants.CONTEXT_CLICK)
+            }
             else -> Unit
         }
     }
+    val lossReset: () -> Unit = { loss.reset() }
     sender.attach(machine)
+    sender.addResetHook(lossReset)
     try {
         awaitPointerEventScope {
             while (true) {
@@ -222,13 +238,20 @@ suspend fun PointerInputScope.trackpadGestures(
                 }
                 val event = if (wait == null) awaitPointerEvent()
                 else withTimeoutOrNull(wait) { awaitPointerEvent() }
-                if (event != null) feedPointerEvent(event) { id, a, x, y, t -> machine.onTouch(id, a, x, y, t) }
-                machine.tick(SystemClock.uptimeMillis())
+                if (event != null) feedPointerEvent(event) { id, a, x, y, t ->
+                    loss.onTouch(id, a, t)
+                    machine.onTouch(id, a, x, y, t)
+                }
+                val t = SystemClock.uptimeMillis()
+                loss.tick(t)
+                machine.tick(t)
                 sender.flush()
             }
         }
     } finally {
         // Composable left / activity paused / pointer input restarted: never leave a button held.
+        loss.reset()
+        sender.removeResetHook(lossReset)
         machine.reset(SystemClock.uptimeMillis())
         sender.detach(machine)
         sender.flush(force = true)

@@ -991,6 +991,21 @@ private fun SettingsScreen(onBack: () -> Unit, onOpenLinkDebug: () -> Unit) {
                 SwitchRow("Invert left/right arrows", null, invertX, { invertX = it; prefs.edit().putBoolean("INVERT_X", it).apply() })
                 RowDivider()
                 SwitchRow("Invert up/down arrows", null, invertY, { invertY = it; prefs.edit().putBoolean("INVERT_Y", it).apply() })
+                // Only where OemGestureSwitches has verified keys for this manufacturer.
+                if (com.shazan.airbridge.input.OsGestureGuard.switchAvailable) {
+                    var osGesturesOff by remember { mutableStateOf(com.shazan.airbridge.input.OsGestureGuard.switchEnabled(prefs)) }
+                    RowDivider()
+                    SwitchRow(
+                        "Turn off Android's multi-finger gestures while using the trackpad",
+                        if (canWriteSettings) "Turned back on when you leave the trackpad" else "Needs “Modify system settings”",
+                        osGesturesOff,
+                        { on ->
+                            osGesturesOff = on
+                            prefs.edit().putBoolean(com.shazan.airbridge.input.OsGestureGuard.PREF_SWITCHES_OFF, on).apply()
+                            if (on && !canWriteSettings) open(Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS, Uri.parse("package:${ctx.packageName}")))
+                        },
+                    )
+                }
             }
 
             SectionHeader("System access")

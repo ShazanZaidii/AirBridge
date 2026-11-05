@@ -7,6 +7,7 @@ import android.view.SurfaceView
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.systemGestureExclusion
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -101,8 +102,12 @@ fun MirrorScreen(
         }
         // Touch layer over the whole area (letterbox included; points clamp to the picture edge).
         Box(
-            Modifier.fillMaxSize().pointerInput(sender) {
-                screenGestures(sender, { currentRect }, { currentInfo }) { view.performHapticFeedback(it) }
+            Modifier.fillMaxSize().systemGestureExclusion().pointerInput(sender) {
+                screenGestures(
+                    sender, { currentRect }, { currentInfo },
+                    haptic = { view.performHapticFeedback(it) },
+                    onSystemTookGesture = OsGestureGuard::onLoss,
+                )
             },
         )
 
@@ -185,6 +190,7 @@ suspend fun PointerInputScope.screenGestures(
     rect: () -> Rect,
     info: () -> MirrorInfo?,
     haptic: (Int) -> Unit,
+    onSystemTookGesture: (fingers: Int) -> Unit = {},
 ) {
     fun nx(x: Float) = rect().let { (x - it.left) / max(1f, it.width) }
     fun ny(y: Float) = rect().let { (y - it.top) / max(1f, it.height) }
@@ -220,7 +226,9 @@ suspend fun PointerInputScope.screenGestures(
             ScreenIntent.ResetAll -> sender.button(false)
         }
     }
-    val hook: () -> Unit = { machine.reset() }
+    // Screen mode ignores 3+ fingers itself, so any such touch the system cancels was taken by it.
+    val loss = MultiFingerLossDetector(onLoss = onSystemTookGesture)
+    val hook: () -> Unit = { machine.reset(); loss.reset() }
     sender.addResetHook(hook)
     try {
         awaitPointerEventScope {
@@ -234,7 +242,11 @@ suspend fun PointerInputScope.screenGestures(
                 }
                 val event = if (wait == null) awaitPointerEvent()
                 else withTimeoutOrNull(wait) { awaitPointerEvent() }
-                if (event != null) feedPointerEvent(event) { id, a, x, y, t -> machine.onTouch(id, a, x, y, t) }
+                if (event != null) feedPointerEvent(event) { id, a, x, y, t ->
+                    loss.onTouch(id, a, t)
+                    machine.onTouch(id, a, x, y, t)
+                }
+                loss.tick(SystemClock.uptimeMillis())
                 machine.tick(SystemClock.uptimeMillis())
                 sender.flush()
             }

@@ -4,6 +4,7 @@ import com.shazan.airbridge.input.GestureIntent.Click
 import com.shazan.airbridge.input.GestureIntent.DragEnd
 import com.shazan.airbridge.input.GestureIntent.DragStart
 import com.shazan.airbridge.input.GestureIntent.Move
+import com.shazan.airbridge.input.GestureIntent.Pinch
 import com.shazan.airbridge.input.GestureIntent.ResetAll
 import com.shazan.airbridge.input.GestureIntent.Scroll
 import com.shazan.airbridge.input.GestureIntent.ThreeFingerSwipe
@@ -235,5 +236,94 @@ class TrackpadGestureMachineTest {
         ev(2, UP, 340f, 100f, 650)
         ev(1, UP, 100f, 100f, 700)
         assertEquals(listOf(DragStart, DragEnd), out)
+    }
+
+    // ---------------------------------------------------------------- 3 / 4 fingers
+
+    private fun fingersDown(n: Int, t: Long = 0, cx: Float = 400f, cy: Float = 400f, r: Float = 150f): Map<Long, Pair<Float, Float>> {
+        val pos = LinkedHashMap<Long, Pair<Float, Float>>()
+        for (k in 0 until n) {
+            val a = Math.PI * 2 * k / n
+            val p = (cx + r * Math.cos(a).toFloat()) to (cy + r * Math.sin(a).toFloat())
+            pos[k + 1L] = p
+            ev(k + 1L, DOWN, p.first, p.second, t + k * 5)
+        }
+        return pos
+    }
+
+    /** Every finger moves by (dx, dy) per step and towards / away from the centre by dr per step. */
+    private fun moveAll(pos: Map<Long, Pair<Float, Float>>, steps: Int, dx: Float, dy: Float, dr: Float = 0f,
+                        t0: Long = 50, cx: Float = 400f, cy: Float = 400f) {
+        for (i in 1..steps) {
+            for ((id, p) in pos) {
+                val ox = p.first - cx; val oy = p.second - cy
+                val len = Math.hypot(ox.toDouble(), oy.toDouble()).toFloat()
+                val k = if (len == 0f) 0f else (len + dr * i) / len
+                ev(id, MOVE, cx + ox * k + dx * i, cy + oy * k + dy * i, t0 + i * 16L)
+            }
+        }
+    }
+
+    private fun liftAll(pos: Map<Long, Pair<Float, Float>>, t: Long) { for (id in pos.keys) ev(id, UP, 0f, 0f, t) }
+
+    @Test fun fourFingerSwipeUpIsMissionControlOnce() {
+        val pos = fingersDown(4)
+        moveAll(pos, 20, 0f, -20f)
+        liftAll(pos, 600)
+        assertEquals(listOf(ThreeFingerSwipe(SwipeDir.UP, 4)), out)
+        assertEquals("mission_control", TrackpadSender.swipeAction(SwipeDir.UP))
+    }
+
+    @Test fun threeAndFourFingerSwipesMapToTheSameActions() {
+        for (n in listOf(3, 4)) for (d in SwipeDir.entries) {
+            out.clear()
+            m = TrackpadGestureMachine(cfg) { out += it }
+            val pos = fingersDown(n)
+            val (dx, dy) = when (d) { SwipeDir.UP -> 0f to -20f; SwipeDir.DOWN -> 0f to 20f; SwipeDir.LEFT -> -20f to 0f; SwipeDir.RIGHT -> 20f to 0f }
+            moveAll(pos, 15, dx, dy)
+            liftAll(pos, 600)
+            assertEquals("$n fingers $d", listOf(ThreeFingerSwipe(d, n)), out)
+        }
+        assertEquals("app_expose", TrackpadSender.swipeAction(SwipeDir.DOWN))
+        assertEquals("desktop_left", TrackpadSender.swipeAction(SwipeDir.RIGHT))
+        assertEquals("desktop_right", TrackpadSender.swipeAction(SwipeDir.LEFT))
+    }
+
+    @Test fun shortFourFingerMoveDoesNothing() {
+        val pos = fingersDown(4)
+        moveAll(pos, 5, 0f, -20f) // 100 px < 160
+        liftAll(pos, 400)
+        assertTrue(out.isEmpty())
+    }
+
+    @Test fun fourFingerPinchInIsLaunchpad() {
+        val pos = fingersDown(4)
+        moveAll(pos, 10, 0f, 0f, dr = -10f) // radius 150 → 50
+        liftAll(pos, 400)
+        assertEquals(listOf(Pinch(spread = false)), out)
+        assertEquals("app_drawer", TrackpadSender.pinchAction(false))
+    }
+
+    @Test fun fourFingerSpreadIsShowDesktop() {
+        val pos = fingersDown(4, r = 60f)
+        moveAll(pos, 10, 0f, 0f, dr = 10f)
+        liftAll(pos, 400)
+        assertEquals(listOf(Pinch(spread = true)), out)
+        assertEquals("show_desktop", TrackpadSender.pinchAction(true))
+    }
+
+    @Test fun threeFingerPinchIsNotAPinch() {
+        val pos = fingersDown(3)
+        moveAll(pos, 10, 0f, 0f, dr = -10f)
+        liftAll(pos, 400)
+        assertTrue(out.none { it is Pinch })
+    }
+
+    @Test fun fourthFingerJoiningAThreeFingerTouchCountsAsFour() {
+        ev(1, DOWN, 100f, 300f, 0); ev(2, DOWN, 200f, 300f, 5); ev(3, DOWN, 300f, 300f, 10)
+        ev(4, DOWN, 400f, 300f, 30)
+        ev(4, DOWN, 400f, 300f, 31) // duplicate DOWN for the same id is not a fifth finger
+        for (i in 1..12) for (id in 1L..4L) ev(id, MOVE, id * 100f, 300f + i * 20f, 40 + i * 16L)
+        assertEquals(listOf(ThreeFingerSwipe(SwipeDir.DOWN, 4)), out)
     }
 }
