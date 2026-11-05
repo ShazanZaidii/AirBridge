@@ -519,23 +519,48 @@ nonisolated final class Injector: @unchecked Sendable {
     }
 
     private func toggleCapsLock() {
+        guard let current = Self.readCapsLock() else { return }
+        let target = !current
+        Self.writeCapsLock(target)
+        // Report the state we just set, not a read-back: the system reports the OLD value for a moment after the
+        // write, which made the phone drop its lit Caps key again while the Mac's Caps Lock stayed on.
+        announceCaps(target)
+        // Re-check shortly after and correct only if the system really ended up somewhere else.
+        queue.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+            guard let self, let actual = Self.readCapsLock(), actual != target else { return }
+            self.announceCaps(actual)
+        }
+    }
+
+    private func announceCaps(_ on: Bool) {
+        // Our own toggle raises no event the controller's tap would report: tell everyone (the phone's Caps key
+        // follows this) and keep the controller's tracker in step so physical toggles are still noticed.
+        Controller.shared.perform { Controller.shared.syncCaps(on) }
+        for p in PeerBus.shared.peers() where p.caps.contains("trackpad") || p.caps.contains("ctl_target") {
+            PeerBus.shared.send(to: p.id, ["t": "key_state", "caps": on])
+        }
+    }
+
+    private static func withHIDSystem<T>(_ body: (io_connect_t) -> T) -> T? {
         let service = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching(kIOHIDSystemClass))
-        guard service != 0 else { return }
+        guard service != 0 else { return nil }
         defer { IOObjectRelease(service) }
         var conn: io_connect_t = 0
-        guard IOServiceOpen(service, mach_task_self_, UInt32(kIOHIDParamConnectType), &conn) == KERN_SUCCESS else { return }
+        guard IOServiceOpen(service, mach_task_self_, UInt32(kIOHIDParamConnectType), &conn) == KERN_SUCCESS else { return nil }
         defer { IOServiceClose(conn) }
-        var on = false
-        IOHIDGetModifierLockState(conn, Int32(kIOHIDCapsLockState), &on)
-        IOHIDSetModifierLockState(conn, Int32(kIOHIDCapsLockState), !on)
-        // Our own toggle raises no event the controller's tap would report, so tell everyone the new state
-        // (the phone's Caps key light follows this) and keep the controller's tracker in step.
-        var now = !on
-        IOHIDGetModifierLockState(conn, Int32(kIOHIDCapsLockState), &now)
-        Controller.shared.perform { Controller.shared.syncCaps(now) }
-        for p in PeerBus.shared.peers() where p.caps.contains("trackpad") || p.caps.contains("ctl_target") {
-            PeerBus.shared.send(to: p.id, ["t": "key_state", "caps": now])
+        return body(conn)
+    }
+
+    private static func readCapsLock() -> Bool? {
+        withHIDSystem { conn in
+            var on = false
+            IOHIDGetModifierLockState(conn, Int32(kIOHIDCapsLockState), &on)
+            return on
         }
+    }
+
+    private static func writeCapsLock(_ on: Bool) {
+        _ = withHIDSystem { conn in IOHIDSetModifierLockState(conn, Int32(kIOHIDCapsLockState), on) }
     }
 
     /// Modifier chord, e.g. chord([kVK_Control], kVK_UpArrow), as real flagsChanged + key events.
