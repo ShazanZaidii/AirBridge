@@ -52,12 +52,11 @@ data class GestureSwitch(val ns: SettingsNs, val key: String, val off: String)
  */
 object OemGestureSwitches {
     val table: Map<String, List<GestureSwitch>> = mapOf(
-        // vivo: pending verification. Candidates seen on a V2404 (Android 15), NOT verified, do not enable
-        // without a before/after diff: smartkey_shot_switch, vivo_three_fingers_switching_enabled,
-        // three_intercepts_rom_support, com.vivo.smartmultiwindow.activesplit,
-        // com.vivo.smartmultiwindow.audosplit, com.vivo.smartmultiwindow.suggestsplit.
-        // Example of the one-line change once verified:
-        // "vivo" to listOf(GestureSwitch(SettingsNs.SYSTEM, "<key>", "0")),
+        // vivo (OriginOS, verified on a V2404 / Android 15 in com.vivo.upslide's GlobalGestureService):
+        // Settings.System smartkey_shot_switch gates the three-finger screenshot, the three-finger
+        // long-press and the three-finger area screenshot (GlobalGestureStateManager.isSmartShotOpen).
+        // Three-finger-up split screen has no switch (device feature), so it can still take a touch.
+        "vivo" to listOf(GestureSwitch(SettingsNs.SYSTEM, "smartkey_shot_switch", "0")),
     )
 
     fun forManufacturer(manufacturer: String?): List<GestureSwitch> =
@@ -264,8 +263,9 @@ object OsGestureGuard {
     }
 
     private fun canWrite(context: Context, ns: SettingsNs): Boolean = when (ns) {
-        SettingsNs.SYSTEM -> Settings.System.canWrite(context)
-        SettingsNs.SECURE -> context.checkSelfPermission(Manifest.permission.WRITE_SECURE_SETTINGS) ==
+        // OEM keys in Settings.System are "private": SettingsProvider accepts them only from a caller
+        // holding WRITE_SECURE_SETTINGS (adb grant), not with plain "Modify system settings".
+        SettingsNs.SYSTEM, SettingsNs.SECURE -> context.checkSelfPermission(Manifest.permission.WRITE_SECURE_SETTINGS) ==
             PackageManager.PERMISSION_GRANTED
     }
 

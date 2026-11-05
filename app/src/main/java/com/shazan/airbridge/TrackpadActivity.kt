@@ -288,7 +288,7 @@ class TrackpadActivity : ComponentActivity() {
         var screenKeyboard by remember { mutableStateOf(false) }
         var showStats by remember { mutableStateOf(false) }
         val gestureLog by com.shazan.airbridge.input.GestureDebug.enabled.collectAsState()
-        LaunchedEffect(Unit) { com.shazan.airbridge.input.GestureDebug.setEnabled(prefs.getBoolean(com.shazan.airbridge.input.GestureDebug.PREF, true)) }
+        LaunchedEffect(Unit) { com.shazan.airbridge.input.GestureDebug.setEnabled(prefs.getBoolean(com.shazan.airbridge.input.GestureDebug.PREF_OVERLAY, false)) }
         var mirrorRun by remember { mutableStateOf(0) } // bump to restart the stream
         val trackpadPrefs by rememberUpdatedState(TrackpadPrefs(naturalScroll = natural, firmPress = firm))
 
@@ -384,7 +384,7 @@ class TrackpadActivity : ComponentActivity() {
                     onToggleGestureLog = {
                         val on = !gestureLog
                         com.shazan.airbridge.input.GestureDebug.setEnabled(on)
-                        prefs.edit().putBoolean(com.shazan.airbridge.input.GestureDebug.PREF, on).apply()
+                        prefs.edit().putBoolean(com.shazan.airbridge.input.GestureDebug.PREF_OVERLAY, on).apply()
                     },
                     onToggleNatural = {
                         natural = !natural

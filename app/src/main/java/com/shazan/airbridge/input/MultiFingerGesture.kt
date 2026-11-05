@@ -35,7 +35,10 @@ sealed interface MultiFingerResult {
 class MultiFingerGesture(
     private val swipePx: Float,
     private val pinchPx: Float,
+    /** Pinch needs this many fingers. */
     private val minFingers: Int = 4,
+    /** Swipes count from this many fingers (three, like a Mac); motion is tracked from here on too. */
+    private val trackFrom: Int = 3,
 ) {
     var fired = false; private set
     /** Diagnostics: the furthest the 4/5-finger hand travelled / pinched during this touch. */
@@ -47,10 +50,11 @@ class MultiFingerGesture(
     private var ty = 0f
     private var spread0 = -1f
     private var maxFingers = 0
+    private var lastPinch = 0f
 
     fun reset() {
         fired = false
-        maxTravel = 0f; maxPinch = 0f
+        maxTravel = 0f; maxPinch = 0f; lastPinch = 0f
         tx = 0f; ty = 0f
         spread0 = -1f
         maxFingers = 0
@@ -59,8 +63,9 @@ class MultiFingerGesture(
     /** Call after a finger landed or lifted, with the fingers now down. */
     fun fingersChanged(fingers: Collection<FingerPos>) {
         if (fingers.size > maxFingers) maxFingers = fingers.size
-        if (fingers.size >= minFingers) {
+        if (fingers.size >= trackFrom) {
             spread0 = spread(fingers)
+            lastPinch = 0f
         } else {
             spread0 = -1f
             tx = 0f; ty = 0f // too few fingers: start counting again when the hand is back
@@ -72,15 +77,16 @@ class MultiFingerGesture(
      * Returns the gesture once, when it is recognised.
      */
     fun onMove(dx: Float, dy: Float, fingers: Collection<FingerPos>): MultiFingerResult? {
-        if (fired || fingers.size < minFingers || spread0 < 0f) return null
+        if (fired || fingers.size < trackFrom || spread0 < 0f) return null
         val n = fingers.size
         tx += dx / n; ty += dy / n
         val travel = hypot(tx, ty)
         val pinch = spread(fingers) - spread0
+        lastPinch = pinch
         maxTravel = maxOf(maxTravel, travel)
         maxPinch = maxOf(maxPinch, abs(pinch))
         val result = when {
-            abs(pinch) >= pinchPx && abs(pinch) > travel -> MultiFingerResult.Pinch(pinch > 0f, maxFingers)
+            fingers.size >= minFingers && abs(pinch) >= pinchPx && abs(pinch) > travel -> MultiFingerResult.Pinch(pinch > 0f, maxFingers)
             travel >= swipePx && travel > abs(pinch) -> MultiFingerResult.Swipe(
                 if (abs(tx) > abs(ty)) (if (tx > 0) SwipeDir.RIGHT else SwipeDir.LEFT)
                 else (if (ty > 0) SwipeDir.DOWN else SwipeDir.UP),
@@ -91,6 +97,32 @@ class MultiFingerGesture(
         if (result != null) fired = true
         return result
     }
+
+    /**
+     * The phone's own gesture detector took this touch away (ACTION_CANCEL) before we recognised it.
+     * Everything up to that moment is still known: call this with smaller thresholds to turn the
+     * motion so far into the gesture anyway (the phone shows nothing for it, so nothing conflicts).
+     */
+    fun recover(minTravel: Float, minPinch: Float): MultiFingerResult? {
+        if (fired || maxFingers < trackFrom) return null
+        val travel = hypot(tx, ty)
+        val result = when {
+            maxFingers >= minFingers && abs(lastPinch) >= minPinch && abs(lastPinch) > travel -> MultiFingerResult.Pinch(lastPinch > 0f, maxFingers)
+            travel >= minTravel -> MultiFingerResult.Swipe(
+                if (abs(tx) > abs(ty)) (if (tx > 0) SwipeDir.RIGHT else SwipeDir.LEFT)
+                else (if (ty > 0) SwipeDir.DOWN else SwipeDir.UP),
+                maxFingers,
+            )
+            else -> null
+        }
+        if (result != null) fired = true
+        return result
+    }
+
+    /** Diagnostics: centroid travel (x, y) so far, and the current pinch. */
+    val travelX: Float get() = tx
+    val travelY: Float get() = ty
+    val pinchNow: Float get() = lastPinch
 
     companion object {
         /** Mean distance of the fingers from their centroid. */

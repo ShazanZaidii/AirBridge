@@ -289,9 +289,11 @@ suspend fun PointerInputScope.screenGestures(
                 val event = if (wait == null) awaitPointerEvent()
                 else withTimeoutOrNull(wait) { awaitPointerEvent() }
                 if (event != null) feedPointerEvent(event) { id, a, x, y, t, pr ->
-                    loss.onTouch(id, a, t)
+                    // The recogniser first: a touch the phone took away may still be recovered (and then
+                    // marked handled) before the loss detector counts it.
                     trace.onTouch(id, a)
                     machine.onTouch(id, a, x, y, t, pr)
+                    loss.onTouch(id, a, t)
                     if (a == TouchAction.CANCEL) trace.cancelled()
                     if (a == TouchAction.UP && machine.isIdle) {
                         val m = machine.multiDiag

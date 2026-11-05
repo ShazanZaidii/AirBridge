@@ -34,6 +34,11 @@
 
     <!-- Used by the input half (volume / brightness / DND actions) -->
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <!-- Never requested at runtime; only `adb shell pm grant` can give it. With it, OsGestureGuard turns
+         vivo's 3-finger screenshot off while the trackpad is open and back on afterwards. -->
+    <uses-permission
+        android:name="android.permission.WRITE_SECURE_SETTINGS"
+        tools:ignore="ProtectedPermissions" />
     <uses-permission
         android:name="android.permission.WRITE_SETTINGS"
         tools:ignore="ProtectedPermissions" />
