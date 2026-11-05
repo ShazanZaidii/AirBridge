@@ -584,6 +584,15 @@ nonisolated final class Injector: @unchecked Sendable {
 
     // MARK: actions
 
+    /// Launchpad (macOS ≤ 15) or the Apps view (macOS 26+).
+    private func openAppsGrid() {
+        for path in ["/System/Applications/Apps.app", "/System/Applications/Launchpad.app"]
+        where FileManager.default.fileExists(atPath: path) {
+            NSWorkspace.shared.openApplication(at: URL(fileURLWithPath: path), configuration: NSWorkspace.OpenConfiguration())
+            return
+        }
+    }
+
     private func action(_ name: String) {
         if let nx = KeyMap.nxKeyType(forAction: name) { pressMediaKey(nx); return }
         switch name {
@@ -592,6 +601,8 @@ nonisolated final class Injector: @unchecked Sendable {
         case "desktop_left": hotkey(79, default: ([0x3B], 0x7B))   // "Move left a space", Ctrl+←
         case "desktop_right": hotkey(81, default: ([0x3B], 0x7C))  // "Move right a space", Ctrl+→
         case "spotlight": hotkey(64, default: ([0x37], 0x31))      // "Show Spotlight search", Cmd+Space
+        case "show_desktop": hotkey(36, default: ([], 0x67))       // "Show Desktop", F11 (4-finger spread)
+        case "app_drawer": openAppsGrid()                          // Launchpad / the Apps view (4-finger pinch)
         case "copy": chord([0x37], 0x08)           // Cmd+C
         case "paste": chord([0x37], 0x09)          // Cmd+V
         case "lock": lockScreen()
