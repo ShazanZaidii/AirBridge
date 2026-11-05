@@ -23,6 +23,8 @@ class AirBridgeApp : Application() {
         Hub.init(this)
         // Input half: routes control messages from PeerBus even before the accessibility service is on.
         InputRouter.install(this)
+        // OEM gesture switches the trackpad turned off and could not put back (crash / kill).
+        com.shazan.airbridge.input.OsGestureGuard.restore(this)
         NetHooks.clipboardPush = { reason -> ClipboardSync.pushNow(reason) }
         // v1 pinned ws:// URLs are meaningless in v2 (peers are found by id).
         getSharedPreferences("AirBridgePrefs", Context.MODE_PRIVATE).edit().remove("WS_URLS").apply()

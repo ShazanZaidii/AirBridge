@@ -17,8 +17,10 @@ sealed interface GestureIntent {
     data class Click(val button: Int, val count: Int) : GestureIntent
     data object DragStart : GestureIntent
     data object DragEnd : GestureIntent
-    /** Direction the fingers moved. */
-    data class ThreeFingerSwipe(val dir: SwipeDir) : GestureIntent
+    /** Three- or four-finger swipe: direction the fingers moved; same meaning for both counts. */
+    data class ThreeFingerSwipe(val dir: SwipeDir, val fingers: Int = 3) : GestureIntent
+    /** Four-finger pinch: [spread] = fingers moved apart (show desktop), else together (Launchpad). */
+    data class Pinch(val spread: Boolean) : GestureIntent
     /** The machine dropped all state (cancel / watchdog / external reset). Release anything held. */
     data object ResetAll : GestureIntent
 }
@@ -38,7 +40,11 @@ sealed interface GestureIntent {
  *   whole gesture ≤ [Config.twoFingerTapMaxMs], centroid moved < slop → `Click(1, 1)`.
  * - Two-finger move → `Scroll` of the centroid. Once any finger of a scroll lifts, the sequence is
  *   finished: nothing else happens (no click, no move) until every finger is up.
- * - Three or more fingers: `ThreeFingerSwipe` exactly once when the centroid travels > swipe distance.
+ * - Three or more fingers: `ThreeFingerSwipe` exactly once when the centroid travels > swipe distance
+ *   (3 and 4 fingers behave the same; `fingers` is the maximum that were down at once).
+ * - Four or more fingers: `Pinch` exactly once when the mean finger distance from the centroid
+ *   changes by ≥ [Config.pinchPx] and more than the centroid travelled (pinch vs swipe: whichever
+ *   dominates). A finger joining or leaving re-baselines the spread.
  * - Taps beginning within [Config.multiCooldownMs] of the end of a multi-finger sequence are ignored.
  * - CANCEL, the watchdog (no event for a pointer that is down) and [reset] emit `DragEnd` if a drag
  *   was active, then `ResetAll`, and never click. A pointer the machine has forgotten (after a reset)
@@ -51,6 +57,7 @@ class TrackpadGestureMachine(
     data class Config(
         val slopPx: Float = 16f,
         val swipePx: Float = 160f,
+        val pinchPx: Float = 80f,
         val tapMaxMs: Long = 180,
         val doubleTapMs: Long = 300,
         val doubleTapSlopPx: Float = 100f,
@@ -83,6 +90,7 @@ class TrackpadGestureMachine(
     private var travelY = 0f
     private var multiX = 0f // accumulated centroid travel (two/three fingers)
     private var multiY = 0f
+    private var spreadStart = -1f // mean distance from the centroid when the 4-finger set formed
     private var tapAllowed = true
     private var firstLiftAt = -1L
     private var lastLiftAt = -1L
@@ -151,7 +159,9 @@ class TrackpadGestureMachine(
             State.MultiPending, State.Scrolling -> if (ptrs.size >= 3) {
                 state = State.Swiping
                 multiX = 0f; multiY = 0f
+                rebaseSpread()
             }
+            State.Swiping -> rebaseSpread()
             // Dragging keeps following the primary finger; Swiping/Finished ignore extra fingers.
             else -> Unit
         }
@@ -209,14 +219,19 @@ class TrackpadGestureMachine(
             State.Scrolling -> scroll(dx / n, dy / n)
             State.Swiping -> {
                 multiX += dx / n; multiY += dy / n
-                if (hypot(multiX, multiY) > config.swipePx) {
+                val travel = hypot(multiX, multiY)
+                val pinch = if (ptrs.size >= 4 && spreadStart > 0f) spread() - spreadStart else 0f
+                if (abs(pinch) >= config.pinchPx && abs(pinch) > travel) {
+                    state = State.Finished // exactly once per sequence
+                    emit(GestureIntent.Pinch(spread = pinch > 0f))
+                } else if (travel > config.swipePx && travel > abs(pinch)) {
                     val dir = if (abs(multiX) > abs(multiY)) {
                         if (multiX > 0) SwipeDir.RIGHT else SwipeDir.LEFT
                     } else {
                         if (multiY > 0) SwipeDir.DOWN else SwipeDir.UP
                     }
                     state = State.Finished // exactly once per sequence
-                    emit(GestureIntent.ThreeFingerSwipe(dir))
+                    emit(GestureIntent.ThreeFingerSwipe(dir, maxFingers.coerceAtMost(4)))
                 }
             }
             State.Finished, State.Idle -> Unit
@@ -257,7 +272,8 @@ class TrackpadGestureMachine(
                 }
             }
             State.Scrolling -> state = State.Finished // lifting one finger never clicks or moves
-            State.Swiping, State.Finished, State.Idle -> Unit
+            State.Swiping -> rebaseSpread()
+            State.Finished, State.Idle -> Unit
         }
 
         if (remaining == 0) endSequence(t)
@@ -283,6 +299,20 @@ class TrackpadGestureMachine(
         tapCount = 0
         lastMultiEnd = t // a cancelled sequence is treated like a multi-finger one: no stray tap after it
         if (wasActive) emit(GestureIntent.ResetAll)
+    }
+
+    /** Mean distance of the fingers from their centroid. */
+    private fun spread(): Float {
+        var cx = 0f; var cy = 0f
+        for (p in ptrs.values) { cx += p.x; cy += p.y }
+        cx /= ptrs.size; cy /= ptrs.size
+        var d = 0f
+        for (p in ptrs.values) d += hypot(p.x - cx, p.y - cy)
+        return d / ptrs.size
+    }
+
+    private fun rebaseSpread() {
+        spreadStart = if (ptrs.size >= 4) spread() else -1f
     }
 
     private fun scroll(fingerDx: Float, fingerDy: Float) {
