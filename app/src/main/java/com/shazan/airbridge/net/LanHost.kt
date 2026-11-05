@@ -42,6 +42,38 @@ object LanHost {
     /** Port we listen on, 0 when not listening. */
     val port: Int get() = server?.localPort ?: 0
 
+    // ---- "Show QR code" (§2.4, mode qr): a one-time secret, valid while the code is on screen ----
+
+    @Volatile private var qrSecret: ByteArray? = null
+    private val _qrLink = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
+    /** The `airbridge://pair?…` link to draw as a QR code, while one is shown. */
+    val qrLink: kotlinx.coroutines.flow.StateFlow<String?> = _qrLink
+
+    /** Start showing a QR code; a new secret every time. Null when this phone is not reachable yet. */
+    @Synchronized fun openQr(): String? {
+        if (server == null) start()
+        val p = port
+        val addr = localAddresses().firstOrNull()
+        if (p == 0 || addr == null) { _qrLink.value = null; return null }
+        val secret = Protocol.randomBytes(32)
+        qrSecret = secret
+        val enc = { v: String -> java.net.URLEncoder.encode(v, "UTF-8").replace("+", "%20") }
+        val link = "airbridge://pair?v=${Protocol.VERSION}&id=${enc(Identity.id)}&name=${enc(Identity.name)}" +
+            "&plat=${Protocol.PLATFORM}&addr=$addr&port=$p&k=${java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(secret)}"
+        _qrLink.value = link
+        if (com.shazan.airbridge.BuildConfig.DEBUG) Log.d(TAG, "qr link: $link") // debug builds only (contains the one-time secret)
+        return link
+    }
+
+    /** The QR code left the screen: its secret stops working. */
+    @Synchronized fun closeQr() { qrSecret = null; _qrLink.value = null }
+
+    /** The secret of the code on screen, if any (Session, host side). */
+    fun qrSecretNow(): ByteArray? = qrSecret
+
+    /** A scan just used the code: show a fresh one (a QR secret pairs once). */
+    @Synchronized fun qrUsed() { if (qrSecret != null) openQr() }
+
     @Synchronized fun acquire() { refs++; if (refs == 1) start() }
     @Synchronized fun release() { if (refs > 0) refs--; if (refs == 0) stop() }
 

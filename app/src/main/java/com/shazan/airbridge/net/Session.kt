@@ -417,8 +417,9 @@ class Session(
         val zz = z ?: return
         val t = transcript ?: return
         val mode = pairMode
-        // Android hosts never show a QR: confirm mode only, auto-accepted (Nearby's digits were compared)
-        // or accepted by this user on the code (LAN host).
+        if (m.str("mode") == "qr") { onQrPair(id, m, t); return }
+        // Confirm mode: auto-accepted (Nearby's digits were compared) or accepted by this user on the
+        // code (LAN host).
         if (m.str("mode") != "confirm" || mode !is PairMode.Confirm) { refusePairing(id); return }
         if (!mode.auto && !userConfirmed) {
             synchronized(lock) { pendingPair = m }
@@ -433,6 +434,24 @@ class Session(
         key = k
         PairStore.put(id, k, peerName, peerPlat, link.kind, null, 0)
         sendHandshake(Protocol.msg("pair_ok").put("proof", Protocol.b64(Crypto.mac(k, "pair_ack|", t))))
+        becomeReady()
+    }
+
+    /** LAN host, mode qr: the client scanned the code this phone shows ([LanHost.openQr]). */
+    private fun onQrPair(id: String, m: JSONObject, t: ByteArray) {
+        val secret = if (link.kind == LanHost.KIND) LanHost.qrSecretNow() else null
+        if (secret == null) { refusePairing(id); return } // no code on screen
+        if (pairStartedAt == 0L) pairStartedAt = System.currentTimeMillis()
+        val k = Crypto.pairKeyQr(secret, id, Identity.id)
+        if (!Protocol.constEq(Crypto.mac(k, "pair|", t), Protocol.unb64(m.str("proof")))) {
+            sendHandshake(Protocol.withReason("pair_fail", "bad_proof"))
+            finish(Outcome.PairFailed("bad_proof"), null)
+            return
+        }
+        key = k
+        PairStore.put(id, k, peerName, peerPlat, link.kind, null, 0)
+        sendHandshake(Protocol.msg("pair_ok").put("proof", Protocol.b64(Crypto.mac(k, "pair_ack|", t))))
+        LanHost.qrUsed()
         becomeReady()
     }
 
