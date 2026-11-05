@@ -101,7 +101,6 @@ import com.shazan.airbridge.input.NetHooks
 import com.shazan.airbridge.input.Notice
 import com.shazan.airbridge.input.RemoteKeyboard
 import com.shazan.airbridge.input.RemoteKeyboardController
-import com.shazan.airbridge.input.RemoteKeyboardMinHeight
 import com.shazan.airbridge.input.Tp
 import com.shazan.airbridge.input.TrackpadPrefs
 import com.shazan.airbridge.input.TrackpadSender
@@ -347,7 +346,7 @@ class TrackpadActivity : ComponentActivity() {
                                 onRetry = { mirrorRun++ },
                                 modifier = Modifier.fillMaxWidth().weight(1f),
                             )
-                            if (screenKeyboard) KeyboardPanel(active, Modifier.fillMaxWidth().heightIn(min = RemoteKeyboardMinHeight).fillMaxHeight(0.5f))
+                            if (screenKeyboard) KeyboardPanel(active, Modifier.fillMaxWidth().fillMaxHeight(0.5f))
                         }
                     }
                     // Keyboard / Screen modes: say clearly that nothing is being sent.
