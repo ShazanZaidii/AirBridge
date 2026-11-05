@@ -270,6 +270,19 @@ namespace AirBridge.Net
             }
         }
 
+        /// <summary>A ready session started closing. If it is still the peer's current session (not one being replaced),
+        /// the input half learns at once (§8.6 "No stray state"). Any thread; must not block.</summary>
+        internal void OnSessionClosing(Session s)
+        {
+            string? id = s.PeerId;
+            if (id == null) return;
+            bool current;
+            lock (_gate) current = _ready.TryGetValue(id, out var cur) && cur == s;
+            if (!current) return;
+            try { PeerBus.NotifySessionEnded(id); }
+            catch (Exception ex) { Log.Error("SessionEndedHandler threw", ex); }
+        }
+
         internal void OnUnpairReceived(Session s)
         {
             if (s.PeerId == null) return;
@@ -371,6 +384,8 @@ namespace AirBridge.Net
         // ================================================================== IPeerTransport
 
         public bool Send(string peerId, JsonObject msg) => ReadySession(peerId)?.EnqueueJson(msg) ?? false;
+
+        public long LastReceivedTick(string peerId) => ReadySession(peerId)?.LastReceivedTick ?? -1;
 
         public void Broadcast(JsonObject msg)
         {

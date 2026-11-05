@@ -26,6 +26,9 @@ namespace AirBridge
         bool SendBinary(string peerId, ReadOnlyMemory<byte> frame);
         /// <summary>Snapshot of ready peers.</summary>
         IReadOnlyList<PeerInfo> Peers();
+        /// <summary><see cref="Environment.TickCount64"/> when anything (ping/pong included) last arrived on the peer's
+        /// ready session, or -1 if it has none.</summary>
+        long LastReceivedTick(string peerId);
     }
 
     /// <summary>
@@ -62,14 +65,21 @@ namespace AirBridge
         public static volatile Action<string, JsonObject>? ControlHandler;
         public static volatile Action<string, ReadOnlyMemory<byte>>? BinaryHandler;
         public static volatile Action<IReadOnlyList<PeerInfo>>? PeersHandler;
+        /// <summary>The peer's current ready session started closing (bye, Disconnect, forget, liveness timeout, socket
+        /// error, shutdown). Called at once, before the close handshake finishes and long before
+        /// <see cref="NotifyPeers"/> drops the peer, so the input half can release a lease/cursor immediately (§8.6).
+        /// Not called when a newer session for the same peer replaced this one (the peer stays ready).</summary>
+        public static volatile Action<string>? SessionEndedHandler;
 
         public static bool Send(string peerId, JsonObject msg) => Transport?.Send(peerId, msg) ?? false;
         public static void Broadcast(JsonObject msg) => Transport?.Broadcast(msg);
         public static bool SendBinary(string peerId, ReadOnlyMemory<byte> frame) => Transport?.SendBinary(peerId, frame) ?? false;
         public static IReadOnlyList<PeerInfo> Peers() => Transport?.Peers() ?? Array.Empty<PeerInfo>();
+        public static long LastReceivedTick(string peerId) => Transport?.LastReceivedTick(peerId) ?? -1;
 
         public static void DispatchControl(string peerId, JsonObject msg) => ControlHandler?.Invoke(peerId, msg);
         public static void DispatchBinary(string peerId, ReadOnlyMemory<byte> frame) => BinaryHandler?.Invoke(peerId, frame);
         public static void NotifyPeers(IReadOnlyList<PeerInfo> peers) => PeersHandler?.Invoke(peers);
+        public static void NotifySessionEnded(string peerId) => SessionEndedHandler?.Invoke(peerId);
     }
 }

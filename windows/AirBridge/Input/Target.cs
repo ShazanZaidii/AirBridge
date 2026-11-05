@@ -17,6 +17,13 @@ namespace AirBridge.Input
     /// key_state is never subject to the lease. mirror_start is answered with mirror_stop (no mirror source on
     /// Windows yet, see the design notes).
     ///
+    /// No loops (§8.6): while this PC drives peer P (<see cref="ControlGate.Controlling"/>), a ctl_enter from P is
+    /// answered with ctl_leave reason "loop" and P's input with ctl_busy (holder = this PC), at most once per 2 s.
+    /// No stray state (§8.6): the lease and everything the holder pressed are released as soon as its session starts
+    /// closing (<see cref="OnSessionEnded"/>), when it leaves the peer list, when it has no ready session, and after
+    /// 10 s with nothing at all (ping/pong included) heard from it. While the workstation is locked, ctl_enter is
+    /// answered with ctl_leave reason "unavailable".
+    ///
     /// Pointer gain: ptr_move deltas are treated as logical (96-dpi) pixels: injected px = d × monitorScale × TargetPointerGain.
     /// rel: fraction along the bounding box of all monitors (top→bottom for left/right, left→right for top/bottom).
     /// </summary>
@@ -36,7 +43,10 @@ namespace AirBridge.Input
         private string? _controller;        // lease holder
         private bool _explicit;             // lease came from ctl_enter
         private double _lastInputMs;        // last admitted input from the holder
-        private readonly Dictionary<string, double> _busySentMs = new();
+        private long _lastHeardTick;        // TickCount64 of the last message of any kind from the holder
+        private double _nextAliveCheckMs;
+        private readonly PerPeerRateLimit _busy = new(BusyIntervalMs);
+        private volatile bool _unavailable; // workstation locked: cannot take control
         private Edge _entryEdge;
         private double _cx, _cy;
         private bool _havePos;
@@ -95,9 +105,20 @@ namespace AirBridge.Input
             {
                 if (_controller != null && !alive.Contains(_controller)) EndLease();
                 foreach (var id in _held.Keys.Where(k => !alive.Contains(k)).ToList()) Release(id);
-                foreach (var id in _busySentMs.Keys.Where(k => !alive.Contains(k)).ToList()) _busySentMs.Remove(id);
+                _busy.Retain(alive);
             });
         }
+
+        /// <summary>The peer's ready session started closing (bye, Disconnect, forget, liveness, socket error, quit). Thread-safe.</summary>
+        public void OnSessionEnded(string peerId) => Post(() =>
+        {
+            if (_controller == peerId) EndLease();
+            Release(peerId);
+            _busy.Forget(peerId);
+        });
+
+        /// <summary>Workstation locked/unlocked: while locked, ctl_enter is refused with reason "unavailable". Thread-safe.</summary>
+        public void SetUnavailable(bool unavailable) => _unavailable = unavailable;
 
         private void Post(Action a)
         {
@@ -110,12 +131,13 @@ namespace AirBridge.Input
             DpiBootstrap.EnterThread();
             while (!_q.IsCompleted)
             {
-                // Wake up periodically only while an implicit lease can expire.
-                int timeout = _controller != null && !_explicit ? 200 : Timeout.Infinite;
+                // Wake up periodically only while a lease is held (implicit expiry, holder silence).
+                int timeout = _controller == null ? Timeout.Infinite : _explicit ? 1000 : 200;
                 try
                 {
                     if (_q.TryTake(out var a, timeout)) a();
                     ExpireImplicitLease();
+                    CheckHolderAlive();
                 }
                 catch (InvalidOperationException) { break; } // completed while waiting
                 catch (Exception ex) { Debug.WriteLine($"input target: {ex}"); }
@@ -132,6 +154,8 @@ namespace AirBridge.Input
             _controller = peer;
             _explicit = isExplicit;
             _lastInputMs = Now;
+            _lastHeardTick = Environment.TickCount64;
+            ControlGate.Shared.ControlledBy = peer;
             if (newHolder) _onEnter(); // if this PC is itself controlling something, take the cursor back first
             _onLease(peer, isExplicit);
         }
@@ -143,8 +167,23 @@ namespace AirBridge.Input
             if (old == null) return;
             _controller = null;
             _explicit = false;
+            ControlGate.Shared.ControlledBy = null;
             Release(old);
             _onLease(null, false);
+        }
+
+        /// <summary>§8.6 safety net: the holder has no ready session, or nothing at all came from it for 10 s.</summary>
+        private void CheckHolderAlive()
+        {
+            var holder = _controller;
+            if (holder == null || Now < _nextAliveCheckMs) return;
+            _nextAliveCheckMs = Now + 500;
+            long transport = PeerBus.LastReceivedTick(holder);
+            double? last = transport < 0 ? null : Math.Max(transport, _lastHeardTick);
+            if (!HolderWatch.ShouldDrop(last, Environment.TickCount64)) return;
+            Debug.WriteLine(transport < 0 ? "input target: lease holder has no session; releasing"
+                                          : "input target: nothing from the lease holder for 10 s; releasing");
+            EndLease();
         }
 
         private void ExpireImplicitLease()
@@ -155,14 +194,23 @@ namespace AirBridge.Input
         /// <summary>True if input from <paramref name="peer"/> may be applied; takes an implicit lease when free.</summary>
         private bool Admit(string peer)
         {
+            if (ControlGate.Shared.RefusesInputFrom(peer))
+            {
+                // Loop guard (§8.6): this PC is driving `peer`, so its trackpad/keyboard must not drive us back.
+                if (_busy.TryAcquire(peer, Now))
+                {
+                    var self = Msg.Of("ctl_busy");
+                    self["holder"] = NetHooks.LocalName();
+                    Send(peer, self);
+                }
+                return false;
+            }
             ExpireImplicitLease();
             if (_controller == null) { SetLease(peer, isExplicit: false); return true; }
             if (_controller == peer) { _lastInputMs = Now; return true; }
 
-            double now = Now;
-            if (!_busySentMs.TryGetValue(peer, out double last) || now - last >= BusyIntervalMs)
+            if (_busy.TryAcquire(peer, Now))
             {
-                _busySentMs[peer] = now;
                 var busy = Msg.Of("ctl_busy");
                 busy["holder"] = ControlState.NameOf(_controller);
                 Send(peer, busy);
@@ -192,6 +240,7 @@ namespace AirBridge.Input
                 Send(old, busy);
             }
             _controller = null;
+            ControlGate.Shared.ControlledBy = null;
             Release(old);
         }
 
@@ -206,6 +255,7 @@ namespace AirBridge.Input
 
         private void Dispatch(string peer, JsonObject m)
         {
+            if (peer == _controller) _lastHeardTick = Environment.TickCount64;
             string? t = Msg.Str(m, "t");
             switch (t)
             {
@@ -280,9 +330,26 @@ namespace AirBridge.Input
 
         private void Enter(string peer, JsonObject m)
         {
+            if (ControlGate.Shared.RefusesEnterFrom(peer))
+            {
+                // Loop guard (§8.6): this PC is driving `peer`; it may not control us back. Its controller ends the
+                // capture and refuses us for a few seconds.
+                var loop = Msg.Of("ctl_leave");
+                loop["reason"] = "loop";
+                Send(peer, loop);
+                return;
+            }
+            if (_unavailable)
+            {
+                // Locked workstation: SendInput can't reach the secure desktop. Say so instead of a silent capture.
+                var no = Msg.Of("ctl_leave");
+                no["reason"] = "unavailable";
+                Send(peer, no);
+                return;
+            }
             // A person physically pushing a cursor over always wins (§8.6).
             if (_controller != null && _controller != peer) PreemptHolder(peer);
-            _busySentMs.Remove(peer);
+            _busy.Forget(peer);
             RefreshMonitors(force: true);
             SyncPos();
             _entryEdge = EdgeExt.Parse(Msg.Str(m, "edge")) ?? Edge.Left;

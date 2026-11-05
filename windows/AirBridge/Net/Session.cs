@@ -100,6 +100,8 @@ namespace AirBridge.Net
         public int ScreenW { get; private set; }
         public int ScreenH { get; private set; }
         public bool IsReady => _state == State.Ready;
+        /// <summary>TickCount64 of the last complete frame received (any type, ping/pong included).</summary>
+        public long LastReceivedTick => Interlocked.Read(ref _lastRecv);
         /// <summary>Reason from a received bye.</summary>
         public string? ByeReason { get; private set; }
         /// <summary>Handshake failure reason (auth_fail/pair_fail reason, or a local one).</summary>
@@ -167,6 +169,9 @@ namespace AirBridge.Net
         {
             if (terminal) Terminal = true;
             if (Interlocked.Exchange(ref _closing, 1) == 1) return;
+            // Tell the input half now: RunAsync only reports the end (OnSessionEnded → NotifyPeers) after the close
+            // handshake or the 3 s abort, which left a remote lease, held keys and "Controlled by" behind (§8.6).
+            if (_state == State.Ready && PeerId != null) _svc.OnSessionClosing(this);
             if (byeReason != null && _ws.State == WebSocketState.Open)
             {
                 var bye = Protocol.Msg("bye"); bye["reason"] = byeReason;

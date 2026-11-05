@@ -78,7 +78,7 @@ namespace AirBridge.Input
             lock (Gate)
             {
                 string? status;
-                if (_controllingId != null) status = $"Controlling {NameOf(_controllingId)} · Ctrl+Alt+Esc to return";
+                if (_controllingId != null) status = $"Controlling {NameOf(_controllingId)} · move back through the edge or press Ctrl+Alt+Esc";
                 else if (_controlledById != null) status = $"Controlled by {NameOf(_controlledById)}";
                 else status = _notice;
                 if (status != _lastStatus) { _lastStatus = status; _pending = status; _pubSeq++; deliver = true; }

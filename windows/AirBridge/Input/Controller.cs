@@ -17,6 +17,14 @@ namespace AirBridge.Input
     ///
     /// Recall hotkey while controlling: Ctrl+Alt+Esc (tracked from physical events inside the hook).
     ///
+    /// Escape never depends on the target (§8.1): after ctl_enter the target must answer ctl_ack within 600 ms, or the
+    /// capture ends (cursor back at the entry point, notice, that peer is not captured again for 5 s; same for
+    /// ctl_leave reason "unavailable"/"loop"). The local cursor stays visible, frozen at the edge, until the ack and is
+    /// hidden only then. While captured, the depth/sideways travel of the remote cursor is estimated from the deltas
+    /// sent (<see cref="CaptureEscape"/>); moving back through the entry edge by more than 40 DIP returns control, and
+    /// the cursor reappears on the entry edge at the entry point plus the sideways travel. A pill near the top of the
+    /// monitor (<see cref="CaptureHud"/>) says how to get back. Loops (§8.6): see <see cref="ControlGate"/>.
+    ///
     /// Capture intent (§8.2): touching an edge never crosses. The cursor must be pinned at an outer edge inside a
     /// peer's span and the user must keep pushing outward: the outward delta accumulated over a sliding 500 ms
     /// window must reach the threshold (Easy 60 / Normal 100 / Firm 160 logical px × the edge monitor's scale).
@@ -53,6 +61,11 @@ namespace AirBridge.Input
         private bool _remote;
         private Portal? _portal;
         private NativeMethods.POINT _anchor, _entry;
+        private CaptureEscape? _esc;                // the current capture's ack/escape state
+        private EdgeSegment _entrySeg;
+        private int _entryAlong;
+        private readonly RefusalList _refused = new();         // peers that didn't ack / refused: 5 s off
+        private readonly HashSet<string> _ended = new();       // session closing, peer list not yet updated
         private readonly bool[] _localHeld = new bool[512];
         private readonly bool[] _remoteHeld = new bool[512];
         private readonly bool[] _suppressUp = new bool[512];
@@ -89,10 +102,11 @@ namespace AirBridge.Input
         private volatile bool _inhibit;             // a remote peer holds this PC's lease
 
         // ---------- sender thread ----------
-        private enum K { Enter, Leave, Move, Btn, Scroll, Key, Action, CapsCheck, Peers }
+        private enum K { Enter, Acked, Leave, Move, Btn, Scroll, Key, Action, CapsCheck, Peers }
 
         private readonly record struct Ev(K Kind, string? Peer = null, double A = 0, double B = 0, int I = 0, int J = 0,
-            int Flags = 0, int Mods = 0, bool F = false, Edge Edge = Edge.Left, int[]? Vks = null, string? S = null, string[]? Ids = null);
+            int Flags = 0, int Mods = 0, bool F = false, Edge Edge = Edge.Left, int[]? Vks = null, string? S = null, string[]? Ids = null,
+            MonitorInfo? Mon = null);
 
         private const int KF_EXT = 1, KF_UP = 2, KF_REP = 4, KF_ALTGR = 8;
         private const int M_LSHIFT = 1, M_RSHIFT = 2, M_LCTRL = 4, M_RCTRL = 8, M_LALT = 16, M_RALT = 32,
@@ -105,6 +119,9 @@ namespace AirBridge.Input
         // sender-thread-only
         private string? _peer;
         private int _anchorX, _anchorY;
+        private bool _acked;                        // sender's view: ctl_ack arrived for _peer
+        private double _enterMs, _nextAckCheckMs;
+        private MonitorInfo? _hudMon;
         private double _pdx, _pdy, _sdx, _sdy;
         private bool _pendingMove, _pendingScroll;
         private readonly Stopwatch _clock = Stopwatch.StartNew();
@@ -195,20 +212,44 @@ namespace AirBridge.Input
             });
         }
 
-        /// <summary>ctl_leave from the target we are controlling: resume at the matching point of our edge.</summary>
+        /// <summary>
+        /// ctl_leave from the target we are controlling: resume at the matching point of our edge. Reason
+        /// "unavailable" (e.g. Android accessibility off) or "loop" (it is controlling us): back at once, notice, 5 s off.
+        /// </summary>
         public void OnCtlLeave(string peerId, JsonObject msg)
         {
             if (_activePeer != peerId) return;
             double? rel = Msg.Num(msg, "rel");
+            var why = CaptureEndExt.FromLeaveReason(Msg.Str(msg, "reason"));
+            if (why != CaptureEnd.Other) rel = null; // a refusal carries no position: back where we entered
             Post(() =>
             {
-                if (_remote && _portal?.PeerId == peerId) DoReturn(rel, sendLeave: false);
+                if (_remote && _portal?.PeerId == peerId) DoReturn(rel, sendLeave: false, why: why);
+            });
+        }
+
+        /// <summary>ctl_ack from the target (§8.1): its cursor is up and it injects; now hide ours.</summary>
+        public void OnCtlAck(string peerId)
+        {
+            if (_activePeer != peerId) return;
+            Post(() => Acked(peerId));
+        }
+
+        /// <summary>The peer's session is closing (any reason): give the cursor back now (§8.6 "No stray state").</summary>
+        public void OnSessionEnded(string peerId)
+        {
+            Post(() =>
+            {
+                _ended.Add(peerId);
+                if (_pinPortal?.PeerId == peerId) Unpin();
+                if (_remote && _portal?.PeerId == peerId) DoReturn(null, sendLeave: false);
             });
         }
 
         public void OnPeersChanged(IReadOnlyList<PeerInfo> peers)
         {
             RebuildPortals();
+            Post(_ended.Clear); // the closing session is gone (or replaced) by now
             string? active = _activePeer;
             if (active != null && !peers.Any(p => p.Id == active && p.Caps.Contains("ctl_target")))
                 Post(() => { if (_remote && _portal?.PeerId == active) DoReturn(null, sendLeave: false); });
@@ -446,12 +487,16 @@ namespace AirBridge.Input
         {
             var map = _map;
             long now = Environment.TickCount64;
-            if (_inhibit || map.Portals.Length == 0 || map.Monitors.Count == 0 || now < _dragQuietUntil) { Unpin(); return false; }
+            if (_inhibit || !ControlGate.Shared.MayCapture || map.Portals.Length == 0 || map.Monitors.Count == 0 || now < _dragQuietUntil)
+            {
+                Unpin();
+                return false;
+            }
 
             var c = Monitors.ClampToNearest(map.Monitors, x, y);
             foreach (var p in map.Portals)
             {
-                if (now < _noCaptureUntil[(int)p.PcEdge]) continue;
+                if (now < _noCaptureUntil[(int)p.PcEdge] || _refused.IsRefused(p.PeerId, now) || _ended.Contains(p.PeerId)) continue;
                 foreach (var s in p.Segments)
                 {
                     if (c.mon.Bounds != s.Monitor) continue;
@@ -502,7 +547,7 @@ namespace AirBridge.Input
             if (dx == 0 && dy == 0) return;
             long now = Environment.TickCount64;
             _lastRawMs = now;
-            if (_inhibit || now < _noCaptureUntil[(int)p.PcEdge]) { Unpin(); return; }
+            if (_inhibit || !ControlGate.Shared.MayCapture || now < _noCaptureUntil[(int)p.PcEdge]) { Unpin(); return; }
             if (_map.RequireAlt && !(_physLAlt || _physRAlt)) return;
             double outward = p.PcEdge switch
             {
@@ -595,6 +640,7 @@ namespace AirBridge.Input
             _pushCount = 0;
             _pushSum = 0;
             _lastChargeStep = -1;
+            if (!ControlGate.Shared.MayCapture) { EdgeIndicator.Hide(); return; } // no chaining (§8.6)
             EdgeIndicator.Flash(bar);
             Enter(p, s, _pinAlong);
         }
@@ -609,11 +655,20 @@ namespace AirBridge.Input
                 Edge.Top => new NativeMethods.POINT { x = along, y = s.Fixed },
                 _ => new NativeMethods.POINT { x = along, y = s.Fixed - 1 },
             };
-            var m = s.Monitor;
-            _anchor = new NativeMethods.POINT { x = m.Left + m.Width / 2, y = m.Top + m.Height / 2 };
+            _entrySeg = s;
+            _entryAlong = along;
+            var mon = MonitorOf(s.Monitor);
+            double scale = mon?.Scale > 0 ? mon.Scale : 1;
+            var info = PeerDirectory.Find(p.PeerId);
+            double extent = CaptureEscape.TargetExtent(p.PcEdge, info?.Platform, info?.ScreenW ?? 0, info?.ScreenH ?? 0);
+            _esc = new CaptureEscape(p.PcEdge, extent, CaptureEscape.ReturnSlackDip * scale, Environment.TickCount64);
+            // Until ctl_ack the cursor stays visible, frozen on the edge where it crossed (§8.6 "Smooth hand-off"); it moves
+            // to the monitor centre (more room for deltas) only once hidden, see Acked.
+            _anchor = _entry;
             _remote = true;
             _portal = p;
             _activePeer = p.PeerId;
+            ControlGate.Shared.Controlling = p.PeerId;
             NativeMethods.SetCursorPos(_anchor.x, _anchor.y);
             _capsOn = (NativeMethods.GetKeyState(KeyMap.VK_CAPITAL) & 1) != 0;
 
@@ -628,8 +683,39 @@ namespace AirBridge.Input
                 synth.Add(id & 0xFF);
             }
             Enqueue(new Ev(K.Enter, p.PeerId, A: rel, I: _anchor.x, J: _anchor.y, F: _capsOn,
-                Edge: p.PcEdge.Opposite(), Vks: synth.Distinct().ToArray()));
+                Edge: p.PcEdge.Opposite(), Vks: synth.Distinct().ToArray(), Mon: mon));
         }
+
+        private MonitorInfo? MonitorOf(IRect bounds)
+        {
+            foreach (var m in _map.Monitors) if (m.Bounds == bounds) return m;
+            return null;
+        }
+
+        /// <summary>Hook thread: ctl_ack for the current capture. The sender hides the cursor, then we re-anchor.</summary>
+        private void Acked(string peerId)
+        {
+            if (!_remote || _portal?.PeerId != peerId || _esc == null || !_esc.Ack()) return;
+            var m = _entrySeg.Monitor;
+            Enqueue(new Ev(K.Acked, peerId, I: m.Left + m.Width / 2, J: m.Top + m.Height / 2));
+        }
+
+        /// <summary>Hook thread, after the sender hid the cursor: move the frozen cursor to the monitor centre.</summary>
+        private void Reanchor(string peerId, int x, int y)
+        {
+            if (!_remote || _portal?.PeerId != peerId || _esc?.Acked != true) return;
+            _anchor = new NativeMethods.POINT { x = x, y = y };
+            NativeMethods.SetCursorPos(x, y);
+        }
+
+        /// <summary>Hook thread: no ctl_ack in time → the target can't or won't take control (§8.1).</summary>
+        private void CheckAck(string peerId)
+        {
+            if (_remote && _portal?.PeerId == peerId && _esc != null && _esc.AckOverdue(Environment.TickCount64))
+                DoReturn(null, sendLeave: true, why: CaptureEnd.NoAck);
+        }
+
+        private bool AnyRemoteButton() => _remoteBtn[0] || _remoteBtn[1] || _remoteBtn[2];
 
         private IntPtr RemoteMouse(int msg, int x, int y, uint data)
         {
@@ -637,7 +723,12 @@ namespace AirBridge.Input
             {
                 case NativeMethods.WM_MOUSEMOVE:
                     int dx = x - _anchor.x, dy = y - _anchor.y;
-                    if (dx != 0 || dy != 0) Enqueue(new Ev(K.Move, A: dx, B: dy));
+                    if (dx == 0 && dy == 0) break;
+                    Enqueue(new Ev(K.Move, A: dx, B: dy));
+                    // Our own estimate of the remote cursor: moving back through the entry edge returns control even
+                    // if the target never answers (§8.1 "Escape is the controller's job").
+                    if (_esc != null && _esc.Move(dx, dy, AnyRemoteButton()))
+                        DoReturn(null, sendLeave: true, why: CaptureEnd.MovedBack);
                     break;
                 case NativeMethods.WM_MOUSEWHEEL:
                     // Windows: positive = wheel away from user = content moves down. Protocol: positive dy = content up.
@@ -770,15 +861,21 @@ namespace AirBridge.Input
             return m;
         }
 
-        /// <summary>Hook thread only. rel = position along the edge reported by the target (null = entry point).</summary>
-        private void DoReturn(double? rel, bool sendLeave, bool restoreCursor = true)
+        /// <summary>Hook thread only. rel = position along the edge reported by the target (null = the entry point
+        /// plus the sideways travel sent since entry).</summary>
+        private void DoReturn(double? rel, bool sendLeave, bool restoreCursor = true, CaptureEnd why = CaptureEnd.Other)
         {
             if (!_remote) return;
             var p = _portal!;
+            var esc = _esc;
             _remote = false;
             _portal = null;
+            _esc = null;
             _activePeer = null;
-            _noCaptureUntil[(int)p.PcEdge] = Environment.TickCount64 + ReturnCooldownMs; // no bounce
+            ControlGate.Shared.EndControlling(p.PeerId);
+            long now = Environment.TickCount64;
+            _noCaptureUntil[(int)p.PcEdge] = now + ReturnCooldownMs; // no bounce
+            if (why.Refuses()) _refused.Refuse(p.PeerId, now);
             Unpin();
 
             for (int id = 0; id < 512; id++)
@@ -792,18 +889,20 @@ namespace AirBridge.Input
 
             if (restoreCursor)
             {
-                var (x, y) = ReturnPoint(p, rel);
+                double along = rel is double r
+                    ? p.SpanStart + Math.Clamp(r, 0, 1) * (p.SpanEnd - p.SpanStart)
+                    : CaptureEscape.ReturnAlong(_entryAlong, esc?.Lateral ?? 0, p.SpanStart, p.SpanEnd);
+                var (x, y) = ReturnPoint(p, along);
                 NativeMethods.SetCursorPos(x, y);
             }
-            Enqueue(new Ev(K.Leave, p.PeerId, F: sendLeave));
+            Enqueue(new Ev(K.Leave, p.PeerId, F: sendLeave, I: (int)why));
         }
 
-        private (int x, int y) ReturnPoint(Portal p, double? rel)
+        private (int x, int y) ReturnPoint(Portal p, double along)
         {
             int x, y;
-            if (rel is double r && p.Segments.Length > 0)
+            if (p.Segments.Length > 0)
             {
-                double along = p.SpanStart + Math.Clamp(r, 0, 1) * (p.SpanEnd - p.SpanStart);
                 EdgeSegment best = p.Segments[0];
                 double bestD = double.MaxValue;
                 foreach (var s in p.Segments)
@@ -852,7 +951,7 @@ namespace AirBridge.Input
             _lastCapsSent = null;
             while (!_stopping || _out.Count > 0)
             {
-                int timeout = 100;
+                int timeout = _peer != null && !_acked ? 20 : 100;
                 if (_pendingMove || _pendingScroll)
                     timeout = (int)Math.Max(0, Math.Ceiling(_lastFlushMs + MoveIntervalMs - Now));
                 try
@@ -868,6 +967,7 @@ namespace AirBridge.Input
             if (_peer != null) { Flush(); Send(_peer, Msg.Of("ctl_leave")); _peer = null; }
             ControlState.SetControlling(null);
             CursorHider.Restore();
+            CaptureHud.HideControlling();
         }
 
         private void Handle(in Ev ev)
@@ -894,8 +994,12 @@ namespace AirBridge.Input
                     _anchorX = ev.I; _anchorY = ev.J;
                     _watchdogMisses = 0;
                     _pendingDead = null;
+                    _acked = false;
+                    _enterMs = Now;
+                    _nextAckCheckMs = _enterMs + CaptureEscape.AckTimeoutMs + 10;
+                    _hudMon = ev.Mon;
                     SynthLocalUps(ev.Vks);
-                    CursorHider.Hide();
+                    // The cursor stays visible (frozen on the edge) until ctl_ack: never a moment without a cursor.
                     var enter = Msg.Of("ctl_enter");
                     enter["edge"] = ev.Edge.ToWire();
                     enter["rel"] = Math.Round(ev.A, 4);
@@ -906,13 +1010,34 @@ namespace AirBridge.Input
                     ControlState.SetControlling(_peer);
                     break;
 
+                case K.Acked:
+                    if (_peer == null || _peer != ev.Peer) return;
+                    _acked = true;
+                    // Hand-off: the target's cursor is up, now ours disappears; only then jump it to the monitor centre.
+                    CursorHider.Hide();
+                    _anchorX = ev.I; _anchorY = ev.J;
+                    _watchdogMisses = 0;
+                    string ackPeer = ev.Peer!;
+                    int ax = ev.I, ay = ev.J;
+                    Post(() => Reanchor(ackPeer, ax, ay));
+                    CaptureHud.ShowControlling(ControlState.NameOf(ackPeer), _hudMon);
+                    break;
+
                 case K.Leave:
                     if (ev.F && ev.Peer != null) Send(ev.Peer, Msg.Of("ctl_leave"));
-                    if (_peer == ev.Peer) { _peer = null; ControlState.SetControlling(null); }
+                    if (_peer == ev.Peer) { _peer = null; _acked = false; ControlState.SetControlling(null); }
                     _pdx = _pdy = _sdx = _sdy = 0;
                     _pendingMove = _pendingScroll = false;
                     _pendingDead = null;
                     CursorHider.Restore();
+                    CaptureHud.HideControlling();
+                    // Names are looked up here, never on the hook thread.
+                    if (ev.Peer != null
+                        && ((CaptureEnd)ev.I).Notice(ControlState.NameOf(ev.Peer), PeerDirectory.Find(ev.Peer)?.Platform == "android") is { } notice)
+                    {
+                        ControlState.Notice(notice, 8000);
+                        CaptureHud.ShowNotice(notice, _hudMon);
+                    }
                     break;
 
                 case K.Btn:
@@ -996,6 +1121,13 @@ namespace AirBridge.Input
         private void Periodic()
         {
             double now = Now;
+            if (_peer != null && !_acked && now >= _nextAckCheckMs)
+            {
+                // The hook thread owns the capture state and decides; this only wakes it (every 50 ms while overdue).
+                _nextAckCheckMs = now + 50;
+                string waiting = _peer;
+                Post(() => CheckAck(waiting));
+            }
             if (_peer != null && now >= _nextWatchdogMs)
             {
                 _nextWatchdogMs = now + 150;

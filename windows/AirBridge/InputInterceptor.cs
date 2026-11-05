@@ -20,6 +20,7 @@ namespace AirBridge
         private readonly Target _target;
         private Action<string, JsonObject>? _controlHandler;
         private Action<IReadOnlyList<PeerInfo>>? _peersHandler;
+        private Action<string>? _sessionEndedHandler;
         private bool _started;
 
         public InputInterceptor()
@@ -45,14 +46,17 @@ namespace AirBridge
             CursorHider.InstallSafetyNet();
             CursorHider.Restore(force: true); // undo a blank cursor left by a previous crash
             EdgeIndicator.Init(System.Windows.Threading.Dispatcher.CurrentDispatcher);
+            CaptureHud.Init(System.Windows.Threading.Dispatcher.CurrentDispatcher);
             try { Microsoft.Win32.SystemEvents.SessionSwitch += OnSessionSwitch; }
             catch (Exception ex) { Debug.WriteLine($"SessionSwitch unavailable: {ex.Message}"); }
 
             PeerDirectory.Update(PeerBus.Peers());
             _controlHandler = OnControl;
             _peersHandler = OnPeers;
+            _sessionEndedHandler = OnSessionEnded;
             PeerBus.ControlHandler = _controlHandler;
             PeerBus.PeersHandler = _peersHandler;
+            PeerBus.SessionEndedHandler = _sessionEndedHandler;
 
             _target.Start();
             _controller.Start();
@@ -65,6 +69,7 @@ namespace AirBridge
             try { Microsoft.Win32.SystemEvents.SessionSwitch -= OnSessionSwitch; } catch { }
             if (PeerBus.ControlHandler == _controlHandler) PeerBus.ControlHandler = null;
             if (PeerBus.PeersHandler == _peersHandler) PeerBus.PeersHandler = null;
+            if (PeerBus.SessionEndedHandler == _sessionEndedHandler) PeerBus.SessionEndedHandler = null;
             _controller.Stop();
             _target.Stop();
             CursorHider.Restore();
@@ -80,6 +85,8 @@ namespace AirBridge
             {
                 _controller.RequestReturn(sendLeave: true);
                 _target.ReleaseAll();
+                if (e.Reason == Microsoft.Win32.SessionSwitchReason.SessionLock) _target.SetUnavailable(true);
+                else if (e.Reason == Microsoft.Win32.SessionSwitchReason.SessionUnlock) _target.SetUnavailable(false);
             }
             catch (Exception ex) { Debug.WriteLine($"session switch: {ex}"); }
         }
@@ -95,9 +102,21 @@ namespace AirBridge
                 string? t = Msg.Str(msg, "t");
                 if (t == "ctl_leave") _controller.OnCtlLeave(peerId, msg);
                 else if (t == "ctl_busy") { _controller.OnCtlBusy(peerId, msg); return; }
+                else if (t == "ctl_ack") { _controller.OnCtlAck(peerId); return; }
                 _target.Handle(peerId, msg);
             }
             catch (Exception ex) { Debug.WriteLine($"input control handler: {ex}"); }
+        }
+
+        // Any thread (whoever closed the session). Must not block: both halves only post to their own threads.
+        private void OnSessionEnded(string peerId)
+        {
+            try
+            {
+                _controller.OnSessionEnded(peerId);
+                _target.OnSessionEnded(peerId);
+            }
+            catch (Exception ex) { Debug.WriteLine($"input session-ended handler: {ex}"); }
         }
 
         // Network thread.
