@@ -14,6 +14,9 @@ import org.json.JSONObject
 /** A peer told us (as controller) that our input is being dropped (§8.6). */
 data class BusyInfo(val holder: String, val atMillis: Long)
 
+/** One `key_state` message: the peer's Caps Lock and a per-message sequence number. */
+data class CapsReport(val on: Boolean, val seq: Long)
+
 /**
  * The input half's single registration with [PeerBus]. Fans control messages out to the target
  * side ([TargetController], present while the accessibility service runs), to the controller side
@@ -29,9 +32,13 @@ object InputRouter {
     private val _peers = MutableStateFlow<List<PeerInfo>>(emptyList())
     val peers: StateFlow<List<PeerInfo>> = _peers
 
-    /** Last `key_state.caps` reported by each peer (absent = never reported). */
-    private val _caps = MutableStateFlow<Map<String, Boolean>>(emptyMap())
-    val capsByPeer: StateFlow<Map<String, Boolean>> = _caps
+    /**
+     * Last `key_state.caps` reported by each peer (absent = never reported). Every message gets a
+     * new [CapsReport.seq], so a repeated identical report is still seen as a fresh one.
+     */
+    private val _caps = MutableStateFlow<Map<String, CapsReport>>(emptyMap())
+    val capsByPeer: StateFlow<Map<String, CapsReport>> = _caps
+    private val capsSeq = java.util.concurrent.atomic.AtomicLong()
 
     /** Latest `ctl_busy` per peer; cleared by any other inbound control message from that peer. */
     private val _busy = MutableStateFlow<Map<String, BusyInfo>>(emptyMap())
@@ -86,11 +93,6 @@ object InputRouter {
         try { _peers.value = PeerBus.peers() } catch (t: Throwable) { Log.w(TAG, "peers() failed", t) }
     }
 
-    /** Optimistic local update after we pressed Caps Lock on a peer that reports its state. */
-    fun setCapsOptimistic(peerId: String, on: Boolean) {
-        _caps.update { if (peerId in it) it + (peerId to on) else it }
-    }
-
     private fun onControl(peerId: String, msg: JSONObject) {
         try {
             val type = msg.optString("t")
@@ -103,7 +105,8 @@ object InputRouter {
             when (type) {
                 "key_state" -> if (msg.has("caps")) {
                     val on = msg.optBoolean("caps", false)
-                    _caps.update { it + (peerId to on) }
+                    val r = CapsReport(on, capsSeq.incrementAndGet())
+                    _caps.update { it + (peerId to r) }
                 }
                 "mirror_info", "mirror_stop" -> mirrorControl?.invoke(peerId, msg)
                 // Only reaches us if the network half routes it (not in CONTROL_TYPES today).
