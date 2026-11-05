@@ -68,6 +68,8 @@ class TrackpadSender {
             GestureIntent.DragEnd -> button(false)
             is GestureIntent.ThreeFingerSwipe -> action(swipeAction(i.dir))
             is GestureIntent.Pinch -> action(pinchAction(i.spread))
+            is GestureIntent.Zoom -> action(if (i.inward) "zoom_out" else "zoom_in")
+            is GestureIntent.MultiTap -> action("look_up")
             GestureIntent.ResetAll -> { flush(force = true); button(false) }
         }
     }
@@ -206,6 +208,8 @@ suspend fun PointerInputScope.trackpadGestures(
         doubleTapMs = viewConfiguration.doubleTapTimeoutMillis,
         doubleTapSlopPx = 48.dp.toPx(),
         pinchPx = 40.dp.toPx(),
+        zoomStartPx = 16.dp.toPx(),
+        zoomStepPx = 24.dp.toPx(),
         naturalScroll = prefs().naturalScroll,
     )
     // Sees the same touches: a 3+ finger touch cancelled before we recognised anything = the system took it.
@@ -215,10 +219,11 @@ suspend fun PointerInputScope.trackpadGestures(
         when (intent) {
             is GestureIntent.Click -> haptic(HapticFeedbackConstants.CONTEXT_CLICK)
             GestureIntent.DragStart -> haptic(HapticFeedbackConstants.LONG_PRESS)
-            is GestureIntent.ThreeFingerSwipe, is GestureIntent.Pinch -> {
+            is GestureIntent.ThreeFingerSwipe, is GestureIntent.Pinch, is GestureIntent.MultiTap -> {
                 loss.markHandled()
                 haptic(HapticFeedbackConstants.CONTEXT_CLICK)
             }
+            is GestureIntent.Zoom -> haptic(HapticFeedbackConstants.CLOCK_TICK)
             else -> Unit
         }
     }
