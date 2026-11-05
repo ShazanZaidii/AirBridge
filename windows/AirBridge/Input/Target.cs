@@ -702,6 +702,8 @@ namespace AirBridge.Input
                 case "media_play_pause": Combo(KeyMap.VK_MEDIA_PLAY_PAUSE); break;
                 case "media_next": Combo(KeyMap.VK_MEDIA_NEXT_TRACK); break;
                 case "media_prev": Combo(KeyMap.VK_MEDIA_PREV_TRACK); break;
+                case "zoom_in": Combo(KeyMap.VK_LCONTROL, 0xBB); break;   // Ctrl+'=' (VK_OEM_PLUS), browsers' zoom in
+                case "zoom_out": Combo(KeyMap.VK_LCONTROL, 0xBD); break;  // Ctrl+'-' (VK_OEM_MINUS)
                 case "copy": Combo(KeyMap.VK_LCONTROL, KeyMap.VK_C); break;
                 case "paste": Combo(KeyMap.VK_LCONTROL, KeyMap.VK_V); break;
                 case "keyboard_toggle": Task.Run(TouchKeyboard.Toggle); break;

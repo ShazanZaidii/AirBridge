@@ -138,6 +138,12 @@ Client                                   Host
   - `xfer` – sends/accepts file transfers
   - `ctl_source` – can control others (has a physical pointer that can leave the screen)
   - `ctl_target` – can be controlled (shows a virtual cursor, injects input)
+  - `type_target` – can type text into the focused field (`key` messages with `text`, editing keys and
+    copy/cut/paste/select-all shortcuts reach a text field). Only ever sent together with `ctl_target`. Android
+    advertises it only while its optional "AirBridge Typing & Clipboard" accessibility service runs; without it a
+    `ctl_target` phone still takes pointer input, actions, Esc/arrows/Page Up/Down, but drops text and editing
+    keys. Controllers may use it for UI hints only; they must keep sending `key` as usual and ignore caps they
+    don't know.
   - `trackpad` – can act as a direct input device (phone trackpad/keyboard mode)
   - `mirror_source` – can stream its screen (§8.7)
   - `mirror_sink` – can display a streamed screen and send absolute input (§8.7)
@@ -299,7 +305,8 @@ An active attacker cannot pair (confirm digits mismatch) nor hijack an existing 
   a controller (§8.5) and when the app comes to the foreground with changed content.
 - Android automatic sync (setting "Send copies to my computers automatically", default on): while the service
   runs, a local copy (clipboard listener where the ROM delivers it in the background; on stock Android 10+ only
-  via the accessibility service, from the system clipboard overlay or a "Copy"/"Cut" tap) is debounced (400 ms),
+  via the optional "AirBridge Typing & Clipboard" accessibility service, from the system clipboard overlay or a
+  "Copy"/"Cut" tap; without that service only the bubble / tile / share / foreground paths remain) is debounced (400 ms),
   then read by briefly taking focus (a 1×1 overlay window, else the invisible activity) and sent as `clip`.
   Never sent automatically: clips flagged `android.content.extra.IS_SENSITIVE`, clips from another device
   (`IS_REMOTE_DEVICE`), file lists, and AirBridge's own clips (label `AirBridge`, 2 s echo window, hash). If the
@@ -525,7 +532,8 @@ Platform mapping (each implementation owns a complete table):
 | name | Meaning (targets ignore what they can't do) |
 |------|------|
 | `home` `back` `recents` `last_app` `app_drawer` `notifications` `quick_settings` | Android navigation |
-| `mission_control` `app_expose` `desktop_left` `desktop_right` `show_desktop` `spotlight` `lock` `keyboard_toggle` | macOS / desktop (`desktop_left` = switch to the desktop on the left, i.e. a three-finger swipe to the right on macOS; `show_desktop` = move windows aside to show the desktop, the four-finger spread on macOS). The phone trackpad sends these for three- and four-finger swipes alike (up `mission_control`, down `app_expose`, right `desktop_left`, left `desktop_right`), and four-finger pinch together = `app_drawer` (Launchpad on macOS) / apart = `show_desktop` |
+| `mission_control` `app_expose` `desktop_left` `desktop_right` `show_desktop` `spotlight` `lock` `keyboard_toggle` | macOS / desktop (`desktop_left` = switch to the desktop on the left, i.e. a three-finger swipe to the right on macOS; `show_desktop` = move windows aside to show the desktop, the four-finger spread on macOS). The phone trackpad sends these for three-, four- and five-finger swipes alike (up `mission_control`, down `app_expose`, right `desktop_left`, left `desktop_right`), and a four- or five-finger pinch together = `app_drawer` (Launchpad / the Apps view on macOS) / apart = `show_desktop` |
+| `zoom_in` `zoom_out` `look_up` | Trackpad gestures (§8.5): a two-finger spread/pinch sends one `zoom_in`/`zoom_out` per step (macOS Cmd+`=`/Cmd+`-`, Windows Ctrl+`=`/Ctrl+`-`); a quick three-finger tap sends `look_up` (macOS Ctrl+Cmd+D). Targets that don't know an action ignore it |
 | `vol_up` `vol_down` `vol_mute` `brightness_up` `brightness_down` | hardware |
 | `media_play_pause` `media_next` `media_prev` | media |
 | `assistant` `dnd_toggle` | system |
