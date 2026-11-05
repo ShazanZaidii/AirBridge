@@ -43,6 +43,8 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.systemGestureExclusion
+import androidx.compose.material.icons.filled.Gesture
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
@@ -101,6 +103,7 @@ import com.shazan.airbridge.input.MirrorScreen
 import com.shazan.airbridge.input.MirrorSink
 import com.shazan.airbridge.input.NetHooks
 import com.shazan.airbridge.input.Notice
+import com.shazan.airbridge.input.OsGestureGuard
 import com.shazan.airbridge.input.RemoteKeyboard
 import com.shazan.airbridge.input.RemoteKeyboardController
 import com.shazan.airbridge.input.Tp
@@ -165,6 +168,8 @@ class TrackpadActivity : ComponentActivity() {
         hideSystemBars()
 
         val prefs = getSharedPreferences("AirBridgePrefs", Context.MODE_PRIVATE)
+        OsGestureGuard.restore(this) // leftovers from a crash, before anything is switched again
+        OsGestureGuard.startSession()
         chosenId = prefs.getString(PREF_PEER, null)
         takePeerExtra(intent, prefs)
         setContent {
@@ -188,6 +193,8 @@ class TrackpadActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         hideSystemBars()
+        // OEM multi-finger gestures off while we are in front (only verified keys; see OsGestureGuard).
+        OsGestureGuard.engage(this, getSharedPreferences("AirBridgePrefs", Context.MODE_PRIVATE))
         InputRouter.refreshPeers()
         resumed = true
         resumeCount++
@@ -207,10 +214,17 @@ class TrackpadActivity : ComponentActivity() {
         mirror.stop() // §8.7: mirror_stop on pause (restarted by the effect on resume)
         NetHooks.setBubbleSuppressed("trackpad", false)
         NetHooks.setBubbleSuppressed("mirror", false)
+        OsGestureGuard.restore(this)
+    }
+
+    override fun onStop() {
+        super.onStop()
+        OsGestureGuard.restore(this) // idempotent backstops
     }
 
     override fun onDestroy() {
         super.onDestroy()
+        OsGestureGuard.restore(this)
         mirror.release()
     }
 
@@ -266,6 +280,8 @@ class TrackpadActivity : ComponentActivity() {
             NetHooks.setBubbleSuppressed("mirror", resumed && mode == Mode.Screen)
         }
 
+        val osLosses by OsGestureGuard.losses.collectAsState()
+        val osBannerDismissed by OsGestureGuard.dismissed.collectAsState()
         val busy = active?.let { busyMap[it.id] }
         LaunchedEffect(busy) {
             if (busy != null) {
@@ -376,6 +392,24 @@ class TrackpadActivity : ComponentActivity() {
                             Modifier.align(Alignment.TopCenter).padding(top = 8.dp),
                         )
                     }
+                    // The system keeps taking 3-finger touches (OEM screenshot / split screen): say so, once.
+                    androidx.compose.animation.AnimatedVisibility(
+                        visible = mode != Mode.Keyboard && OsGestureGuard.shouldShowBanner(osLosses, osBannerDismissed, prefs),
+                        enter = if (noMotion) EnterTransition.None else fadeIn(tween(150)) + slideInVertically(tween(200)) { it / 2 },
+                        exit = if (noMotion) ExitTransition.None else fadeOut(tween(150)),
+                        modifier = Modifier.align(Alignment.BottomCenter).windowInsetsPadding(safeSides).padding(16.dp),
+                    ) {
+                        OsGestureBanner(
+                            onOpenSettings = {
+                                OsGestureGuard.dismiss()
+                                try { startActivity(OsGestureGuard.settingsIntent(this@TrackpadActivity)) } catch (_: Throwable) {
+                                    try { startActivity(android.content.Intent(android.provider.Settings.ACTION_SETTINGS)) } catch (_: Throwable) {}
+                                }
+                            },
+                            onDontShowAgain = { OsGestureGuard.dontShowAgain(prefs) },
+                            onDismiss = { OsGestureGuard.dismiss() },
+                        )
+                    }
                     // Non-blocking lease banner: no pointer handlers, touches pass through.
                     androidx.compose.animation.AnimatedVisibility(
                         visible = busy != null,
@@ -398,7 +432,16 @@ class TrackpadActivity : ComponentActivity() {
             modifier.clip(RoundedCornerShape(16.dp)).background(Tp.Surface)
                 .border(1.dp, Tp.SurfaceHigh, RoundedCornerShape(16.dp))
                 .semantics { contentDescription = "Trackpad" }
-                .pointerInput(Unit) { trackpadGestures(sender, { current }) { view.performHapticFeedback(it) } },
+                // Keeps edge back/home swipes off the pad where Android allows it (≤ 200 dp per edge).
+                // It cannot stop OEM three-finger gestures; see OsGestureGuard.
+                .systemGestureExclusion()
+                .pointerInput(Unit) {
+                    trackpadGestures(
+                        sender, { current },
+                        haptic = { view.performHapticFeedback(it) },
+                        onSystemTookGesture = OsGestureGuard::onLoss,
+                    )
+                },
             contentAlignment = Alignment.Center,
         ) {
             if (active == null && blocker != null) {
@@ -415,7 +458,7 @@ class TrackpadActivity : ComponentActivity() {
             } else {
                 Text(
                     "Tap to click · two-finger tap to right-click · hold, then move to drag\n" +
-                        "Two fingers to scroll · three-finger swipe for Mission Control and desktops",
+                        "Two fingers to scroll · three or four fingers: swipe for Mission Control and desktops, pinch for Launchpad",
                     color = Tp.MutedForeground.copy(alpha = 0.6f),
                     fontSize = 13.sp, lineHeight = 19.sp, textAlign = TextAlign.Center,
                     modifier = Modifier.widthIn(max = 520.dp).padding(24.dp),
@@ -433,6 +476,47 @@ class TrackpadActivity : ComponentActivity() {
                 platform = active?.platform ?: "macos",
                 modifier = Modifier.fillMaxWidth().weight(1f).windowInsetsPadding(safe),
             )
+        }
+    }
+
+    /** Non-blocking hint: only its own buttons take touches; the pad around it keeps working. */
+    @Composable
+    private fun OsGestureBanner(onOpenSettings: () -> Unit, onDontShowAgain: () -> Unit, onDismiss: () -> Unit) {
+        Row(
+            Modifier.widthIn(max = 620.dp).clip(RoundedCornerShape(Tp.Radius)).background(Tp.Surface)
+                .border(1.dp, Tp.Border, RoundedCornerShape(Tp.Radius))
+                .semantics(mergeDescendants = false) { liveRegion = LiveRegionMode.Polite }
+                .padding(start = 14.dp, top = 8.dp, bottom = 8.dp, end = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Default.Gesture, contentDescription = null, tint = Tp.Warning, modifier = Modifier.size(22.dp))
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f, fill = false)) {
+                Text(
+                    "Android is using 3-finger swipes for itself. Turn them off for AirBridge",
+                    color = Tp.Foreground, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, lineHeight = 18.sp,
+                )
+                Text(
+                    "In Settings, search for “three-finger” and turn off the screenshot and split-screen gestures.",
+                    color = Tp.MutedForeground, fontSize = 12.sp, lineHeight = 16.sp,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    BannerButton("Open settings", Tp.Accent, onOpenSettings)
+                    BannerButton("Don't show again", Tp.MutedForeground, onDontShowAgain)
+                }
+            }
+            IconButton48(Icons.Default.Close, "Dismiss", onDismiss)
+        }
+    }
+
+    @Composable
+    private fun BannerButton(label: String, color: Color, onClick: () -> Unit) {
+        Box(
+            Modifier.height(Tp.TouchTarget).clip(RoundedCornerShape(8.dp))
+                .clickable(role = Role.Button, onClick = onClick).padding(horizontal = 8.dp),
+            contentAlignment = Alignment.CenterStart,
+        ) {
+            Text(label, color = color, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
         }
     }
 
