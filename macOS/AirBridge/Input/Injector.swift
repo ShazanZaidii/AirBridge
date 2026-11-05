@@ -601,15 +601,19 @@ nonisolated final class Injector: @unchecked Sendable {
         case "desktop_left": hotkey(79, default: ([0x3B], 0x7B))   // "Move left a space", Ctrl+←
         case "desktop_right": hotkey(81, default: ([0x3B], 0x7C))  // "Move right a space", Ctrl+→
         case "spotlight": hotkey(64, default: ([0x37], 0x31))      // "Show Spotlight search", Cmd+Space
-        case "show_desktop": hotkey(36, default: ([], 0x67))       // "Show Desktop", F11 (4-finger spread)
-        case "app_drawer": openAppsGrid()                          // Launchpad / the Apps view (4-finger pinch)
+        case "show_desktop": hotkey(36, default: ([], 0x67))       // "Show Desktop", F11 (4/5-finger spread)
+        case "app_drawer": openAppsGrid()                          // Launchpad / the Apps view (4/5-finger pinch)
         case "zoom_in": chord([0x37], 0x18)        // Cmd+= (2-finger spread)
         case "zoom_out": chord([0x37], 0x1B)       // Cmd+-  (2-finger pinch)
-        case "look_up": chord([0x3B, 0x37], 0x02)  // Ctrl+Cmd+D (3-finger tap)
+        case "look_up": chord([0x3B, 0x37], 0x02)  // Ctrl+Cmd+D (firm press = force click)
         case "copy": chord([0x37], 0x08)           // Cmd+C
         case "paste": chord([0x37], 0x09)          // Cmd+V
         case "lock": lockScreen()
         case "keyboard_toggle": toggleAccessibilityKeyboard()
+        case "dock_toggle": hotkey(52, default: ([0x37, 0x3A], 0x02))   // "Turn Dock hiding on/off", Cmd+Opt+D
+        case "screenshot": hotkey(184, default: ([0x37, 0x38], 0x17))   // "Screenshot and recording options", Cmd+Shift+5
+        case "menu_bar_toggle": toggleMenuBarHiding()
+        case "notifications": showNotificationCenter()
         default: break // Android-only and gesture actions have no Mac meaning
         }
     }
@@ -635,6 +639,41 @@ nonisolated final class Injector: @unchecked Sendable {
         if m & 0x20000 != 0 { mods.append(0x38) }   // shift
         if m & 0x100000 != 0 { mods.append(0x37) }  // command
         chord(mods, UInt16(kc))
+    }
+
+    /// Flips "Automatically hide and show the menu bar" through System Events (asks once for Automation
+    /// permission). Off the injector queue: the first run waits for the user's answer.
+    private func toggleMenuBarHiding() {
+        DispatchQueue.global(qos: .userInitiated).async {
+            let src = """
+            tell application "System Events" to tell dock preferences to set autohide menu bar to not autohide menu bar
+            """
+            var err: NSDictionary?
+            NSAppleScript(source: src)?.executeAndReturnError(&err)
+            if let err { NSLog("[AirBridge] inject: menu bar toggle failed: %@", err) }
+        }
+    }
+
+    /// Notification Center: the user's shortcut if they set one ("Show Notification Center"), else
+    /// fn/Globe+N, the system default since macOS 12.
+    private func showNotificationCenter() {
+        let all = UserDefaults(suiteName: "com.apple.symbolichotkeys")?.dictionary(forKey: "AppleSymbolicHotKeys")
+        if let entry = all?["163"] as? [String: Any], Msg.bool(entry["enabled"]) == true {
+            hotkey(163, default: ([], 0x2D))
+            return
+        }
+        let fn = CGEventFlags.maskSecondaryFn
+        func fnKey(_ down: Bool) { // kVK_Function as a real modifier change
+            guard let e = CGEvent(keyboardEventSource: source, virtualKey: 0x3F, keyDown: down) else { return }
+            e.type = .flagsChanged
+            e.flags = down ? fn : []
+            Self.post(e)
+        }
+        fnKey(true)
+        keyEvent(0x2D, down: true, flags: fn)   // N
+        usleep(10_000)
+        keyEvent(0x2D, down: false, flags: fn)
+        fnKey(false)
     }
 
     /// Mission Control binary: no argument = Mission Control, "2" = App Exposé (current app's windows).
