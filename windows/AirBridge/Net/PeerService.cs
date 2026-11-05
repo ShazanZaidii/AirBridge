@@ -425,11 +425,20 @@ namespace AirBridge.Net
             Log.Info($"Forgot peer {peerId}");
         }
 
-        /// <summary>Retry a paired host now (clears backoff and "replaced" suspension).</summary>
+        /// <summary>User clicked Disconnect: close the session with bye "user" (the peer stops redialling) and do not
+        /// redial it ourselves until the user presses Connect. The pairing is kept.</summary>
+        public void Disconnect(string peerId)
+        {
+            _client.PauseByUser(peerId);
+            ReadySession(peerId)?.Close("user", terminal: true);
+            Log.Info($"Disconnected peer {peerId} (user)");
+        }
+
+        /// <summary>Retry a paired host now (clears backoff, "replaced" suspension and a user Disconnect).</summary>
         public void ConnectNow(string peerId)
         {
             var rec = Store.Get(peerId);
-            if (rec?.Dial == true) _client.EnsureLoop(peerId);
+            if (rec?.Dial == true) _client.EnsureLoop(peerId, userAction: true);
         }
 
         /// <summary>

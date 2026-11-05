@@ -144,6 +144,12 @@ namespace AirBridge
             grid.Children.Add(text);
 
             var actions = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+            if (p.Connected)
+            {
+                var disconnect = IconButton("\uE711", $"Disconnect from {p.Name} (keeps the pairing)");
+                disconnect.Click += (_, _) => App.Peers?.Disconnect(p.Id);
+                actions.Children.Add(disconnect);
+            }
             if (!p.Connected && p.IsHost)
             {
                 var retry = IconButton("\uE72C", $"Reconnect to {p.Name}");

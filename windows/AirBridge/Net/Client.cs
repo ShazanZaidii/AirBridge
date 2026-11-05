@@ -21,6 +21,7 @@ namespace AirBridge.Net
             public readonly CancellationTokenSource Cts = new();
             public readonly SemaphoreSlim Wake = new(0);
             public volatile bool Suspended;   // after bye "replaced" until network change / user action
+            public volatile bool UserPaused;  // the user chose Disconnect; only an explicit Connect clears it
             public volatile Session? Current;
             public void Poke() { if (Wake.CurrentCount == 0) Wake.Release(); }
         }
@@ -32,7 +33,7 @@ namespace AirBridge.Net
         public Client(PeerService svc) { _svc = svc; }
 
         /// <summary>Ensures a reconnect loop exists for a dial peer. <paramref name="adopt"/> = an already-running session.</summary>
-        public void EnsureLoop(string peerId, Session? adopt = null, Task? adoptRun = null)
+        public void EnsureLoop(string peerId, Session? adopt = null, Task? adoptRun = null, bool userAction = false)
         {
             DialLoop loop;
             lock (_gate)
@@ -40,6 +41,7 @@ namespace AirBridge.Net
                 if (_loops.TryGetValue(peerId, out var existing))
                 {
                     existing.Suspended = false;
+                    if (userAction) existing.UserPaused = false;
                     existing.Poke();
                     return;
                 }
@@ -47,6 +49,18 @@ namespace AirBridge.Net
                 _loops[peerId] = loop;
             }
             _ = Task.Run(() => RunLoopAsync(loop, adoptRun));
+        }
+
+        /// <summary>User chose Disconnect: stop redialling this peer until they press Connect.</summary>
+        public void PauseByUser(string peerId)
+        {
+            lock (_gate)
+                if (_loops.TryGetValue(peerId, out var l)) l.UserPaused = true;
+        }
+
+        public bool IsPausedByUser(string peerId)
+        {
+            lock (_gate) return _loops.TryGetValue(peerId, out var l) && l.UserPaused;
         }
 
         public void StopLoop(string peerId)
@@ -103,7 +117,7 @@ namespace AirBridge.Net
                     // One session per peer: if any ready session exists (inbound or outbound), just wait.
                     // Exception (§10.1): while a link to this peer is closing, dial the LAN anyway so the new LAN session
                     // replaces the link session (make-before-break back).
-                    if (loop.Suspended || (_svc.HasReadySession(loop.PeerId) && !_svc.Links.AllowDialWhileReady(loop.PeerId)))
+                    if (loop.Suspended || loop.UserPaused || (_svc.HasReadySession(loop.PeerId) && !_svc.Links.AllowDialWhileReady(loop.PeerId)))
                     {
                         await loop.Wake.WaitAsync(TimeSpan.FromSeconds(10), ct).ConfigureAwait(false);
                         continue;

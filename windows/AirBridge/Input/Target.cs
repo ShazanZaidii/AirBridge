@@ -325,6 +325,8 @@ namespace AirBridge.Input
             var c = Monitors.ClampToNearest(_mons, x, y);
             _cx = c.x + 0.5; _cy = c.y + 0.5; _havePos = true;
             MoveCursorTo(c.x, c.y);
+            // §8.1: tell the controller the cursor is shown and input can be injected, so it keeps the capture.
+            Send(peer, Msg.Of("ctl_ack"));
         }
 
         private void Move(string peer, double dx, double dy)
