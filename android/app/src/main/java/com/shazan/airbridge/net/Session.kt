@@ -83,16 +83,19 @@ class Session(
     @Volatile private var lastRx = startedAt
     @Volatile private var lastTx = startedAt
 
-    val isPairing: Boolean get() = pairMode !is PairMode.None
+    /** A first-contact pairing (client: we dialled to pair; host: the peer sent `pair_start`). */
+    val isPairing: Boolean get() = if (role == Role.HOST) pairStartedAt > 0L else pairMode !is PairMode.None
     val isReady: Boolean get() = state == State.READY
     val isClosed: Boolean get() = state == State.CLOSED
     /** True once the handshake completed (stays true after close). */
     @Volatile var everReady = false; private set
 
-    /** Mode `confirm`, client: the 6 digits to show, once known. */
+    /** Mode `confirm`: the 6 digits to show, once known (client after hello; LAN host after pair_start). */
     @Volatile var confirmDigits: String? = null; private set
-    /** Mode `confirm`, client: the user tapped Confirm and our proof is sent. */
+    /** Mode `confirm`: the user tapped Confirm (client: our proof is sent; host: we may accept the proof). */
     @Volatile var userConfirmed = false; private set
+    /** LAN host: the client's `pair` that arrived before our user accepted. */
+    private var pendingPair: JSONObject? = null
 
     @Volatile var peerId: String? = expectedPeerId; private set
     @Volatile var peerName: String = ""; private set
@@ -322,7 +325,20 @@ class Session(
 
     /** Client, mode `confirm`: the user compared the digits. Safe to call from the UI thread. */
     fun userConfirm(accept: Boolean) {
-        if (role != Role.CLIENT || pairMode !is PairMode.Confirm || state != State.HANDSHAKE) return
+        if (pairMode !is PairMode.Confirm || state != State.HANDSHAKE) return
+        if (role == Role.HOST) {
+            Hub.scheduler.execute {
+                if (!accept) {
+                    sendHandshake(Protocol.withReason("pair_fail", "rejected"))
+                    finish(Outcome.PairFailed("cancelled"), null)
+                    return@execute
+                }
+                userConfirmed = true
+                Hub.onPairPrompt(this)
+                synchronized(lock) { pendingPair.also { pendingPair = null } }?.let { onPair(it) }
+            }
+            return
+        }
         if (!accept) { finish(Outcome.PairFailed("cancelled"), "user"); return }
         Hub.scheduler.execute { sendConfirmProof() }
     }
@@ -374,7 +390,7 @@ class Session(
         }
     }
 
-    /** Host side (Android only hosts over Nearby). */
+    /** Host side (Nearby, and the LAN host [LanHost]). */
     private fun refusePairing(id: String) {
         sendHandshake(Protocol.withReason("pair_fail", "not_pairing"))
         // The peer lost its key for us; ours is now useless. Forget it so both sides prompt next time.
@@ -383,8 +399,16 @@ class Session(
 
     private fun onPairStart(m: JSONObject) {
         val id = peerId ?: return
-        if (pairMode !is PairMode.Confirm || m.str("mode") != "confirm") { refusePairing(id); return }
+        val mode = pairMode
+        if (mode !is PairMode.Confirm || m.str("mode") != "confirm") { refusePairing(id); return }
         if (pairStartedAt == 0L) pairStartedAt = System.currentTimeMillis()
+        if (!mode.auto) {
+            // LAN host: show the same 6 digits the dialling phone shows, and wait for this user.
+            val zz = z ?: return
+            val t = transcript ?: return
+            confirmDigits = Crypto.confirmDigits(zz, t)
+            Hub.onIncomingPairing(this)
+        }
     }
 
     private fun onPair(m: JSONObject) {
@@ -393,8 +417,13 @@ class Session(
         val zz = z ?: return
         val t = transcript ?: return
         val mode = pairMode
-        // Android hosts never show a QR, and only pair when Nearby's digits were confirmed (auto-accept).
-        if (m.str("mode") != "confirm" || mode !is PairMode.Confirm || !mode.auto) { refusePairing(id); return }
+        // Android hosts never show a QR: confirm mode only, auto-accepted (Nearby's digits were compared)
+        // or accepted by this user on the code (LAN host).
+        if (m.str("mode") != "confirm" || mode !is PairMode.Confirm) { refusePairing(id); return }
+        if (!mode.auto && !userConfirmed) {
+            synchronized(lock) { pendingPair = m }
+            return
+        }
         val k = Crypto.pairKeyConfirm(zz, pn, myNonce, id, Identity.id)
         if (!Protocol.constEq(Crypto.mac(k, "pair|", t), Protocol.unb64(m.str("proof")))) {
             sendHandshake(Protocol.withReason("pair_fail", "bad_proof"))

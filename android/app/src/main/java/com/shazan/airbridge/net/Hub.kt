@@ -118,6 +118,7 @@ object Hub : PeerBus.Transport {
         if (running) return
         running = true
         Discovery.acquire()
+        LanHost.acquire() // other phones on this Wi-Fi can find and reach this one
         registerNetworkCallback()
         WsClient.start()
         NearbyTransport.onServiceStart()
@@ -132,6 +133,7 @@ object Hub : PeerBus.Transport {
         LinkManager.stopAll() // releases Wi-Fi Direct network requests
         WsClient.stop()
         NearbyTransport.onServiceStop()
+        LanHost.release()
         Discovery.release()
         sessions.forEach { it.close(Outcome.Ended("shutdown"), "shutdown") }
         recomputeStatus()
@@ -176,7 +178,7 @@ object Hub : PeerBus.Transport {
         if (s.isClosed) { ready.remove(id, s); return } // finished between becomeReady and here
         if (old != null && old !== s) old.close(Outcome.Ended("replaced"), "replaced") // §3.4
         PairStore.updateMeta(id, name = s.peerName, plat = s.peerPlat)
-        if (pairingSession === s) { pairingSession = null; _pairing.value = null }
+        if (pairingSession === s) { pairingSession = null; _pairing.value = null; Notifs.cancel(NOTIF_INCOMING_PAIR) }
         if (s.isPairing) _events.tryEmit(NetEvent.PairResult(true, s.peerName))
         peersChanged()
         // ctl_target / type_target flipped during this handshake: its hello is already stale.
@@ -186,7 +188,7 @@ object Hub : PeerBus.Transport {
 
     fun onClosed(s: Session, outcome: Outcome) {
         sessions.remove(s)
-        if (pairingSession === s) { pairingSession = null; _pairing.value = null }
+        if (pairingSession === s) { pairingSession = null; _pairing.value = null; Notifs.cancel(NOTIF_INCOMING_PAIR) }
         val id = s.peerId
         val wasReady = id != null && ready.remove(id, s)
         when (outcome) {
@@ -222,6 +224,33 @@ object Hub : PeerBus.Transport {
         _pairing.value = PairProgress(name, plat, mode, PairStage.CONNECTING)
         if (s.confirmDigits != null) onPairPrompt(s) // digits arrived before we got here
     }
+
+    /**
+     * LAN host: another phone dialled us to pair (§3.3 confirm). Show the same 6 digits it shows, in the
+     * pairing sheet and as a notification (the app may be in the background).
+     */
+    fun onIncomingPairing(s: Session) {
+        if (s.isClosed) return
+        pairingSession?.takeIf { it !== s && !it.isClosed }?.let { // one pairing at a time
+            s.close(Outcome.PairFailed("busy"), null)
+            return
+        }
+        pairingSession = s
+        _pairing.value = PairProgress(s.peerName.ifBlank { "A phone" }, s.peerPlat, "confirm", PairStage.CONFIRM, s.confirmDigits)
+        val n = androidx.core.app.NotificationCompat.Builder(app, Notifs.CH_PAIR)
+            .setSmallIcon(com.shazan.airbridge.R.drawable.ic_stat_name)
+            .setContentTitle("Pair with ${s.peerName.ifBlank { "a phone" }}?")
+            .setContentText("Check that both screens show ${s.confirmDigits ?: "the same code"}. Tap to confirm.")
+            .setPriority(androidx.core.app.NotificationCompat.PRIORITY_HIGH)
+            .setCategory(androidx.core.app.NotificationCompat.CATEGORY_CALL)
+            .setAutoCancel(true)
+            .setTimeoutAfter(Protocol.PAIR_TIMEOUT_MS)
+            .setContentIntent(Notifs.openAppIntent(app))
+            .build()
+        Notifs.notify(NOTIF_INCOMING_PAIR, n)
+    }
+
+    private const val NOTIF_INCOMING_PAIR = 4711
 
     /** Session callback: digits are known, or the user's confirmation went out. */
     fun onPairPrompt(s: Session) {

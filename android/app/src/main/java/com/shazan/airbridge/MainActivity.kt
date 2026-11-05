@@ -161,8 +161,8 @@ class MainActivity : ComponentActivity() {
         intent?.data = null
         // Browse mDNS while visible (discovery list, QR address lookup); the service keeps its own reference.
         lifecycle.addObserver(object : DefaultLifecycleObserver {
-            override fun onStart(owner: LifecycleOwner) = Discovery.acquire()
-            override fun onStop(owner: LifecycleOwner) = Discovery.release()
+            override fun onStart(owner: LifecycleOwner) { Discovery.acquire(); com.shazan.airbridge.net.LanHost.acquire() }
+            override fun onStop(owner: LifecycleOwner) { com.shazan.airbridge.net.LanHost.release(); Discovery.release() }
         })
         setContent {
             AirBridgeTheme {
@@ -372,6 +372,7 @@ private fun AirBridgeRoot() {
         Screen.ADD -> AddDeviceScreen(
             pairedIds = paired.map { it.id }.toSet(),
             onPickHost = { h -> startPair(h.name, h.plat, h.host, h.port, h.id, PairMode.Confirm(auto = false)) },
+            onPickAddress = { host, port -> startPair(host, "", host, port, null, PairMode.Confirm(auto = false)) },
             onBack = if (paired.isNotEmpty()) ({ screen = Screen.DEVICES }) else null,
             onOpenScanner = { screen = Screen.SCANNER },
             onOpenSettings = { screen = Screen.SETTINGS },
@@ -499,6 +500,7 @@ private fun rememberNearbyPermission(onResult: (Boolean) -> Unit = {}): Pair<Boo
 private fun AddDeviceScreen(
     pairedIds: Set<String>,
     onPickHost: (DiscoveredHost) -> Unit,
+    onPickAddress: (host: String, port: Int) -> Unit,
     onBack: (() -> Unit)?,
     onOpenScanner: () -> Unit,
     onOpenSettings: () -> Unit,
@@ -520,7 +522,10 @@ private fun AddDeviceScreen(
     }
 
     val hostList = hosts.values.sortedBy { it.name.lowercase() }
-    val androidList = androids.filter { it.peerId == null || it.peerId !in pairedIds }
+    // A phone already listed on this Wi-Fi (faster) is not listed again under Nearby.
+    val androidList = androids.filter { (it.peerId == null || it.peerId !in pairedIds) && it.peerId !in hosts.keys }
+    var askAddress by remember { mutableStateOf(false) }
+    if (askAddress) AddressDialog(onDismiss = { askAddress = false }, onConnect = { h, p -> askAddress = false; onPickAddress(h, p) })
 
     AbScaffold(
         title = "Add a device",
@@ -537,13 +542,13 @@ private fun AddDeviceScreen(
         LazyColumn(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(Dimens.sm)) {
             item {
                 Text(
-                    "Pick your computer to pair. You'll check that both screens show the same code.",
+                    "Pick a computer or phone to pair. You'll check that both screens show the same code.",
                     style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
             item { SectionHeader("On this Wi-Fi") }
             if (hostList.isEmpty()) item {
-                SearchingCard(Icons.Outlined.Wifi, "Looking for computers…", "Open AirBridge on your Mac or PC. Both devices need to be on the same Wi-Fi.")
+                SearchingCard(Icons.Outlined.Wifi, "Looking on this Wi-Fi…", "Open AirBridge on your Mac, PC or other phone. Both need to be on the same Wi-Fi.")
             }
             items(hostList, key = { it.id }) { host ->
                 val isPaired = host.id in pairedIds
@@ -556,6 +561,21 @@ private fun AddDeviceScreen(
                             if (isPaired) StatusChip("Paired", ChipTone.SUCCESS)
                             else Text("Pair", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.tertiary)
                         },
+                    )
+                }
+            }
+            item {
+                // Some networks hide devices from each other (and an emulator can't see the network at all):
+                // the other device can still dial this one directly.
+                val mine = remember { com.shazan.airbridge.net.LanHost.localAddresses() }
+                val port = com.shazan.airbridge.net.LanHost.port
+                AbCard(onClick = { askAddress = true }) {
+                    InfoRow(
+                        title = "Connect by address",
+                        subtitle = if (mine.isNotEmpty() && port > 0) "Can't see it? Enter its address. This phone is ${mine.first()}${if (port != 47632) ":$port" else ""}"
+                        else "Can't see it? Enter its address.",
+                        leading = { PlatformAvatar("") },
+                        trailing = { Text("Enter", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.tertiary) },
                     )
                 }
             }
@@ -591,6 +611,31 @@ private fun AddDeviceScreen(
             item { Spacer(Modifier.height(Dimens.md)) }
         }
     }
+}
+
+/** "192.168.1.20" or "192.168.1.20:47633" → pair with whatever AirBridge device answers there. */
+@Composable
+private fun AddressDialog(onDismiss: () -> Unit, onConnect: (host: String, port: Int) -> Unit) {
+    var text by rememberSaveable { mutableStateOf("") }
+    val parsed = remember(text) {
+        val t = text.trim()
+        val host = t.substringBeforeLast(':', t).trim()
+        val port = if (':' in t) t.substringAfterLast(':').toIntOrNull() else 47632
+        if (host.isNotEmpty() && port != null && port in 1..65535 && host.all { it.isLetterOrDigit() || it == '.' || it == '-' }) host to port else null
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Connect by address") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(Dimens.sm)) {
+                Text("The other device's IP address, as shown on its Add a device screen.",
+                    style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                OutlinedTextField(value = text, onValueChange = { text = it }, singleLine = true, placeholder = { Text("192.168.1.20") })
+            }
+        },
+        confirmButton = { TextButton(enabled = parsed != null, onClick = { parsed?.let { onConnect(it.first, it.second) } }) { Text("Connect") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
 }
 
 @Composable
