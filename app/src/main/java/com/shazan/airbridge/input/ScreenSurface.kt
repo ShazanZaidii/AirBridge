@@ -60,6 +60,8 @@ fun MirrorScreen(
     peerName: String?,
     supported: Boolean,
     showStats: Boolean,
+    /** The peer's platform: a phone gets its own explanation when it can't share its screen. */
+    platform: String = "",
     onRetry: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -74,7 +76,10 @@ fun MirrorScreen(
             return@BoxWithConstraints
         }
         if (!supported) {
-            Notice(
+            if (platform == "android") Notice(
+                "Phones can't share their screen yet",
+                "Screen mode works with a Mac or PC. Use Trackpad or Keyboard to control $peerName.",
+            ) else Notice(
                 "$peerName can't share its screen",
                 "Update AirBridge on the computer and allow Screen Recording in its system settings.",
             )

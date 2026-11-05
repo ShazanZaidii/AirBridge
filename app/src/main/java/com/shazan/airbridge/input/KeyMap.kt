@@ -50,6 +50,8 @@ object Hid {
     const val RSHIFT = 0xE5
     const val RALT = 0xE6
     const val RGUI = 0xE7
+    /** Keyboard "Application" / Menu key (Windows keyboards, often instead of a right Win key). */
+    const val APPLICATION = 0x65
 
     fun isModifier(hid: Int) = hid in LCTRL..RGUI
     fun isLetter(hid: Int) = hid in A..Z
