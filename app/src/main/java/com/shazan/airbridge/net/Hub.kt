@@ -23,7 +23,11 @@ import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
 
-enum class PeerStatus { CONNECTED, CONNECTING, RECONNECTING, OFFLINE }
+enum class PeerStatus {
+    CONNECTED, CONNECTING, RECONNECTING, OFFLINE,
+    /** The user (or the peer, with `bye user`) disconnected it; no redial until Connect. */
+    DISCONNECTED,
+}
 
 /** Where an interactive (LAN) pairing attempt is, for the pairing sheet. */
 enum class PairStage { CONNECTING, CONFIRM, WAITING_PEER }
@@ -175,6 +179,8 @@ object Hub : PeerBus.Transport {
         if (pairingSession === s) { pairingSession = null; _pairing.value = null }
         if (s.isPairing) _events.tryEmit(NetEvent.PairResult(true, s.peerName))
         peersChanged()
+        // ctl_target flipped during this handshake: its hello is already stale.
+        if (s.advertisedTarget != null && s.advertisedTarget != Protocol.targetAvailable()) CapsRefresh.poke()
         LinkManager.onSessionReady(s) // after the old session was retired: a held xfer_offer goes on [s]
     }
 
@@ -283,6 +289,8 @@ object Hub : PeerBus.Transport {
             else -> {
                 if (t in LEASE_INPUT && _controlledBy.value != id) _controlledBy.value = id
                 if (PeerBus.controlHandler == null) {
+                    // §8.1: never leave a controller waiting for a ctl_ack we can't give.
+                    if (t == "ctl_enter") s.send(Protocol.withReason("ctl_leave", "unavailable"))
                     if (t in PeerBus.CONTROL_TYPES && !accessibilityToastShown) {
                         accessibilityToastShown = true
                         toast("Enable Accessibility Service in Android Settings to simulate Mouse (or from the App)", long = true)
@@ -323,10 +331,13 @@ object Hub : PeerBus.Transport {
     }
 
     fun renameSelf(name: String) {
-        if (Identity.setName(name)) {
-            broadcast(Protocol.msg("name").put("name", Identity.name))
-            NearbyTransport.onNameChanged()
-        }
+        if (Identity.setName(name)) broadcastName()
+    }
+
+    /** Tell every ready peer our current name (§7 `name`). */
+    fun broadcastName() {
+        broadcast(Protocol.msg("name").put("name", Identity.name))
+        NearbyTransport.onNameChanged()
     }
 
     // ---- transfer UI ----

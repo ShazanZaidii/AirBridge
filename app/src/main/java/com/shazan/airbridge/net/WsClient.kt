@@ -47,10 +47,12 @@ object WsClient {
         @Volatile var session: Session? = null
         var backoffMs = 1000L
         @Volatile var retry: ScheduledFuture<*>? = null
-        /** Set after bye user/replaced etc.; cleared by explicit user action or app foreground. */
-        @Volatile var paused = false
-        /** Pause came from `bye replaced`: a network change also clears it (§3.4). */
-        var pausedByReplace = false
+        /**
+         * Transient pause after bye replaced etc. (cleared by app foreground; by a network change after
+         * `bye replaced`, §3.4) and the persisted user disconnect (cleared only by Connect / re-pairing).
+         */
+        val pause = DialPause(peerId, PairStore)
+        val paused: Boolean get() = pause.paused
         /** The session dialled over a Wi-Fi Direct link (§10.1), alongside [session]. Never auto-redialled. */
         @Volatile var link: Session? = null
     }
@@ -80,11 +82,13 @@ object WsClient {
     }
 
     fun statusOf(peerId: String): PeerStatus {
-        val d = dialers[peerId] ?: return PeerStatus.OFFLINE
+        val d = dialers[peerId]
+            ?: return if (PairStore.userPause(peerId) != null) PeerStatus.DISCONNECTED else PeerStatus.OFFLINE
         val s = d.session ?: d.link
         return when {
             s?.isReady == true -> PeerStatus.CONNECTED
             s != null -> PeerStatus.CONNECTING
+            d.pause.user != null -> PeerStatus.DISCONNECTED
             running && !d.paused && d.retry != null -> PeerStatus.RECONNECTING
             else -> PeerStatus.OFFLINE
         }
@@ -92,14 +96,16 @@ object WsClient {
 
     /**
      * Connect (or retry immediately) every paired LAN peer. [unpause] = user-initiated (app opened,
-     * service started): also connects when auto-reconnect is off and clears a bye-induced pause.
+     * service started): also connects when auto-reconnect is off and clears a bye-induced pause —
+     * but never a user disconnect (only [connect] or a new pairing lifts that).
      */
     fun retryAllNow(unpause: Boolean = false, networkChanged: Boolean = false) {
         if (!running) return
         PairStore.all().filter { it.via == "lan" }.forEach { p ->
             val d = dialers.getOrPut(p.id) { Dialer(p.id) }
             synchronized(d) {
-                if (unpause || (networkChanged && d.pausedByReplace)) { d.paused = false; d.pausedByReplace = false }
+                if (unpause) d.pause.apply(DialPause.Trigger.APP_OPEN)
+                else if (networkChanged) d.pause.apply(DialPause.Trigger.NETWORK_CHANGE)
                 d.backoffMs = 1000L
             }
             ensure(d, now = true, manual = unpause)
@@ -198,13 +204,56 @@ object WsClient {
         if (!running || PairStore.get(peerId)?.via != "lan") return
         val d = dialers.getOrPut(peerId) { Dialer(peerId) }
         synchronized(d) {
-            d.paused = false
-            d.pausedByReplace = false
+            d.pause.apply(DialPause.Trigger.LINK_ENDED)
             d.backoffMs = 1000L
             d.retry?.cancel(false); d.retry = null
         }
         ensure(d, now = true, manual = true, overLink = overLink)
         Hub.recomputeStatus()
+    }
+
+    // ---- user Disconnect / Connect ----
+
+    /**
+     * The user tapped Disconnect: persist the pause (survives restarts), then close the session with
+     * `bye user` (§4.1: no reconnect on either side).
+     */
+    fun disconnect(peerId: String) {
+        if (PairStore.get(peerId)?.via != "lan") return
+        val d = dialers.getOrPut(peerId) { Dialer(peerId) }
+        val (s, l) = synchronized(d) {
+            d.pause.userDisconnect()
+            d.retry?.cancel(false); d.retry = null
+            val pair = d.session to d.link
+            d.session = null
+            d.link = null
+            pair
+        }
+        val outcome = Outcome.Ended("user disconnect")
+        s?.close(outcome, "user")
+        l?.close(outcome, "user")
+        Hub.readySession(peerId)?.close(outcome, "user") // e.g. a session the link machinery owns
+        Hub.recomputeStatus()
+    }
+
+    /**
+     * The user tapped Connect: lift every pause (also a peer's `bye user`) and dial now — the mDNS
+     * address first, the last address that worked as fallback. Returns false if the service isn't
+     * running yet (the pause is cleared; the service start dials).
+     */
+    fun connect(peerId: String): Boolean {
+        if (PairStore.get(peerId)?.via != "lan") return false
+        val d = dialers.getOrPut(peerId) { Dialer(peerId) }
+        synchronized(d) {
+            d.pause.apply(DialPause.Trigger.USER_CONNECT)
+            d.backoffMs = 1000L
+        }
+        if (!running) { Hub.recomputeStatus(); return false }
+        // ensure() prefers the mDNS address and falls back to the last one that worked; with neither,
+        // onDiscovered() dials as soon as the browse resolves it.
+        ensure(d, now = true, manual = true)
+        Hub.recomputeStatus()
+        return true
     }
 
     private fun onEnded(d: Dialer, s: Session, outcome: Outcome) {
@@ -214,8 +263,7 @@ object WsClient {
             when {
                 outcome is Outcome.Unpaired || PairStore.get(d.peerId) == null -> { dialers.remove(d.peerId, d); return }
                 !outcome.reconnect -> {
-                    d.paused = true
-                    d.pausedByReplace = outcome is Outcome.Ended && outcome.why == "bye replaced"
+                    d.pause.onEnded(outcome)
                     return
                 }
                 !running || dialers[d.peerId] !== d -> return
@@ -247,8 +295,7 @@ object WsClient {
         val s = synchronized(d) {
             d.retry?.cancel(false); d.retry = null
             d.session?.close(Outcome.Ended("re-pairing"), "replaced")
-            d.paused = false
-            d.pausedByReplace = false
+            d.pause.apply(DialPause.Trigger.NEW_PAIRING)
             d.backoffMs = 1000L
             val s = open(host, port, expectedId, mode) { s, outcome -> onEnded(d, s, outcome) }
             d.session = s.takeUnless { it.isClosed }
