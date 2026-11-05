@@ -643,6 +643,9 @@ nonisolated final class Controller: @unchecked Sendable {
         return true
     }
 
+    /// The injector flipped Caps Lock (no tap event): keep our tracker in step so physical toggles are still seen.
+    func syncCaps(_ on: Bool) { capsOn = on }
+
     private func noteCaps(_ flags: CGEventFlags) {
         let on = flags.contains(.maskAlphaShift)
         guard on != capsOn else { return }

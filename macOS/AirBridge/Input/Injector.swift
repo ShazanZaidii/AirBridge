@@ -528,6 +528,14 @@ nonisolated final class Injector: @unchecked Sendable {
         var on = false
         IOHIDGetModifierLockState(conn, Int32(kIOHIDCapsLockState), &on)
         IOHIDSetModifierLockState(conn, Int32(kIOHIDCapsLockState), !on)
+        // Our own toggle raises no event the controller's tap would report, so tell everyone the new state
+        // (the phone's Caps key light follows this) and keep the controller's tracker in step.
+        var now = !on
+        IOHIDGetModifierLockState(conn, Int32(kIOHIDCapsLockState), &now)
+        Controller.shared.perform { Controller.shared.syncCaps(now) }
+        for p in PeerBus.shared.peers() where p.caps.contains("trackpad") || p.caps.contains("ctl_target") {
+            PeerBus.shared.send(to: p.id, ["t": "key_state", "caps": now])
+        }
     }
 
     /// Modifier chord, e.g. chord([kVK_Control], kVK_UpArrow), as real flagsChanged + key events.
