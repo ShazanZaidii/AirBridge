@@ -83,7 +83,6 @@ enum class ModKey(val bit: Int, val hid: Int) {
     Fn(0, 0), // local layer only (arrows → Home/End/PgUp/PgDn, delete → forward delete): no HID usage
 }
 
-enum class ModState { Off, OneShot, Locked }
 
 /** Where the controller's `key` messages go (the [TrackpadSender] in the app, a fake in tests). */
 fun interface KeyOut {
@@ -103,12 +102,13 @@ private object MainKeyTimer : KeyTimer {
 }
 
 /**
- * Remote keyboard logic (§8.3). Every key is a HID down … up pair. Modifiers are sticky:
- * tap = applies to the next key (sent down before it and up after it), double-tap = locked
- * (held on the peer) until tapped again. Main thread only.
+ * Remote keyboard logic (§8.3). Every key is a HID down … up pair, exactly like a hardware
+ * keyboard: shift, control, option, command and fn are down only while a finger is on them (hold
+ * ⌘ with one finger and tap tab with another for the app switcher; lift ⌘ to switch). Nothing is
+ * sticky except Caps Lock. Main thread only.
  *
  * F-row: media / system actions (§8.5) by default, F1–F12 HID keys in [fKeysMode]; holding `fn`
- * (one-shot or locked) inverts that for the next F-row key, like a Mac.
+ * inverts that while it is held, like a Mac.
  *
  * Caps Lock: tapping it flips [capsOn] at once (optimistic) and opens a [CAPS_GUARD_MS] window.
  * Peer `key_state` reports (fed through [onPeerCaps], each with its own sequence number):
@@ -131,7 +131,6 @@ class RemoteKeyboardController(
     )
 
     companion object {
-        const val LOCK_WINDOW_MS = 350L
         const val REPEAT_DELAY_MS = 400L
         const val REPEAT_EVERY_MS = 45L
         const val CAPS_GUARD_MS = 600L
@@ -142,8 +141,6 @@ class RemoteKeyboardController(
             "media_prev", "media_play_pause", "media_next", "vol_mute", "vol_down", "vol_up",
         )
     }
-
-    private val states = mutableStateMapOf<ModKey, ModState>()
 
     /** F-row sends F1–F12 (true) or media / system actions (false). */
     var fKeysMode by mutableStateOf(false)
@@ -162,8 +159,9 @@ class RemoteKeyboardController(
         reportSinceTap?.let { if (it != capsOn) capsOn = it }
     }
 
-    private val lastModTap = HashMap<ModKey, Long>()
-    private val held = LinkedHashMap<Int, List<ModKey>>() // pressed hid → one-shot mods wrapped around it
+    /** Fingers on each modifier (two shift / two ⌘ keys can both be held). */
+    private val modFingers = mutableStateMapOf<ModKey, Int>()
+    private val held = LinkedHashSet<Int>() // pressed non-modifier hids
     private var repeatHid = -1
     private val repeater = object : Runnable {
         override fun run() {
@@ -176,10 +174,10 @@ class RemoteKeyboardController(
     private fun send(hid: Int, down: Boolean, mods: Int, rep: Boolean = false, text: String? = null) =
         out.key(hid, down, mods, rep, text)
 
-    fun state(m: ModKey): ModState = states[m] ?: ModState.Off
-    private fun active(m: ModKey) = state(m) != ModState.Off
-    val shiftActive: Boolean get() = active(ModKey.Shift)
-    val fnActive: Boolean get() = active(ModKey.Fn)
+    /** A finger is on [m] right now. */
+    fun isDown(m: ModKey): Boolean = (modFingers[m] ?: 0) > 0
+    val shiftActive: Boolean get() = isDown(ModKey.Shift)
+    val fnActive: Boolean get() = isDown(ModKey.Fn)
 
     /** The F-row currently shows (and sends) F1–F12: [fKeysMode] xor fn. */
     val fRowIsFKeys: Boolean get() = fKeysMode xor fnActive
@@ -194,27 +192,25 @@ class RemoteKeyboardController(
     /** Current `mods` bitmask. */
     fun bits(): Int {
         var b = 0
-        for (m in ModKey.entries) if (active(m)) b = b or m.bit
+        for (m in ModKey.entries) if (isDown(m)) b = b or m.bit
         if (capsOn) b = b or Mods.CAPS
         return b
     }
 
-    fun tapModifier(m: ModKey) {
-        val now = clock()
-        when (state(m)) {
-            ModState.Off -> { states[m] = ModState.OneShot; lastModTap[m] = now }
-            ModState.OneShot -> if (now - (lastModTap[m] ?: 0L) <= LOCK_WINDOW_MS && !isWrapped(m)) {
-                states[m] = ModState.Locked
-                if (m.hid != 0) send(m.hid, true, bits())
-            } else if (!isWrapped(m)) states[m] = ModState.Off
-            ModState.Locked -> {
-                states[m] = ModState.Off
-                if (m.hid != 0) send(m.hid, false, bits())
-            }
-        }
+    /** Finger lands on a modifier key: the modifier goes down on the peer (first finger only). */
+    fun modifierDown(m: ModKey) {
+        val n = modFingers[m] ?: 0
+        modFingers[m] = n + 1
+        if (n == 0 && m.hid != 0) send(m.hid, true, bits())
     }
 
-    private fun isWrapped(m: ModKey) = held.values.any { m in it }
+    /** Finger leaves a modifier key: the modifier goes up when no finger is left on it. */
+    fun modifierUp(m: ModKey) {
+        val n = modFingers[m] ?: 0
+        if (n <= 0) return // already released (releaseAll)
+        modFingers[m] = n - 1
+        if (n == 1 && m.hid != 0) send(m.hid, false, bits())
+    }
 
     /** Caps Lock key: optimistic local flip, then the HID tap. */
     fun capsLock() {
@@ -254,12 +250,7 @@ class RemoteKeyboardController(
             Hid.BACKSPACE -> Hid.DELETE
             else -> baseHid
         } else baseHid
-        if (hid in held) return hid
-        val wrap = ModKey.entries.filter { it.hid != 0 && state(it) == ModState.OneShot }
-        var b = bits()
-        for (m in wrap) b = b and m.bit.inv()
-        for (m in wrap) { b = b or m.bit; send(m.hid, true, b) }
-        held[hid] = wrap
+        if (!held.add(hid)) return hid
         send(hid, true, bits(), text = KeyMap.text(hid, bits()))
         if (hid != Hid.ESC && hid != Hid.TAB && hid != Hid.ENTER) {
             repeatHid = hid
@@ -270,30 +261,17 @@ class RemoteKeyboardController(
     }
 
     fun release(hid: Int) {
-        val wrap = held.remove(hid) ?: return
+        if (!held.remove(hid)) return
         if (repeatHid == hid) { timer.cancel(repeater); repeatHid = -1 }
         send(hid, false, bits())
-        var b = bits()
-        for (m in wrap.asReversed()) {
-            if (state(m) != ModState.OneShot) continue // re-locked meanwhile: stays held
-            b = b and m.bit.inv()
-            states[m] = ModState.Off
-            send(m.hid, false, b)
-        }
-        if (state(ModKey.Fn) == ModState.OneShot) states[ModKey.Fn] = ModState.Off
     }
 
     /**
      * F-row key [index] (0 = F1). Sends the HID F-key when [fRowIsFKeys] (returns it: pass it to
-     * [release]), otherwise the media / system action (returns null). A one-shot fn is used up.
+     * [release]), otherwise the media / system action (returns null).
      */
     fun pressFunctionRow(index: Int): Int? {
-        if (fRowIsFKeys) {
-            // fn only selected the layer: the F-key must not carry it (fn has no HID usage anyway).
-            if (state(ModKey.Fn) == ModState.OneShot) states[ModKey.Fn] = ModState.Off
-            return press(Hid.F1 + index)
-        }
-        if (state(ModKey.Fn) == ModState.OneShot) states[ModKey.Fn] = ModState.Off
+        if (fRowIsFKeys) return press(Hid.F1 + index)
         actionOut(F_ACTIONS[index])
         return null
     }
@@ -305,14 +283,11 @@ class RemoteKeyboardController(
     fun releaseAll() {
         timer.cancel(repeater)
         repeatHid = -1
-        for ((hid, wrap) in held.entries.toList()) {
-            send(hid, false, 0)
-            for (m in wrap.asReversed()) send(m.hid, false, 0)
-        }
+        for (hid in held.toList()) send(hid, false, 0)
         held.clear()
         for (m in ModKey.entries) {
-            if (state(m) == ModState.Locked && m.hid != 0) send(m.hid, false, 0)
-            states[m] = ModState.Off
+            if (isDown(m) && m.hid != 0) send(m.hid, false, 0)
+            modFingers[m] = 0
         }
     }
 }
@@ -327,8 +302,8 @@ private const val PAD_V = 5
 private val DENSE_ROW = 40.dp
 private val LocalDense = staticCompositionLocalOf { false }
 
-/** Normal key; Latched = pressed look (one-shot modifier, Caps on); Locked = pressed look + bar. */
-private enum class Look { Normal, Latched, Locked }
+/** Normal key; Latched = pressed look while Caps Lock is on. */
+private enum class Look { Normal, Latched }
 
 private data class Labels(
     val ctrl: Pair<String, String>, val alt: Pair<String, String>, val gui: Pair<String, String>,
@@ -347,8 +322,8 @@ private val F_DESCRIPTIONS = listOf(
 )
 
 /**
- * Full Mac layout in six rows, edge to edge within the space it is given: F-row (media / F-keys
- * switch, esc, F1–F12 or media icons, lock), number row, three letter rows, modifiers + space with
+ * Full Mac layout in six rows, edge to edge within the space it is given: F-row (esc, F1–F12 or
+ * media icons, media / F-keys switch, lock), number row, three letter rows, modifiers + space with
  * the inverted-T arrows at the far end. Caps Lock shows its state on its own LED; no header.
  *
  * The caller places it inside the display-cutout-safe area (the keys must never sit under a
@@ -375,9 +350,10 @@ fun RemoteKeyboard(
     CompositionLocalProvider(LocalDense provides dense) {
     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(GAP.dp)) {
         KeyRow {
-            FRowSwitch(c, 1.5f)
-            HidKey(c, Hid.ESC, 1.2f, "esc")
+            // esc in the corner where it belongs; the media / F-keys switch sits at the far end, by lock.
+            HidKey(c, Hid.ESC, 1.3f, "esc")
             for (i in 0 until 12) FunctionKey(c, i)
+            FRowSwitch(c, 1.5f)
             KeyCap(
                 Modifier.weight(1f).fillMaxHeight().semantics { contentDescription = "lock screen"; role = Role.Button },
                 onDown = { c.action("lock") },
@@ -448,7 +424,7 @@ private fun ColumnScope.KeyRow(content: @Composable RowScope.() -> Unit) {
 }
 
 /**
- * The media / F-keys switch at the start of the F-row: a key-sized two-segment control, the active
+ * The media / F-keys switch at the end of the F-row (before lock): a key-sized two-segment control, the active
  * segment in the inverted (latched) fill. Follows fn, so the F-row and the switch always agree.
  */
 @Composable
@@ -570,23 +546,12 @@ private fun ArrowKey(c: RemoteKeyboardController, hid: Int, icon: ImageVector, d
 
 @Composable
 private fun RowScope.ModifierKey(c: RemoteKeyboardController, m: ModKey, weight: Float, label: String, symbol: String = "") {
-    val st = c.state(m)
-    val look = when (st) {
-        ModState.Off -> Look.Normal
-        ModState.OneShot -> Look.Latched
-        ModState.Locked -> Look.Locked
-    }
+    // Held only while touched, like a hardware key: the key's own pressed look is the whole state.
     KeyCap(
-        Modifier.weight(weight).fillMaxHeight().semantics {
-            role = Role.Button
-            stateDescription = when (st) {
-                ModState.Off -> "off"
-                ModState.OneShot -> "on for next key"
-                ModState.Locked -> "locked"
-            }
-        },
-        look = look,
-        onDown = { c.tapModifier(m) },
+        Modifier.weight(weight).fillMaxHeight().semantics { role = Role.Button },
+        haptic = HapticFeedbackConstants.VIRTUAL_KEY,
+        onDown = { c.modifierDown(m) },
+        onUp = { c.modifierUp(m) },
     ) { fg -> WordFace(label, fg, symbol) }
 }
 
@@ -615,15 +580,17 @@ private fun RowScope.CapsKey(c: RemoteKeyboardController, weight: Float) {
 }
 
 /**
- * A key surface: down on touch, up on release or cancellation (so keys can never stick). Finger
- * down, latched and locked all show the same inverted fill (light neutral key, dark label);
- * locked adds a short bar at the bottom. 90 ms colour transition, none with reduced motion.
+ * A key surface: down on touch, up on release or cancellation (so keys can never stick). Each key
+ * tracks its own finger, so several keys can be held at once (⌘ + tab). Finger down and Caps on
+ * show the same inverted fill (light neutral key, dark label). 90 ms colour transition, none with
+ * reduced motion.
  */
 @Composable
 private fun KeyCap(
     modifier: Modifier,
     look: Look = Look.Normal,
     radius: Dp = 8.dp,
+    haptic: Int = HapticFeedbackConstants.KEYBOARD_TAP,
     onDown: () -> Unit,
     onUp: () -> Unit = {},
     content: @Composable (fg: Color) -> Unit,
@@ -648,7 +615,7 @@ private fun KeyCap(
                     val d = awaitFirstDown()
                     d.consume()
                     pressed = true
-                    view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                    view.performHapticFeedback(haptic)
                     try {
                         down()
                         while (true) {
@@ -665,12 +632,6 @@ private fun KeyCap(
             },
     ) {
         content(fg)
-        if (look == Look.Locked) {
-            Box(
-                Modifier.align(Alignment.BottomCenter).padding(bottom = if (LocalDense.current) 2.dp else 4.dp).width(16.dp).height(3.dp)
-                    .clip(RoundedCornerShape(2.dp)).background(fg),
-            )
-        }
     }
 }
 

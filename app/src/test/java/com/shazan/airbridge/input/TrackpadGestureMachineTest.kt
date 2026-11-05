@@ -3,13 +3,13 @@ package com.shazan.airbridge.input
 import com.shazan.airbridge.input.GestureIntent.Click
 import com.shazan.airbridge.input.GestureIntent.DragEnd
 import com.shazan.airbridge.input.GestureIntent.DragStart
-import com.shazan.airbridge.input.GestureIntent.MultiTap
+import com.shazan.airbridge.input.GestureIntent.FirmPress
 import com.shazan.airbridge.input.GestureIntent.Move
 import com.shazan.airbridge.input.GestureIntent.Zoom
 import com.shazan.airbridge.input.GestureIntent.Pinch
 import com.shazan.airbridge.input.GestureIntent.ResetAll
 import com.shazan.airbridge.input.GestureIntent.Scroll
-import com.shazan.airbridge.input.GestureIntent.ThreeFingerSwipe
+import com.shazan.airbridge.input.GestureIntent.Swipe
 import com.shazan.airbridge.input.TouchAction.CANCEL
 import com.shazan.airbridge.input.TouchAction.DOWN
 import com.shazan.airbridge.input.TouchAction.MOVE
@@ -30,7 +30,7 @@ class TrackpadGestureMachineTest {
         m = TrackpadGestureMachine(cfg) { out += it }
     }
 
-    private fun ev(id: Long, a: TouchAction, x: Float, y: Float, t: Long) = m.onTouch(id, a, x, y, t)
+    private fun ev(id: Long, a: TouchAction, x: Float, y: Float, t: Long, p: Float = Float.NaN) = m.onTouch(id, a, x, y, t, p)
     private fun clicks() = out.filterIsInstance<Click>()
     private fun tap(id: Long, t: Long, x: Float = 100f, y: Float = 100f, dur: Long = 60) {
         ev(id, DOWN, x, y, t); ev(id, UP, x, y, t + dur)
@@ -136,33 +136,45 @@ class TrackpadGestureMachineTest {
         assertEquals(listOf(Click(0, 1)), out)
     }
 
-    @Test fun threeFingerSwipeFiresExactlyOnce() {
+    @Test fun threeFingersDoNothingAtAll() {
+        // Swipe, tap and pinch with three fingers: Android skins own those, so the pad ignores them.
         ev(1, DOWN, 100f, 300f, 0); ev(2, DOWN, 200f, 300f, 5); ev(3, DOWN, 300f, 300f, 10)
-        for (i in 1..30) {
-            val t = 10L + i * 16
-            for (id in 1L..3L) ev(id, MOVE, id * 100f + i * 15f, 300f, t)
-        }
+        for (i in 1..30) for (id in 1L..3L) ev(id, MOVE, id * 100f + i * 15f, 300f, 10L + i * 16)
         for (id in 1L..3L) ev(id, UP, id * 100f + 450f, 300f, 600)
-        assertEquals(listOf(ThreeFingerSwipe(SwipeDir.RIGHT)), out)
+        ev(1, DOWN, 100f, 300f, 800); ev(2, DOWN, 200f, 300f, 805); ev(3, DOWN, 300f, 300f, 810)
+        for (id in 1L..3L) ev(id, UP, id * 100f, 300f, 880)
+        assertTrue("got $out", out.isEmpty())
     }
 
-    @Test fun threeFingerSwipeUp() {
-        ev(1, DOWN, 100f, 300f, 0); ev(2, DOWN, 200f, 300f, 0); ev(3, DOWN, 300f, 300f, 0)
-        for (i in 1..12) for (id in 1L..3L) ev(id, MOVE, id * 100f, 300f - i * 20f, i * 16L)
-        assertEquals(listOf(ThreeFingerSwipe(SwipeDir.UP)), out)
-    }
-
-    @Test fun threeFingerTapIsLookUpOnce() {
-        ev(1, DOWN, 100f, 300f, 0); ev(2, DOWN, 200f, 300f, 5); ev(3, DOWN, 300f, 300f, 10)
-        for (id in 1L..3L) ev(id, UP, id * 100f, 300f, 80)
-        assertEquals(listOf(MultiTap(3)), out)
-        assertEquals(0, clicks().size)
-    }
-
-    @Test fun slowThreeFingerRestIsNotATap() {
-        ev(1, DOWN, 100f, 300f, 0); ev(2, DOWN, 200f, 300f, 5); ev(3, DOWN, 300f, 300f, 10)
-        for (id in 1L..3L) ev(id, UP, id * 100f, 300f, 600)
+    @Test fun firmPressIsAForceClickInsteadOfATap() {
+        m.firmPressAt = 0.6f
+        ev(1, DOWN, 100f, 100f, 0, p = 0.3f)
+        ev(1, MOVE, 100f, 100f, 40, p = 0.45f)
         assertTrue(out.isEmpty())
+        ev(1, MOVE, 101f, 100f, 80, p = 0.7f)
+        ev(1, MOVE, 101f, 100f, 100, p = 0.8f) // once only
+        ev(1, UP, 101f, 100f, 140, p = 0.2f)
+        m.tick(2_000)
+        assertEquals(listOf(FirmPress), out)
+        assertTrue(m.lastWasFirm)
+    }
+
+    @Test fun lightTapStaysATapAndRecordsItsPeak() {
+        m.firmPressAt = 0.6f
+        ev(1, DOWN, 100f, 100f, 0, p = 0.3f)
+        ev(1, MOVE, 100f, 100f, 30, p = 0.4f)
+        ev(1, UP, 100f, 100f, 60, p = 0.1f)
+        assertEquals(listOf(Click(0, 1)), out)
+        assertEquals(0.4f, m.peakPressure, 0.0001f)
+        assertEquals(1, m.lastTouchFingers)
+    }
+
+    @Test fun firmPressWhileMovingIsJustAMove() {
+        m.firmPressAt = 0.6f
+        ev(1, DOWN, 100f, 100f, 0, p = 0.3f)
+        ev(1, MOVE, 140f, 100f, 30, p = 0.3f)
+        ev(1, MOVE, 160f, 100f, 60, p = 0.9f)
+        assertTrue(out.none { it == FirmPress })
     }
 
     @Test fun twoFingerSpreadZoomsInStepByStep() {
@@ -217,8 +229,8 @@ class TrackpadGestureMachineTest {
         val pos = fingersDown(5)
         moveAll(pos, 20, 0f, -20f)
         liftAll(pos, 600)
-        assertEquals(1, out.filterIsInstance<ThreeFingerSwipe>().size)
-        assertEquals(SwipeDir.UP, out.filterIsInstance<ThreeFingerSwipe>().first().dir)
+        assertEquals(1, out.filterIsInstance<Swipe>().size)
+        assertEquals(SwipeDir.UP, out.filterIsInstance<Swipe>().first().dir)
     }
 
     @Test fun longPressDragStartsAndEnds() {
@@ -335,19 +347,19 @@ class TrackpadGestureMachineTest {
         val pos = fingersDown(4)
         moveAll(pos, 20, 0f, -20f)
         liftAll(pos, 600)
-        assertEquals(listOf(ThreeFingerSwipe(SwipeDir.UP, 4)), out)
+        assertEquals(listOf(Swipe(SwipeDir.UP, 4)), out)
         assertEquals("mission_control", TrackpadSender.swipeAction(SwipeDir.UP))
     }
 
-    @Test fun threeAndFourFingerSwipesMapToTheSameActions() {
-        for (n in listOf(3, 4)) for (d in SwipeDir.entries) {
+    @Test fun fourAndFiveFingerSwipesMapToTheSameActions() {
+        for (n in listOf(4, 5)) for (d in SwipeDir.entries) {
             out.clear()
             m = TrackpadGestureMachine(cfg) { out += it }
             val pos = fingersDown(n)
             val (dx, dy) = when (d) { SwipeDir.UP -> 0f to -20f; SwipeDir.DOWN -> 0f to 20f; SwipeDir.LEFT -> -20f to 0f; SwipeDir.RIGHT -> 20f to 0f }
             moveAll(pos, 15, dx, dy)
             liftAll(pos, 600)
-            assertEquals("$n fingers $d", listOf(ThreeFingerSwipe(d, n)), out)
+            assertEquals("$n fingers $d", listOf(Swipe(d, n)), out)
         }
         assertEquals("app_expose", TrackpadSender.swipeAction(SwipeDir.DOWN))
         assertEquals("desktop_left", TrackpadSender.swipeAction(SwipeDir.RIGHT))
@@ -389,6 +401,28 @@ class TrackpadGestureMachineTest {
         ev(4, DOWN, 400f, 300f, 30)
         ev(4, DOWN, 400f, 300f, 31) // duplicate DOWN for the same id is not a fifth finger
         for (i in 1..12) for (id in 1L..4L) ev(id, MOVE, id * 100f, 300f + i * 20f, 40 + i * 16L)
-        assertEquals(listOf(ThreeFingerSwipe(SwipeDir.DOWN, 4)), out)
+        assertEquals(listOf(Swipe(SwipeDir.DOWN, 4)), out)
+    }
+
+    @Test fun fingersLandingOneByOneStillGiveAFourFingerSwipe() {
+        // First finger moves the cursor a bit, then two, three, four land: the swipe still fires.
+        ev(1, DOWN, 100f, 300f, 0); ev(1, MOVE, 130f, 300f, 20)
+        ev(2, DOWN, 200f, 300f, 40); ev(3, DOWN, 300f, 300f, 60); ev(4, DOWN, 400f, 300f, 80)
+        for (i in 1..12) {
+            ev(1, MOVE, 130f - i * 20f, 300f, 90 + i * 16L)
+            for (id in 2L..4L) ev(id, MOVE, id * 100f - i * 20f, 300f, 90 + i * 16L)
+        }
+        assertEquals(listOf(Swipe(SwipeDir.LEFT, 4)), out.filterNot { it is Move })
+        assertEquals("desktop_right", TrackpadSender.swipeAction(SwipeDir.LEFT))
+    }
+
+    @Test fun scrollThatGainsTwoMoreFingersBecomesAFourFingerSwipe() {
+        ev(1, DOWN, 100f, 300f, 0); ev(2, DOWN, 200f, 300f, 5)
+        for (i in 1..4) { ev(1, MOVE, 100f, 300f - i * 10f, i * 16L); ev(2, MOVE, 200f, 300f - i * 10f, i * 16L) }
+        assertTrue(out.any { it is Scroll })
+        out.clear()
+        ev(3, DOWN, 300f, 260f, 100); ev(4, DOWN, 400f, 260f, 110)
+        for (i in 1..12) for (id in 1L..4L) ev(id, MOVE, id * 100f, 260f - i * 20f, 120 + i * 16L)
+        assertEquals(listOf(Swipe(SwipeDir.UP, 4)), out)
     }
 }

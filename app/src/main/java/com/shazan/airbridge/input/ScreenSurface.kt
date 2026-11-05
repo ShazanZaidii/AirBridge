@@ -33,6 +33,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.input.pointer.PointerInputScope
+import androidx.compose.ui.input.pointer.motionEventSpy
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
@@ -51,6 +52,7 @@ import kotlin.math.max
  *
  * @param supported the peer advertises `mirror_source`.
  */
+@OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
 @Composable
 fun MirrorScreen(
     sink: MirrorSink,
@@ -101,14 +103,18 @@ fun MirrorScreen(
             )
         }
         // Touch layer over the whole area (letterbox included; points clamp to the picture edge).
+        val pressure = remember { PressureFeed() }
         Box(
-            Modifier.fillMaxSize().systemGestureExclusion().pointerInput(sender) {
-                screenGestures(
-                    sender, { currentRect }, { currentInfo },
-                    haptic = { view.performHapticFeedback(it) },
-                    onSystemTookGesture = OsGestureGuard::onLoss,
-                )
-            },
+            Modifier.fillMaxSize().systemGestureExclusion()
+                .motionEventSpy(pressure::onMotionEvent)
+                .pointerInput(sender) {
+                    screenGestures(
+                        sender, { currentRect }, { currentInfo },
+                        haptic = { view.performHapticFeedback(it) },
+                        onSystemTookGesture = OsGestureGuard::onLoss,
+                        pressure = pressure,
+                    )
+                },
         )
 
         when (status.phase) {
@@ -191,7 +197,9 @@ suspend fun PointerInputScope.screenGestures(
     info: () -> MirrorInfo?,
     haptic: (Int) -> Unit,
     onSystemTookGesture: (fingers: Int) -> Unit = {},
+    pressure: PressureFeed? = null,
 ) {
+    val loss = MultiFingerLossDetector(onLoss = onSystemTookGesture)
     fun nx(x: Float) = rect().let { (x - it.left) / max(1f, it.width) }
     fun ny(y: Float) = rect().let { (y - it.top) / max(1f, it.height) }
     val machine = ScreenGestureMachine(
@@ -200,6 +208,10 @@ suspend fun PointerInputScope.screenGestures(
             longPressMs = viewConfiguration.longPressTimeoutMillis,
             doubleTapMs = viewConfiguration.doubleTapTimeoutMillis,
             doubleTapSlopPx = 40.dp.toPx(),
+            swipePx = 56.dp.toPx(),
+            pinchPx = 40.dp.toPx(),
+            zoomStartPx = 16.dp.toPx(),
+            zoomStepPx = 24.dp.toPx(),
         ),
     ) { i ->
         when (i) {
@@ -223,16 +235,36 @@ suspend fun PointerInputScope.screenGestures(
                 val k = (info()?.w?.toFloat() ?: rect().width) / max(1f, rect().width)
                 sender.scroll(i.dx * k, i.dy * k)
             }
+            is ScreenIntent.Zoom -> {
+                sender.action(if (i.inward) "zoom_out" else "zoom_in")
+                haptic(HapticFeedbackConstants.CLOCK_TICK)
+            }
+            is ScreenIntent.Swipe -> {
+                loss.markHandled()
+                sender.action(TrackpadSender.swipeAction(i.dir))
+                haptic(HapticFeedbackConstants.CONFIRM)
+            }
+            is ScreenIntent.Pinch -> {
+                loss.markHandled()
+                sender.action(TrackpadSender.pinchAction(i.spread))
+                haptic(HapticFeedbackConstants.CONFIRM)
+            }
+            is ScreenIntent.FirmPress -> {
+                sender.pointAt(nx(i.x), ny(i.y))
+                sender.flush(force = true) // the pointer must be there before the force click
+                sender.action(TrackpadSender.FIRM_PRESS_ACTION)
+                haptic(HapticFeedbackConstants.LONG_PRESS)
+            }
             ScreenIntent.ResetAll -> sender.button(false)
         }
     }
-    // Screen mode ignores 3+ fingers itself, so any such touch the system cancels was taken by it.
-    val loss = MultiFingerLossDetector(onLoss = onSystemTookGesture)
     val hook: () -> Unit = { machine.reset(); loss.reset() }
+    pressure?.listener = { p -> machine.onPressure(p); sender.flush() }
     sender.addResetHook(hook)
     try {
         awaitPointerEventScope {
             while (true) {
+                if (machine.isIdle) machine.firmPressAt = FirmPress.threshold()
                 val now = SystemClock.uptimeMillis()
                 val deadline = machine.nextDeadline()
                 val wait: Long? = when {
@@ -242,16 +274,22 @@ suspend fun PointerInputScope.screenGestures(
                 }
                 val event = if (wait == null) awaitPointerEvent()
                 else withTimeoutOrNull(wait) { awaitPointerEvent() }
-                if (event != null) feedPointerEvent(event) { id, a, x, y, t ->
+                if (event != null) feedPointerEvent(event) { id, a, x, y, t, pr ->
                     loss.onTouch(id, a, t)
-                    machine.onTouch(id, a, x, y, t)
+                    machine.onTouch(id, a, x, y, t, pr)
+                    if (a == TouchAction.UP && machine.isIdle) {
+                        FirmPress.touchEnded(machine.lastTouchFingers, machine.peakPressure, machine.lastWasFirm)
+                    }
                 }
-                loss.tick(SystemClock.uptimeMillis())
-                machine.tick(SystemClock.uptimeMillis())
+                // Event time while events flow, wall clock only after a timeout (see trackpadGestures).
+                val t = event?.changes?.maxOfOrNull { it.uptimeMillis } ?: SystemClock.uptimeMillis()
+                loss.tick(t)
+                machine.tick(t)
                 sender.flush()
             }
         }
     } finally {
+        pressure?.listener = null
         sender.removeResetHook(hook)
         machine.reset()
         sender.flush(force = true)

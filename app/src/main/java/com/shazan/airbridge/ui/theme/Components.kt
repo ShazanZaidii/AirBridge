@@ -178,21 +178,26 @@ fun toneColor(tone: ChipTone): Color {
     }
 }
 
-/** Live status pill: dot + label (never colour alone). Colour changes animate (200 ms). */
+/**
+ * Live status: a small dot + a plain label (never colour alone). Quiet on purpose: colour only in
+ * the dot, the label stays neutral unless something is wrong. Colour changes animate (200 ms).
+ */
 @Composable
 fun StatusChip(label: String, tone: ChipTone, modifier: Modifier = Modifier) {
     val target = toneColor(tone)
     val c by animateColorAsState(target, tween(200), label = "chip")
     Row(
         modifier
-            .background(c.copy(alpha = 0.16f), CircleShape)
-            .padding(horizontal = 10.dp, vertical = Dimens.xs)
+            .padding(vertical = 2.dp)
             .clearAndSetSemantics { contentDescription = "Status: $label" },
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(Modifier.size(Dimens.sm).background(c, CircleShape))
+        Box(Modifier.size(7.dp).background(c, CircleShape))
         Spacer(Modifier.width(6.dp))
-        Text(label, style = MaterialTheme.typography.labelMedium, color = c, maxLines = 1)
+        Text(
+            label, style = MaterialTheme.typography.labelMedium, maxLines = 1,
+            color = if (tone == ChipTone.DANGER) c else MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
@@ -244,8 +249,8 @@ fun SwitchRow(title: String, subtitle: String?, checked: Boolean, onChange: (Boo
         Switch(
             checked = checked, onCheckedChange = null, enabled = enabled,
             colors = SwitchDefaults.colors(
-                checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
-                checkedTrackColor = MaterialTheme.colorScheme.primary,
+                checkedThumbColor = OnAccent,
+                checkedTrackColor = Accent,
                 uncheckedThumbColor = MaterialTheme.colorScheme.onSurfaceVariant,
                 uncheckedTrackColor = MaterialTheme.colorScheme.surfaceVariant,
                 uncheckedBorderColor = MaterialTheme.colorScheme.outline,
