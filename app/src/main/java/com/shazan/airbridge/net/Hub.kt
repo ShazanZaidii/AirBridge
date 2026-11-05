@@ -179,8 +179,8 @@ object Hub : PeerBus.Transport {
         if (pairingSession === s) { pairingSession = null; _pairing.value = null }
         if (s.isPairing) _events.tryEmit(NetEvent.PairResult(true, s.peerName))
         peersChanged()
-        // ctl_target flipped during this handshake: its hello is already stale.
-        if (s.advertisedTarget != null && s.advertisedTarget != Protocol.targetAvailable()) CapsRefresh.poke()
+        // ctl_target / type_target flipped during this handshake: its hello is already stale.
+        if (s.advertisedDynamic.let { it != null && it != Protocol.dynamicCaps() }) CapsRefresh.poke()
         LinkManager.onSessionReady(s) // after the old session was retired: a held xfer_offer goes on [s]
     }
 

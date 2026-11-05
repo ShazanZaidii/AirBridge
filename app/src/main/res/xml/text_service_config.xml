@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Optional service "AirBridge Typing & Clipboard" (AirBridgeTextService). Everything here is the
+  minimum the screen-content features need; keep it that way (each change switches the service off
+  after an update).
+
+  canRetrieveWindowContent  TargetKeys: find the focused field (findFocus / rootInActiveWindow),
+                            read its text and selection, ACTION_SET_TEXT / SET_SELECTION / COPY /
+                            CUT / PASTE / FOCUS. ClipboardSync: AccessibilityEvent.getSource() of the
+                            SystemUI clipboard overlay.
+  typeViewClicked           ClipboardSync: a tap on a "Copy"/"Cut" action (the label only).
+  typeWindowStateChanged    ClipboardSync: the SystemUI clipboard overlay appearing (Android 13+).
+  flagInputMethodEditor     TargetKeys (API 33+): getInputMethod() is null without it. It is what
+                            types into fields ACTION_SET_TEXT can't handle (browsers, Compose, apps
+                            with input filters), sends real Enter/Tab/arrow/Backspace key events and
+                            keeps the editor's undo and composition intact.
+
+  Deliberately absent: flagRetrieveInteractiveWindows, flagIncludeNotImportantViews,
+  flagRequestFilterKeyEvents / canRequestFilterKeyEvents, touch exploration, isAccessibilityTool.
+-->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeViewClicked|typeWindowStateChanged"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagDefault|flagInputMethodEditor"
+    android:canRetrieveWindowContent="true"
+    android:description="@string/text_service_description"
+    android:notificationTimeout="100" />
