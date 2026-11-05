@@ -31,8 +31,9 @@ import com.shazan.airbridge.ui.theme.PlatformAvatar
 import com.shazan.airbridge.ui.theme.platformLabel
 
 /**
- * Invisible activity that reads the clipboard while focused and pushes it. This is the only
- * legal way to read the clipboard from the background on Android 10+ (tile, bubble, `copy`).
+ * Invisible activity that reads the clipboard while focused and pushes it (tile, notification action,
+ * and the fallback when [com.shazan.airbridge.net.ClipFocusWindow] cannot take focus: bubble, `copy`,
+ * automatic sync). Android 10+ only lets the focused app read the clipboard.
  */
 class SyncActivity : Activity() {
     private var done = false
@@ -48,9 +49,7 @@ class SyncActivity : Activity() {
         if (!hasFocus || done) return
         done = true
         val reason = intent.getStringExtra(ClipboardSync.EXTRA_REASON) ?: "manual"
-        val text = ClipboardSync.readText()
-        if (text != null) ClipboardSync.pushText(text, reason)
-        else if (reason != "copy") Toast.makeText(this, "Clipboard has no text", Toast.LENGTH_SHORT).show()
+        ClipboardSync.onFocusedRead(ClipboardSync.readClip(), reason)
         finishQuietly()
     }
 

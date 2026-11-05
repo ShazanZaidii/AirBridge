@@ -84,6 +84,7 @@ class AirBridgeService : Service() {
         bubble = FloatingBubble(this)
         BubbleController.onChange = { refreshBubble() }
         refreshBubble()
+        scope.launch { ClipboardSync.pending.collect { bubble?.setPending(it) } }
 
         scope.launch {
             combine(PairStore.peers, Hub.status) { p, s -> p to s }.collect { (peers, status) ->
@@ -129,6 +130,8 @@ class AirBridgeService : Service() {
             ACTION_REFRESH_BUBBLE -> refreshBubble()
             else -> {
                 if (!shouldRun(this)) { stopSelf(); return START_NOT_STICKY }
+                // Null intent = START_STICKY restart after the system killed us: copies made meanwhile were missed.
+                if (intent == null) ClipboardSync.markPending("service restarted")
                 WsClient.retryAllNow(unpause = true)
             }
         }
