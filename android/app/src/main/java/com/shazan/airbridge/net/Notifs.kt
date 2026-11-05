@@ -15,9 +15,11 @@ object Notifs {
     const val CH_XFER = "airbridge_transfers"
     const val CH_RESULT = "airbridge_results"
     const val CH_PAIR = "airbridge_pairing"
+    const val CH_CONTROL = "airbridge_control"
 
     const val ID_SERVICE = 1
     const val ID_NEARBY_REQUEST = 2
+    const val ID_CONTROL_UNAVAILABLE = 3
 
     fun init(ctx: Context) {
         val nm = ctx.getSystemService(NotificationManager::class.java) ?: return
@@ -27,6 +29,7 @@ object Notifs {
                 NotificationChannel(CH_XFER, "File transfer progress", NotificationManager.IMPORTANCE_LOW),
                 NotificationChannel(CH_RESULT, "File transfer results", NotificationManager.IMPORTANCE_DEFAULT),
                 NotificationChannel(CH_PAIR, "Pairing requests", NotificationManager.IMPORTANCE_HIGH),
+                NotificationChannel(CH_CONTROL, "Remote control setup", NotificationManager.IMPORTANCE_DEFAULT),
             )
         )
         // Channel ids used by v1 builds.

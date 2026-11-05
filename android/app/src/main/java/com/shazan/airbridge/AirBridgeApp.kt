@@ -19,6 +19,7 @@ class AirBridgeApp : Application() {
         Identity.init(this)
         PairStore.init(this)
         Notifs.init(this)
+        RemoteControlSetup.init(this)
         Hub.init(this)
         // Input half: routes control messages from PeerBus even before the accessibility service is on.
         InputRouter.install(this)

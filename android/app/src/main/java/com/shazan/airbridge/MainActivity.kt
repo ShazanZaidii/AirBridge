@@ -47,6 +47,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Devices
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.ErrorOutline
@@ -96,8 +97,10 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.shazan.airbridge.input.InputRouter
 import com.shazan.airbridge.net.ClipboardSync
 import com.shazan.airbridge.net.DiscoveredHost
+import com.shazan.airbridge.net.DisconnectBy
 import com.shazan.airbridge.net.Discovery
 import com.shazan.airbridge.net.Hub
 import com.shazan.airbridge.net.Identity
@@ -166,6 +169,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        // The phone may have been renamed in system settings while we were away.
+        if (Identity.refreshDefault()) Hub.broadcastName()
         if (AirBridgeService.isRunning) WsClient.retryAllNow(unpause = true)
     }
 
@@ -609,11 +614,14 @@ private fun DevicesScreen(
     val status by Hub.status.collectAsState()
     val transfers by Hub.transfers.collectAsState()
     val myName by Identity.nameFlow.collectAsState()
-    val suppress by BubbleController.reasons.collectAsState()
-    val reportedHolder by BubbleController.leaseHolder.collectAsState()
-    val lastInput by Hub.lastInputPeer.collectAsState()
-    val controller = if ("lease" in suppress) reportedHolder ?: lastInput else null
+    // The lease holder as the input half reports it: cleared the moment its session ends (§8.6).
+    val controller by InputRouter.controlledBy.collectAsState()
     var forgetting by remember { mutableStateOf<PairedPeer?>(null) }
+    val resumeTick = rememberResumeTick()
+    val serviceRunning by AirBridgeInputService.runningFlow.collectAsState()
+    val setupDismissed by RemoteControlSetup.cardDismissed.collectAsState()
+    // Re-checked on every resume (the user comes back from the system settings).
+    val accessibilityOff = remember(resumeTick, serviceRunning) { !AirBridgeInputService.isRunning }
 
     forgetting?.let { p ->
         AlertDialog(
@@ -635,6 +643,16 @@ private fun DevicesScreen(
         },
     ) {
         LazyColumn(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(Dimens.sm)) {
+            if (accessibilityOff && !setupDismissed && paired.isNotEmpty()) item(key = "a11y") {
+                RemoteControlSetupCard(
+                    noun = RemoteControlSetup.controllerNoun(),
+                    onOpen = {
+                        try { ctx.startActivity(RemoteControlSetup.settingsIntent()) }
+                        catch (_: Exception) { toast(ctx, "Not available on this device") }
+                    },
+                    onDismiss = { RemoteControlSetup.dismissCard() },
+                )
+            }
             item {
                 Text("This phone · $myName", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -656,7 +674,14 @@ private fun DevicesScreen(
                     controllingYou = st == PeerStatus.CONNECTED && controller == peer.id,
                     onForget = { forgetting = peer },
                     onTrackpad = {
-                        ctx.startActivity(Intent(ctx, TrackpadActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP))
+                        ctx.startActivity(
+                            Intent(ctx, TrackpadActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                                .putExtra(TrackpadActivity.EXTRA_PEER, peer.id),
+                        )
+                    },
+                    onDisconnect = { WsClient.disconnect(peer.id) },
+                    onConnect = {
+                        if (!WsClient.connect(peer.id)) AirBridgeService.start(ctx)
                     },
                 )
             }
@@ -666,16 +691,30 @@ private fun DevicesScreen(
 }
 
 @Composable
-private fun DeviceCard(peer: PairedPeer, status: PeerStatus, controllingYou: Boolean, onForget: () -> Unit, onTrackpad: () -> Unit) {
+private fun DeviceCard(
+    peer: PairedPeer,
+    status: PeerStatus,
+    controllingYou: Boolean,
+    onForget: () -> Unit,
+    onTrackpad: () -> Unit,
+    onDisconnect: () -> Unit,
+    onConnect: () -> Unit,
+) {
     var menu by remember { mutableStateOf(false) }
+    val disconnected = status == PeerStatus.DISCONNECTED
     val (label, tone) = when {
         controllingYou -> "Controlling you" to ChipTone.INFO
         status == PeerStatus.CONNECTED -> "Connected" to ChipTone.SUCCESS
         status == PeerStatus.CONNECTING -> "Connecting" to ChipTone.WARNING
         status == PeerStatus.RECONNECTING -> "Reconnecting" to ChipTone.WARNING
+        disconnected && peer.disconnectedBy == DisconnectBy.PEER -> "Disconnected by ${peer.name}" to ChipTone.NEUTRAL
+        disconnected -> "Disconnected" to ChipTone.NEUTRAL
         else -> "Offline" to ChipTone.NEUTRAL
     }
     val desktop = peer.plat == "macos" || peer.plat == "windows" || peer.plat == "linux"
+    val lan = peer.via == "lan"
+    val canDisconnect = lan && (status == PeerStatus.CONNECTED || status == PeerStatus.CONNECTING || status == PeerStatus.RECONNECTING)
+    val canConnect = lan && (disconnected || status == PeerStatus.OFFLINE)
     AbCard {
         Row(
             Modifier.fillMaxWidth().padding(start = Dimens.md, top = Dimens.md, bottom = Dimens.md, end = Dimens.xs),
@@ -687,7 +726,13 @@ private fun DeviceCard(peer: PairedPeer, status: PeerStatus, controllingYou: Boo
                 Text(peer.name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text("${platformLabel(peer.plat)} · ${if (peer.via == "nearby") "Nearby" else "Wi-Fi"}",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                StatusChip(label, tone)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    StatusChip(label, tone, modifier = Modifier.weight(1f, fill = false))
+                    if (disconnected) {
+                        Spacer(Modifier.width(Dimens.xs))
+                        TextButton(onClick = onConnect, modifier = Modifier.height(Dimens.touch)) { Text("Connect") }
+                    }
+                }
             }
             Box {
                 IconButton(onClick = { menu = true }) { Icon(Icons.Outlined.MoreVert, contentDescription = "More options for ${peer.name}") }
@@ -696,12 +741,45 @@ private fun DeviceCard(peer: PairedPeer, status: PeerStatus, controllingYou: Boo
                         text = { Text("Use as trackpad") },
                         onClick = { menu = false; onTrackpad() },
                     )
+                    if (canDisconnect) DropdownMenuItem(
+                        text = { Text("Disconnect") },
+                        onClick = { menu = false; onDisconnect() },
+                    )
+                    if (canConnect) DropdownMenuItem(
+                        text = { Text("Connect") },
+                        onClick = { menu = false; onConnect() },
+                    )
                     DropdownMenuItem(
                         text = { Text("Forget device", color = AbTheme.status.danger) },
                         onClick = { menu = false; onForget() },
                     )
                 }
             }
+        }
+    }
+}
+
+/**
+ * Top-of-list warning while the accessibility service is off: the computer would otherwise try to
+ * move its cursor onto a phone that can't show it (§8.1 `unavailable`).
+ */
+@Composable
+private fun RemoteControlSetupCard(noun: String, onOpen: () -> Unit, onDismiss: () -> Unit) {
+    val warn = AbTheme.status.warning
+    AbCard(Modifier.border(1.dp, warn.copy(alpha = 0.6f), MaterialTheme.shapes.large)) {
+        Row(Modifier.fillMaxWidth().padding(start = Dimens.md, top = Dimens.md, end = Dimens.xs), verticalAlignment = Alignment.Top) {
+            Icon(Icons.Outlined.ErrorOutline, contentDescription = null, tint = warn,
+                modifier = Modifier.padding(top = 2.dp).size(Dimens.iconMd))
+            Spacer(Modifier.width(Dimens.md))
+            Column(Modifier.weight(1f).semantics(mergeDescendants = true) {}, verticalArrangement = Arrangement.spacedBy(Dimens.xs)) {
+                Text("$noun can't control this phone yet", style = MaterialTheme.typography.titleMedium)
+                Text("Turn on the AirBridge accessibility service so the cursor can appear and your clicks and typing reach this phone.",
+                    style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            IconButton(onClick = onDismiss) { Icon(Icons.Outlined.Close, contentDescription = "Dismiss") }
+        }
+        Row(Modifier.fillMaxWidth().padding(Dimens.md), horizontalArrangement = Arrangement.End) {
+            PrimaryButton("Turn on", onClick = onOpen, icon = Icons.Outlined.Settings)
         }
     }
 }
@@ -847,7 +925,7 @@ private fun SettingsScreen(onBack: () -> Unit, onOpenLinkDebug: () -> Unit) {
             title = { Text("Phone name") },
             text = {
                 OutlinedTextField(value = name, onValueChange = { name = it.take(64) }, singleLine = true,
-                    label = { Text("Shown on your other devices") }, placeholder = { Text(Build.MODEL) })
+                    label = { Text("Shown on your other devices") }, placeholder = { Text(Identity.defaultName) })
             },
             confirmButton = { TextButton(onClick = { Hub.renameSelf(name); renaming = false }) { Text("Save") } },
             dismissButton = { TextButton(onClick = { renaming = false }) { Text("Cancel") } },
