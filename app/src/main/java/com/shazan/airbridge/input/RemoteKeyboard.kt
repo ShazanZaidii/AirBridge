@@ -12,6 +12,7 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
@@ -29,11 +30,26 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.automirrored.filled.VolumeDown
+import androidx.compose.material.icons.automirrored.filled.VolumeOff
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
+import androidx.compose.material.icons.filled.BrightnessHigh
+import androidx.compose.material.icons.filled.BrightnessLow
+import androidx.compose.material.icons.filled.DarkMode
+import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.PowerSettingsNew
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -91,38 +107,60 @@ private object MainKeyTimer : KeyTimer {
  * tap = applies to the next key (sent down before it and up after it), double-tap = locked
  * (held on the peer) until tapped again. Main thread only.
  *
- * Caps Lock: tapping it flips [capsOn] at once (optimistic); the peer's `key_state.caps`, fed in
- * through [onPeerCaps], wins when it differs. Reports arriving within [CAPS_SETTLE_MS] of a local
- * tap may describe the state before it (rapid double taps), so they are applied when that window
- * ends rather than immediately, which keeps the LED from flickering. A peer that never reports
- * leaves the local toggle in place.
+ * F-row: media / system actions (§8.5) by default, F1–F12 HID keys in [fKeysMode]; holding `fn`
+ * (one-shot or locked) inverts that for the next F-row key, like a Mac.
+ *
+ * Caps Lock: tapping it flips [capsOn] at once (optimistic) and opens a [CAPS_GUARD_MS] window.
+ * Peer `key_state` reports (fed through [onPeerCaps], each with its own sequence number):
+ * - inside the window, a report that agrees with the new state confirms it and closes the window;
+ *   one that disagrees is ignored for now (it may describe the state before the tap);
+ * - when the window ends, the latest report received since the tap wins if it still disagrees
+ *   (the toggle really did not take, or the peer ended elsewhere);
+ * - outside any window, every report is adopted at once (Caps Lock pressed on the computer itself).
+ * A peer that never reports leaves the local toggle in place.
  */
 class RemoteKeyboardController(
     private val out: KeyOut,
     private val clock: () -> Long = { SystemClock.uptimeMillis() },
     private val timer: KeyTimer = MainKeyTimer,
+    private val actionOut: (String) -> Unit = {},
 ) {
-    constructor(sender: TrackpadSender) : this(KeyOut { hid, down, mods, rep, text -> sender.key(hid, down, mods, rep, text) })
+    constructor(sender: TrackpadSender) : this(
+        out = { hid, down, mods, rep, text -> sender.key(hid, down, mods, rep, text) },
+        actionOut = { sender.action(it) },
+    )
 
     companion object {
         const val LOCK_WINDOW_MS = 350L
         const val REPEAT_DELAY_MS = 400L
         const val REPEAT_EVERY_MS = 45L
-        const val CAPS_SETTLE_MS = 400L
+        const val CAPS_GUARD_MS = 600L
+
+        /** F1…F12 in media mode (§8.5 action names), Mac order. */
+        val F_ACTIONS = listOf(
+            "brightness_down", "brightness_up", "mission_control", "spotlight", "assistant", "dnd_toggle",
+            "media_prev", "media_play_pause", "media_next", "vol_mute", "vol_down", "vol_up",
+        )
     }
 
     private val states = mutableStateMapOf<ModKey, ModState>()
 
+    /** F-row sends F1–F12 (true) or media / system actions (false). */
+    var fKeysMode by mutableStateOf(false)
+
     /** Caps Lock as shown on the key's LED and sent in `mods`. */
     var capsOn by mutableStateOf(false)
         private set
-    /** Last `key_state.caps` seen from the peer (null = never reported). */
-    private var peerCaps: Boolean? = null
-    private var lastCapsTap = Long.MIN_VALUE / 2
-    /** Told about every local Caps toggle (keeps the router's per-peer state in step). */
-    var onCapsToggled: ((Boolean) -> Unit)? = null
+    private var lastReportSeq: Long? = null
+    /** Inside the post-tap window: disagreeing reports are held back. */
+    private var capsGuarded = false
+    /** Latest peer report received since the last local tap (null = none yet). */
+    private var reportSinceTap: Boolean? = null
 
-    private val settleCaps = Runnable { peerCaps?.let { capsOn = it } }
+    private val endCapsGuard = Runnable {
+        capsGuarded = false
+        reportSinceTap?.let { if (it != capsOn) capsOn = it }
+    }
 
     private val lastModTap = HashMap<ModKey, Long>()
     private val held = LinkedHashMap<Int, List<ModKey>>() // pressed hid → one-shot mods wrapped around it
@@ -142,6 +180,9 @@ class RemoteKeyboardController(
     private fun active(m: ModKey) = state(m) != ModState.Off
     val shiftActive: Boolean get() = active(ModKey.Shift)
     val fnActive: Boolean get() = active(ModKey.Fn)
+
+    /** The F-row currently shows (and sends) F1–F12: [fKeysMode] xor fn. */
+    val fRowIsFKeys: Boolean get() = fKeysMode xor fnActive
 
     /** Letter faces (and letter text) are upper case: Shift xor Caps Lock, as on a real keyboard. */
     val upperLetters: Boolean get() = shiftActive xor capsOn
@@ -178,25 +219,29 @@ class RemoteKeyboardController(
     /** Caps Lock key: optimistic local flip, then the HID tap. */
     fun capsLock() {
         capsOn = !capsOn
-        lastCapsTap = clock()
+        capsGuarded = true
+        reportSinceTap = null
         val b = bits()
         send(Hid.CAPS_LOCK, true, b)
         send(Hid.CAPS_LOCK, false, b)
-        onCapsToggled?.invoke(capsOn)
-        timer.cancel(settleCaps)
-        timer.post(CAPS_SETTLE_MS, settleCaps)
+        timer.cancel(endCapsGuard)
+        timer.post(CAPS_GUARD_MS, endCapsGuard)
     }
 
     /**
-     * The active peer's latest `key_state.caps` (null = it never reported). Safe to call on every
-     * recomposition: only a changed value is acted on.
+     * The active peer's latest `key_state.caps` and the sequence number of that message (both null
+     * = it never reported). Safe to call on every recomposition: a report is acted on once.
      */
-    fun onPeerCaps(reported: Boolean?) {
-        if (reported == peerCaps) return
-        peerCaps = reported
+    fun onPeerCaps(reported: Boolean?, seq: Long?) {
+        if (seq == lastReportSeq) return
+        lastReportSeq = seq
         if (reported == null) return
-        if (clock() - lastCapsTap < CAPS_SETTLE_MS) return // in flight: [settleCaps] reconciles
-        capsOn = reported
+        if (!capsGuarded) { capsOn = reported; return }
+        reportSinceTap = reported
+        if (reported == capsOn) { // confirmed: stop guarding, later reports apply at once
+            capsGuarded = false
+            timer.cancel(endCapsGuard)
+        }
     }
 
     /** Applies the fn layer; returns the HID actually pressed (pass it to [release]). */
@@ -238,6 +283,24 @@ class RemoteKeyboardController(
         if (state(ModKey.Fn) == ModState.OneShot) states[ModKey.Fn] = ModState.Off
     }
 
+    /**
+     * F-row key [index] (0 = F1). Sends the HID F-key when [fRowIsFKeys] (returns it: pass it to
+     * [release]), otherwise the media / system action (returns null). A one-shot fn is used up.
+     */
+    fun pressFunctionRow(index: Int): Int? {
+        if (fRowIsFKeys) {
+            // fn only selected the layer: the F-key must not carry it (fn has no HID usage anyway).
+            if (state(ModKey.Fn) == ModState.OneShot) states[ModKey.Fn] = ModState.Off
+            return press(Hid.F1 + index)
+        }
+        if (state(ModKey.Fn) == ModState.OneShot) states[ModKey.Fn] = ModState.Off
+        actionOut(F_ACTIONS[index])
+        return null
+    }
+
+    /** A §8.5 action (the lock key). */
+    fun action(name: String) = actionOut(name)
+
     /** Release every key and modifier on the peer. Call on pause, peer switch and keyboard close. */
     fun releaseAll() {
         timer.cancel(repeater)
@@ -256,12 +319,13 @@ class RemoteKeyboardController(
 
 // ------------------------------------------------------------------------------------ UI
 
-private const val ROW_GAP = 5
+private const val GAP = 5
 private const val PAD_H = 6
 private const val PAD_V = 5
 
-/** Smallest height that still gives every key a 48 dp target (5 rows, gaps, padding). */
-val RemoteKeyboardMinHeight: Dp = Tp.TouchTarget * 5 + (ROW_GAP * 4 + PAD_V * 2).dp
+/** Below this row height (Screen-mode sheet) faces drop their second line. */
+private val DENSE_ROW = 40.dp
+private val LocalDense = staticCompositionLocalOf { false }
 
 /** Normal key; Latched = pressed look (one-shot modifier, Caps on); Locked = pressed look + bar. */
 private enum class Look { Normal, Latched, Locked }
@@ -271,9 +335,24 @@ private data class Labels(
     val delete: String, val enter: String,
 )
 
+private val F_ICONS: List<ImageVector> = listOf(
+    Icons.Default.BrightnessLow, Icons.Default.BrightnessHigh, Icons.Default.GridView, Icons.Default.Search,
+    Icons.Default.Mic, Icons.Default.DarkMode, Icons.Default.SkipPrevious, Icons.Default.PlayArrow,
+    Icons.Default.SkipNext, Icons.AutoMirrored.Filled.VolumeOff, Icons.AutoMirrored.Filled.VolumeDown,
+    Icons.AutoMirrored.Filled.VolumeUp,
+)
+private val F_DESCRIPTIONS = listOf(
+    "brightness down", "brightness up", "Mission Control", "Spotlight", "dictation", "Do Not Disturb",
+    "previous track", "play or pause", "next track", "mute", "volume down", "volume up",
+)
+
 /**
- * Mac-style layout, edge to edge: number row (with esc), three letter rows, modifiers + space,
- * full-height inverted-T arrows. No header and no F-row: Caps Lock shows its state on its own LED.
+ * Full Mac layout in six rows, edge to edge within the space it is given: F-row (media / F-keys
+ * switch, esc, F1–F12 or media icons, lock), number row, three letter rows, modifiers + space with
+ * the inverted-T arrows at the far end. Caps Lock shows its state on its own LED; no header.
+ *
+ * The caller places it inside the display-cutout-safe area (the keys must never sit under a
+ * punch-hole camera); the background can extend under the cutout.
  */
 @Composable
 fun RemoteKeyboard(
@@ -291,71 +370,153 @@ fun RemoteKeyboard(
     }
     val c = controller
 
-    Column(
-        modifier = modifier.background(Tp.KeyboardBg).padding(horizontal = PAD_H.dp, vertical = PAD_V.dp),
-        verticalArrangement = Arrangement.spacedBy(ROW_GAP.dp),
-    ) {
-        KeyRow(Modifier.weight(1f)) {
-            HidKey(c, Hid.ESC, 1f, "esc")
+    BoxWithConstraints(modifier.background(Tp.KeyboardBg).padding(horizontal = PAD_H.dp, vertical = PAD_V.dp)) {
+    val dense = (maxHeight - (GAP * 5).dp) / 6 < DENSE_ROW
+    CompositionLocalProvider(LocalDense provides dense) {
+    Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(GAP.dp)) {
+        KeyRow {
+            FRowSwitch(c, 1.5f)
+            HidKey(c, Hid.ESC, 1.2f, "esc")
+            for (i in 0 until 12) FunctionKey(c, i)
+            KeyCap(
+                Modifier.weight(1f).fillMaxHeight().semantics { contentDescription = "lock screen"; role = Role.Button },
+                onDown = { c.action("lock") },
+            ) { fg -> Icon(Icons.Default.PowerSettingsNew, contentDescription = null, tint = fg, modifier = Modifier.size(18.dp)) }
+        }
+        KeyRow {
             CharKey(c, Hid.GRAVE)
             for (h in Hid.ONE..Hid.ZERO) CharKey(c, h)
             CharKey(c, Hid.MINUS)
             CharKey(c, Hid.EQUAL)
             HidKey(c, Hid.BACKSPACE, 1.6f, l.delete)
         }
-        KeyRow(Modifier.weight(1f)) {
-            HidKey(c, Hid.TAB, 1.8f, "tab")
+        KeyRow {
+            HidKey(c, Hid.TAB, 1.5f, "tab")
             for (ch in "QWERTYUIOP") CharKey(c, Hid.A + (ch - 'A'))
             CharKey(c, Hid.LBRACKET)
             CharKey(c, Hid.RBRACKET)
-            CharKey(c, Hid.BACKSLASH, 1.8f)
+            CharKey(c, Hid.BACKSLASH)
         }
-        KeyRow(Modifier.weight(1f)) {
-            CapsKey(c, 2f)
+        KeyRow {
+            CapsKey(c, 1.8f)
             for (ch in "ASDFGHJKL") CharKey(c, Hid.A + (ch - 'A'))
             CharKey(c, Hid.SEMICOLON)
             CharKey(c, Hid.QUOTE)
-            HidKey(c, Hid.ENTER, 2.6f, l.enter)
+            HidKey(c, Hid.ENTER, 1.8f, l.enter)
         }
-        // Bottom two rows share the arrow cluster so ↑ sits exactly above ↓ at full key height.
-        Row(Modifier.fillMaxWidth().weight(2f), horizontalArrangement = Arrangement.spacedBy(ROW_GAP.dp)) {
-            Column(Modifier.weight(12.6f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(ROW_GAP.dp)) {
-                KeyRow(Modifier.weight(1f)) {
-                    ModifierKey(c, ModKey.Shift, 2.6f, "shift", "⇧")
-                    for (ch in "ZXCVBNM") CharKey(c, Hid.A + (ch - 'A'))
-                    CharKey(c, Hid.COMMA)
-                    CharKey(c, Hid.PERIOD)
-                    CharKey(c, Hid.SLASH)
-                }
-                KeyRow(Modifier.weight(1f)) {
-                    ModifierKey(c, ModKey.Fn, 1f, "fn")
-                    ModifierKey(c, ModKey.Ctrl, 1.2f, l.ctrl.second, l.ctrl.first)
-                    ModifierKey(c, ModKey.Alt, 1.2f, l.alt.second, l.alt.first)
-                    ModifierKey(c, ModKey.Gui, 1.5f, l.gui.second, l.gui.first)
-                    HidKey(c, Hid.SPACE, if (mac) 5f else 6.2f, "", description = "space")
-                    ModifierKey(c, ModKey.Gui, 1.5f, l.gui.second, l.gui.first)
-                    if (mac) ModifierKey(c, ModKey.Alt, 1.2f, l.alt.second, l.alt.first)
-                }
-            }
-            Column(Modifier.weight(3f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(ROW_GAP.dp)) {
-                KeyRow(Modifier.weight(1f)) {
-                    ModifierKey(c, ModKey.Shift, 1f, "shift", "⇧")
-                    ArrowKey(c, Hid.UP, Icons.Default.KeyboardArrowUp, "up")
+        KeyRow {
+            ModifierKey(c, ModKey.Shift, 2.3f, "shift", "⇧")
+            for (ch in "ZXCVBNM") CharKey(c, Hid.A + (ch - 'A'))
+            CharKey(c, Hid.COMMA)
+            CharKey(c, Hid.PERIOD)
+            CharKey(c, Hid.SLASH)
+            ModifierKey(c, ModKey.Shift, 2.3f, "shift", "⇧")
+        }
+        KeyRow {
+            ModifierKey(c, ModKey.Fn, 1f, "fn")
+            ModifierKey(c, ModKey.Ctrl, 1.2f, l.ctrl.second, l.ctrl.first)
+            ModifierKey(c, ModKey.Alt, 1.2f, l.alt.second, l.alt.first)
+            ModifierKey(c, ModKey.Gui, 1.5f, l.gui.second, l.gui.first)
+            HidKey(c, Hid.SPACE, if (mac) 5f else 6.2f, "", description = "space")
+            ModifierKey(c, ModKey.Gui, 1.5f, l.gui.second, l.gui.first)
+            if (mac) ModifierKey(c, ModKey.Alt, 1.2f, l.alt.second, l.alt.first)
+            // Inverted T in the last row, like a MacBook: ← and → half height at the bottom,
+            // ↑ above ↓ in the middle column.
+            Row(Modifier.weight(3f).fillMaxHeight(), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                Column(Modifier.weight(1f).fillMaxHeight()) {
                     Spacer(Modifier.weight(1f))
+                    ArrowKey(c, Hid.LEFT, Icons.AutoMirrored.Filled.KeyboardArrowLeft, "left", Modifier.weight(1f))
                 }
-                KeyRow(Modifier.weight(1f)) {
-                    ArrowKey(c, Hid.LEFT, Icons.AutoMirrored.Filled.KeyboardArrowLeft, "left")
-                    ArrowKey(c, Hid.DOWN, Icons.Default.KeyboardArrowDown, "down")
-                    ArrowKey(c, Hid.RIGHT, Icons.AutoMirrored.Filled.KeyboardArrowRight, "right")
+                Column(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    ArrowKey(c, Hid.UP, Icons.Default.KeyboardArrowUp, "up", Modifier.weight(1f))
+                    ArrowKey(c, Hid.DOWN, Icons.Default.KeyboardArrowDown, "down", Modifier.weight(1f))
+                }
+                Column(Modifier.weight(1f).fillMaxHeight()) {
+                    Spacer(Modifier.weight(1f))
+                    ArrowKey(c, Hid.RIGHT, Icons.AutoMirrored.Filled.KeyboardArrowRight, "right", Modifier.weight(1f))
                 }
             }
         }
     }
+    }
+    }
 }
 
 @Composable
-private fun KeyRow(modifier: Modifier, content: @Composable RowScope.() -> Unit) {
-    Row(modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(ROW_GAP.dp), content = content)
+private fun ColumnScope.KeyRow(content: @Composable RowScope.() -> Unit) {
+    Row(Modifier.fillMaxWidth().weight(1f), horizontalArrangement = Arrangement.spacedBy(GAP.dp), content = content)
+}
+
+/**
+ * The media / F-keys switch at the start of the F-row: a key-sized two-segment control, the active
+ * segment in the inverted (latched) fill. Follows fn, so the F-row and the switch always agree.
+ */
+@Composable
+private fun RowScope.FRowSwitch(c: RemoteKeyboardController, weight: Float) {
+    val fKeys = c.fRowIsFKeys
+    val view = LocalView.current
+    val dense = LocalDense.current
+    val m = Modifier.weight(weight).fillMaxHeight().clip(RoundedCornerShape(8.dp)).background(Tp.KeyFace)
+            .semantics {
+                role = Role.Switch
+                contentDescription = "Function row"
+                stateDescription = if (fKeys) "F1 to F12" else "media keys"
+            }
+            .pointerInput(Unit) {
+                awaitEachGesture {
+                    awaitFirstDown().consume()
+                    view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                    c.fKeysMode = !c.fKeysMode
+                }
+            }
+            .padding(3.dp)
+    // Stacked when there is room, side by side in the short Screen-mode sheet.
+    if (dense) Row(m, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+        SwitchSegment("media", !fKeys, Modifier.weight(1f).fillMaxHeight())
+        SwitchSegment("F1–12", fKeys, Modifier.weight(1f).fillMaxHeight())
+    } else Column(m, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        SwitchSegment("media", !fKeys, Modifier.fillMaxWidth().weight(1f))
+        SwitchSegment("F1–F12", fKeys, Modifier.fillMaxWidth().weight(1f))
+    }
+}
+
+@Composable
+private fun SwitchSegment(text: String, selected: Boolean, modifier: Modifier) {
+    Box(
+        modifier.clip(RoundedCornerShape(5.dp))
+            .background(if (selected) Tp.KeyLatched else Color.Transparent),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text, fontSize = if (LocalDense.current) 9.sp else 10.sp, lineHeight = 11.sp, fontWeight = FontWeight.Medium, maxLines = 1, softWrap = false,
+            color = if (selected) Tp.OnKeyLatched else Tp.MutedForeground,
+        )
+    }
+}
+
+/** F-row key: media icon with a small "F n" caption, or the F-key name alone in F-keys mode. */
+@Composable
+private fun RowScope.FunctionKey(c: RemoteKeyboardController, index: Int) {
+    var pressed by remember { mutableStateOf<Int?>(null) }
+    val fKeys = c.fRowIsFKeys
+    KeyCap(
+        Modifier.weight(1f).fillMaxHeight().semantics {
+            contentDescription = if (fKeys) "F${index + 1}" else F_DESCRIPTIONS[index]
+        },
+        onDown = { pressed = c.pressFunctionRow(index) },
+        onUp = { pressed?.let { c.release(it) }; pressed = null },
+    ) { fg ->
+        if (fKeys) {
+            Text("F${index + 1}", color = fg, fontSize = 13.sp, fontWeight = FontWeight.Medium, maxLines = 1, softWrap = false)
+        } else if (LocalDense.current) {
+            Icon(F_ICONS[index], contentDescription = null, tint = fg, modifier = Modifier.size(15.dp))
+        } else {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Icon(F_ICONS[index], contentDescription = null, tint = fg, modifier = Modifier.size(16.dp))
+                Text("F${index + 1}", color = fg.copy(alpha = 0.62f), fontSize = 9.sp, lineHeight = 10.sp, maxLines = 1, softWrap = false)
+            }
+        }
+    }
 }
 
 /** Letter / symbol key. Letters follow Shift xor Caps; symbols swap to their shifted glyph with Shift. */
@@ -368,14 +529,17 @@ private fun RowScope.CharKey(c: RemoteKeyboardController, hid: Int, weight: Floa
         onUp = { pressed?.let { c.release(it) }; pressed = null },
     ) { fg ->
         val main = c.faceLabel(hid) ?: ""
+        val dense = LocalDense.current
         if (Hid.isLetter(hid)) {
-            Text(main, color = fg, fontSize = 20.sp, fontWeight = FontWeight.Medium)
+            Text(main, color = fg, fontSize = if (dense) 16.sp else 19.sp, fontWeight = FontWeight.Medium)
+        } else if (dense) {
+            Text(main, color = fg, fontSize = 15.sp, lineHeight = 16.sp, fontWeight = FontWeight.Medium)
         } else {
             // The other layer's glyph as a small hint above, like a printed key cap.
             val other = KeyMap.label(hid, !c.shiftActive) ?: ""
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(other, color = fg.copy(alpha = 0.62f), fontSize = 11.sp, lineHeight = 12.sp)
-                Text(main, color = fg, fontSize = 18.sp, lineHeight = 20.sp, fontWeight = FontWeight.Medium)
+                Text(other, color = fg.copy(alpha = 0.62f), fontSize = 10.sp, lineHeight = 11.sp)
+                Text(main, color = fg, fontSize = 16.sp, lineHeight = 18.sp, fontWeight = FontWeight.Medium)
             }
         }
     }
@@ -394,13 +558,14 @@ private fun RowScope.HidKey(c: RemoteKeyboardController, hid: Int, weight: Float
 }
 
 @Composable
-private fun RowScope.ArrowKey(c: RemoteKeyboardController, hid: Int, icon: ImageVector, description: String) {
+private fun ArrowKey(c: RemoteKeyboardController, hid: Int, icon: ImageVector, description: String, modifier: Modifier) {
     var pressed by remember { mutableStateOf<Int?>(null) }
     KeyCap(
-        Modifier.weight(1f).fillMaxHeight(),
+        modifier.fillMaxWidth(),
+        radius = 5.dp,
         onDown = { pressed = c.press(hid) },
         onUp = { pressed?.let { c.release(it) }; pressed = null },
-    ) { fg -> Icon(icon, contentDescription = description, tint = fg, modifier = Modifier.size(22.dp)) }
+    ) { fg -> Icon(icon, contentDescription = description, tint = fg, modifier = Modifier.size(18.dp)) }
 }
 
 @Composable
@@ -440,7 +605,8 @@ private fun RowScope.CapsKey(c: RemoteKeyboardController, weight: Float) {
         Box(Modifier.fillMaxSize()) {
             // The LED: a small dot, bright when on, dim when off. No halo.
             Box(
-                Modifier.align(Alignment.TopStart).padding(start = 8.dp, top = 8.dp).size(7.dp)
+                Modifier.align(Alignment.TopStart)
+                    .padding(start = 7.dp, top = if (LocalDense.current) 4.dp else 6.dp).size(7.dp)
                     .clip(CircleShape).background(if (on) Tp.LedOn else Tp.LedOff),
             )
             Box(Modifier.align(Alignment.Center)) { WordFace("caps lock", fg) }
@@ -457,6 +623,7 @@ private fun RowScope.CapsKey(c: RemoteKeyboardController, weight: Float) {
 private fun KeyCap(
     modifier: Modifier,
     look: Look = Look.Normal,
+    radius: Dp = 8.dp,
     onDown: () -> Unit,
     onUp: () -> Unit = {},
     content: @Composable (fg: Color) -> Unit,
@@ -474,7 +641,7 @@ private fun KeyCap(
     Box(
         contentAlignment = Alignment.Center,
         modifier = modifier
-            .clip(RoundedCornerShape(8.dp))
+            .clip(RoundedCornerShape(radius))
             .background(bg)
             .pointerInput(Unit) {
                 awaitEachGesture {
@@ -500,7 +667,7 @@ private fun KeyCap(
         content(fg)
         if (look == Look.Locked) {
             Box(
-                Modifier.align(Alignment.BottomCenter).padding(bottom = 6.dp).width(16.dp).height(3.dp)
+                Modifier.align(Alignment.BottomCenter).padding(bottom = if (LocalDense.current) 2.dp else 4.dp).width(16.dp).height(3.dp)
                     .clip(RoundedCornerShape(2.dp)).background(fg),
             )
         }
@@ -510,18 +677,26 @@ private fun KeyCap(
 /** Word label for special keys, with an optional symbol above it (⌘ command, ⇧ shift). */
 @Composable
 private fun WordFace(text: String, fg: Color, symbol: String = "") {
+    if (LocalDense.current) { // one line: "⇧ shift"
+        Text(
+            if (symbol.isNotEmpty() && text.isNotEmpty()) "$symbol $text" else symbol + text,
+            color = fg, fontSize = 11.sp, lineHeight = 12.sp, fontWeight = FontWeight.Medium,
+            maxLines = 1, softWrap = false,
+        )
+        return
+    }
     Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
         if (symbol.isNotEmpty()) {
-            Text(symbol, color = fg, fontSize = 15.sp, lineHeight = 16.sp)
+            Text(symbol, color = fg, fontSize = 14.sp, lineHeight = 15.sp)
         }
         if (text.isNotEmpty()) {
             Text(
                 text = text,
                 color = fg,
-                fontSize = if (text.length > 6) 12.sp else 13.sp,
+                fontSize = if (text.length > 6) 11.sp else 12.sp,
                 fontWeight = FontWeight.Medium,
                 textAlign = TextAlign.Center,
-                lineHeight = 14.sp,
+                lineHeight = 13.sp,
                 maxLines = 1,
                 softWrap = false,
             )

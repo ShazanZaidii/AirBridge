@@ -27,6 +27,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -152,6 +154,14 @@ class TrackpadActivity : ComponentActivity() {
             try { requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE } catch (_: Throwable) {}
         }
         WindowCompat.setDecorFitsSystemWindows(window, false)
+        // Edge to edge with the bars hidden: the window always reaches into the cutout band on the
+        // short edges (the default for targetSdk 35+ on Android 15+, explicit for older releases) and
+        // the content avoids it through WindowInsets.displayCutout. Consistent on every release.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            window.attributes = window.attributes.apply {
+                layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+            }
+        }
         hideSystemBars()
 
         val prefs = getSharedPreferences("AirBridgePrefs", Context.MODE_PRIVATE)
@@ -246,8 +256,8 @@ class TrackpadActivity : ComponentActivity() {
                 keyboard.releaseAll() // to the previous peer, before switching
                 sender.peerId = active?.id
             }
-            keyboard.onPeerCaps(active?.let { capsMap[it.id] })
-            keyboard.onCapsToggled = { on -> active?.let { InputRouter.setCapsOptimistic(it.id, on) } }
+            val caps = active?.let { capsMap[it.id] }
+            keyboard.onPeerCaps(caps?.on, caps?.seq)
         }
 
         // §5: the clipboard bubble hides while these screens are in front.
@@ -299,8 +309,12 @@ class TrackpadActivity : ComponentActivity() {
                 else mirror.stop()
             }
 
-            Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.displayCutout)) {
+            // Cutout handling: the bar and every surface stay out of the camera band; the keyboard's
+            // background runs under it while its keys fill exactly the camera-free width.
+            val safeSides = WindowInsets.displayCutout.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom)
+            Column(Modifier.fillMaxSize()) {
                 TopBar(
+                    modifier = Modifier.windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Top)),
                     desktops = desktops,
                     active = active,
                     wanted = wanted,
@@ -327,16 +341,17 @@ class TrackpadActivity : ComponentActivity() {
                 )
                 Box(Modifier.fillMaxWidth().weight(1f)) {
                     when (mode) {
-                        Mode.Trackpad -> TrackpadSurface(active, wanted, blocker, trackpadPrefs, Modifier.fillMaxSize().padding(12.dp))
+                        Mode.Trackpad -> TrackpadSurface(active, wanted, blocker, trackpadPrefs, Modifier.fillMaxSize().windowInsetsPadding(safeSides).padding(12.dp))
                         Mode.Keyboard -> Column(Modifier.fillMaxSize()) {
-                            if (!landscape) TrackpadSurface(active, wanted, blocker, trackpadPrefs, Modifier.fillMaxWidth().weight(1f).padding(12.dp))
+                            if (!landscape) TrackpadSurface(active, wanted, blocker, trackpadPrefs, Modifier.fillMaxWidth().weight(1f).windowInsetsPadding(safeSides).padding(12.dp))
                             KeyboardPanel(
                                 active,
                                 if (landscape) Modifier.fillMaxWidth().weight(1f)
                                 else Modifier.fillMaxWidth().height(portraitKeyboardHeight),
+                                safeSides,
                             )
                         }
-                        Mode.Screen -> Column(Modifier.fillMaxSize()) {
+                        Mode.Screen -> Column(Modifier.fillMaxSize().then(if (screenKeyboard) Modifier else Modifier.windowInsetsPadding(safeSides))) {
                             MirrorScreen(
                                 sink = mirror,
                                 sender = sender,
@@ -344,9 +359,10 @@ class TrackpadActivity : ComponentActivity() {
                                 supported = active?.let { "mirror_source" in it.caps } ?: false,
                                 showStats = showStats,
                                 onRetry = { mirrorRun++ },
-                                modifier = Modifier.fillMaxWidth().weight(1f),
+                                modifier = Modifier.fillMaxWidth().weight(1f)
+                                    .then(if (screenKeyboard) Modifier.windowInsetsPadding(safeSides.only(WindowInsetsSides.Horizontal)) else Modifier),
                             )
-                            if (screenKeyboard) KeyboardPanel(active, Modifier.fillMaxWidth().fillMaxHeight(0.5f))
+                            if (screenKeyboard) KeyboardPanel(active, Modifier.fillMaxWidth().fillMaxHeight(0.5f), safeSides)
                         }
                     }
                     // Keyboard / Screen modes: say clearly that nothing is being sent.
@@ -409,12 +425,13 @@ class TrackpadActivity : ComponentActivity() {
     }
 
     @Composable
-    private fun KeyboardPanel(active: PeerInfo?, modifier: Modifier) {
+    private fun KeyboardPanel(active: PeerInfo?, modifier: Modifier, safe: WindowInsets) {
+        // Background edge to edge (under the camera band too), keys only in the safe width.
         Column(modifier.background(Tp.KeyboardBg)) {
             RemoteKeyboard(
                 controller = keyboard,
                 platform = active?.platform ?: "macos",
-                modifier = Modifier.fillMaxWidth().weight(1f),
+                modifier = Modifier.fillMaxWidth().weight(1f).windowInsetsPadding(safe),
             )
         }
     }
@@ -450,6 +467,7 @@ class TrackpadActivity : ComponentActivity() {
 
     @Composable
     private fun TopBar(
+        modifier: Modifier,
         desktops: List<PeerInfo>,
         active: PeerInfo?,
         wanted: String?,
@@ -466,7 +484,7 @@ class TrackpadActivity : ComponentActivity() {
         onClose: () -> Unit,
     ) {
         Row(
-            Modifier.fillMaxWidth().height(Tp.BarHeight).background(Tp.Background).padding(horizontal = 8.dp),
+            Modifier.fillMaxWidth().background(Tp.Background).then(modifier).height(Tp.BarHeight).padding(horizontal = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {

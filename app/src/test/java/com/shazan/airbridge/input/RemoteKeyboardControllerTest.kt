@@ -30,29 +30,33 @@ class RemoteKeyboardControllerTest {
     }
 
     private val sent = mutableListOf<Sent>()
+    private val actions = mutableListOf<String>()
     private val timer = FakeTimer()
     private lateinit var c: RemoteKeyboardController
-    private val toggles = mutableListOf<Boolean>()
+    private var seq = 0L
 
     @Before fun setUp() {
-        sent.clear(); toggles.clear()
+        sent.clear(); actions.clear()
         c = RemoteKeyboardController(
             out = { hid, down, mods, rep, text -> sent += Sent(hid, down, mods, rep, text) },
             clock = { timer.now },
             timer = timer,
+            actionOut = { actions += it },
         )
-        c.onCapsToggled = { toggles += it }
     }
 
     private fun tapKey(hid: Int) { val h = c.press(hid); c.release(h) }
     private fun downOf(hid: Int) = sent.last { it.hid == hid && it.down }
+    /** A fresh `key_state` message from the peer. */
+    private fun report(on: Boolean) = c.onPeerCaps(on, ++seq)
+    /** The same message seen again (recomposition). */
+    private fun repeatLast(on: Boolean) = c.onPeerCaps(on, seq)
 
     // ---------------------------------------------------------------- caps lock
 
     @Test fun capsTapIsOptimisticAndSendsCapsHid() {
         c.capsLock()
         assertTrue(c.capsOn)
-        assertEquals(listOf(true), toggles)
         assertEquals(
             listOf(Sent(Hid.CAPS_LOCK, true, Mods.CAPS, false, null), Sent(Hid.CAPS_LOCK, false, Mods.CAPS, false, null)),
             sent,
@@ -60,73 +64,147 @@ class RemoteKeyboardControllerTest {
     }
 
     @Test fun peerThatNeverReportsKeepsLocalToggle() {
-        c.onPeerCaps(null)
+        c.onPeerCaps(null, null)
         c.capsLock()
         timer.advance(5_000)
-        c.onPeerCaps(null)
+        c.onPeerCaps(null, null)
         assertTrue(c.capsOn)
         c.capsLock()
         timer.advance(5_000)
         assertFalse(c.capsOn)
     }
 
-    @Test fun matchingPeerReportAfterOptimisticChangeDoesNotFlicker() {
-        c.onPeerCaps(false)
+    @Test fun peerThatStoppedReportingKeepsLocalToggle() {
+        report(false)
+        timer.advance(1_000)
+        c.capsLock()
+        timer.advance(5_000)
+        repeatLast(false) // only the old report, seen again on recomposition
+        assertTrue(c.capsOn)
+    }
+
+    @Test fun staleDisagreeingReportThenConfirmationStaysLit() {
+        report(false)
+        timer.advance(1_000)
         val seen = mutableListOf<Boolean>()
         c.capsLock(); seen += c.capsOn
-        // The router mirrors the optimistic value, then the Mac confirms it.
-        c.onPeerCaps(true); seen += c.capsOn
+        timer.advance(150)
+        report(false); seen += c.capsOn // stale read-back of the state before the tap
         timer.advance(50)
-        c.onPeerCaps(true); seen += c.capsOn
-        timer.advance(1_000); seen += c.capsOn
-        assertEquals(listOf(true, true, true, true), seen)
+        report(true); seen += c.capsOn // the Mac confirms
+        timer.advance(2_000); seen += c.capsOn
+        repeatLast(true); seen += c.capsOn
+        assertEquals(listOf(true, true, true, true, true), seen)
     }
 
-    @Test fun differingPeerReportIsAdoptedAfterSettleWindow() {
-        c.onPeerCaps(false)
+    @Test fun confirmingReportClosesTheWindowSoACorrectionAppliesAtOnce() {
+        report(false)
+        timer.advance(1_000)
         c.capsLock()
-        c.onPeerCaps(true) // router mirrors optimistic value
-        timer.advance(60)
-        c.onPeerCaps(false) // the Mac says the toggle did not take
-        assertTrue("held until the settle window ends", c.capsOn)
-        timer.advance(RemoteKeyboardController.CAPS_SETTLE_MS)
+        timer.advance(20)
+        report(true) // confirmed
+        timer.advance(200)
+        report(false) // the Mac corrects itself: it really is off
         assertFalse(c.capsOn)
     }
 
-    @Test fun staleReportDuringRapidDoubleTapDoesNotFlicker() {
-        c.onPeerCaps(false)
-        c.capsLock(); c.onPeerCaps(true)
-        timer.advance(80)
-        c.capsLock(); c.onPeerCaps(false)
+    @Test fun peerThatEndsElsewhereIsAdoptedAfterTheWindow() {
+        report(false)
+        timer.advance(1_000)
+        c.capsLock()
+        timer.advance(100)
+        report(false) // the toggle did not take
+        assertTrue("held during the window", c.capsOn)
+        timer.advance(RemoteKeyboardController.CAPS_GUARD_MS - 101)
+        assertTrue(c.capsOn)
+        timer.advance(1)
+        assertFalse("adopted when the window ends", c.capsOn)
+    }
+
+    @Test fun disagreeingReportAfterTheWindowIsAdoptedImmediately() {
+        report(false)
+        timer.advance(1_000)
+        c.capsLock()
+        timer.advance(RemoteKeyboardController.CAPS_GUARD_MS + 50)
+        assertTrue(c.capsOn) // no report during the window: local state stays
+        report(false)
         assertFalse(c.capsOn)
+    }
+
+    @Test fun capsToggledOnTheComputerIsAdoptedAtOnce() {
+        report(false)
+        timer.advance(1_000)
+        report(true) // physical Caps Lock pressed on the Mac
+        assertTrue(c.capsOn)
+        repeatLast(true) // same message again on recomposition: no-op
+        assertTrue(c.capsOn)
+        report(false)
+        assertFalse(c.capsOn)
+    }
+
+    @Test fun rapidDoubleTapIgnoresTheFirstTapsLateReport() {
+        report(false)
+        timer.advance(1_000)
+        c.capsLock()
+        timer.advance(80)
+        c.capsLock() // back off; the window restarts
         timer.advance(40)
-        c.onPeerCaps(true) // report for the first tap arrives late
+        report(true) // late report for the first tap
         assertFalse(c.capsOn)
         timer.advance(30)
-        c.onPeerCaps(false) // report for the second tap
+        report(false) // report for the second tap confirms
         assertFalse(c.capsOn)
         timer.advance(1_000)
-        assertFalse(c.capsOn)
-    }
-
-    @Test fun unsolicitedPeerReportIsAdoptedImmediately() {
-        c.onPeerCaps(false)
-        timer.advance(1_000)
-        c.onPeerCaps(true) // physical Caps Lock pressed on the Mac
-        assertTrue(c.capsOn)
-        c.onPeerCaps(true) // same value again on recomposition: no-op
-        assertTrue(c.capsOn)
-        c.onPeerCaps(false)
         assertFalse(c.capsOn)
     }
 
     @Test fun repeatedSameReportDoesNotUndoALaterLocalTap() {
-        c.onPeerCaps(false)
+        report(false)
         timer.advance(1_000)
-        c.capsLock() // no router mirroring: peer value stays false
+        c.capsLock()
         timer.advance(10)
-        c.onPeerCaps(false) // unchanged value from recomposition: ignored
+        repeatLast(false) // unchanged message from recomposition: ignored
+        timer.advance(2_000)
         assertTrue(c.capsOn)
+    }
+
+    // ---------------------------------------------------------------- F-row
+
+    @Test fun fRowSendsMediaActionsByDefault() {
+        assertFalse(c.fRowIsFKeys)
+        assertNull(c.pressFunctionRow(7))
+        assertNull(c.pressFunctionRow(11))
+        assertEquals(listOf("media_play_pause", "vol_up"), actions)
+        assertTrue(sent.isEmpty())
+    }
+
+    @Test fun fKeysModeSendsHidFKeys() {
+        c.fKeysMode = true
+        val h = c.pressFunctionRow(0)
+        assertEquals(Hid.F1, h)
+        c.release(h!!)
+        assertEquals(listOf(Sent(Hid.F1, true, 0, false, null), Sent(Hid.F1, false, 0, false, null)), sent)
+        assertTrue(actions.isEmpty())
+    }
+
+    @Test fun fnInvertsTheFRowForOneKey() {
+        c.tapModifier(ModKey.Fn)
+        assertTrue(c.fRowIsFKeys)
+        val h = c.pressFunctionRow(4)
+        assertEquals(Hid.F1 + 4, h)
+        c.release(h!!)
+        assertEquals(ModState.Off, c.state(ModKey.Fn))
+        assertFalse(c.fRowIsFKeys)
+        c.fKeysMode = true
+        c.tapModifier(ModKey.Fn)
+        assertNull(c.pressFunctionRow(9))
+        assertEquals(listOf("vol_mute"), actions)
+        assertEquals(ModState.Off, c.state(ModKey.Fn))
+    }
+
+    @Test fun lockKeySendsLockAction() {
+        c.action("lock")
+        assertEquals(listOf("lock"), actions)
     }
 
     // ---------------------------------------------------------------- letters, shift xor caps
