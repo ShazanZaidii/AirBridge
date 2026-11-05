@@ -36,7 +36,7 @@ class AirBridgeInputService : AccessibilityService() {
         controller?.onConfigurationChanged()
     }
 
-    override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
+    override fun onAccessibilityEvent(event: AccessibilityEvent?) { event?.let { com.shazan.airbridge.net.ClipboardSync.onAccessibilityEvent(it) } }
 
     override fun onInterrupt() {}
 

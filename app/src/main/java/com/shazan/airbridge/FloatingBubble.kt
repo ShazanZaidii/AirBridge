@@ -26,13 +26,17 @@ import kotlin.math.abs
 
 /**
  * The floating clipboard bubble: tap = push clipboard, long-press = menu (trackpad, unlock to move).
- * Dropping it on the close target hides it (re-enable in Settings).
+ * Dropping it on the close target hides it (re-enable in Settings). A small amber dot means the latest
+ * copy could not be sent automatically ([ClipboardSync.pending]); tapping sends it.
  */
 class FloatingBubble(private val ctx: Context) {
     companion object {
         const val PREF_ENABLED = "BUBBLE_ENABLED"
         private const val SIZE = 130
         private const val IDLE_ALPHA = 0.3f
+        /** More visible while a copy is waiting to be sent (the dot must be noticeable). */
+        private const val PENDING_ALPHA = 0.85f
+        private const val DOT = 34
     }
 
     private val wm = ctx.getSystemService(WindowManager::class.java)
@@ -43,13 +47,17 @@ class FloatingBubble(private val ctx: Context) {
     private var params: WindowManager.LayoutParams? = null
     private var locked = true
     private var hoveringClose = false
+    private var pending = false
+    private var dot: View? = null
 
     private val overlayType = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
     private val autoLock = Runnable {
         locked = true
         toast("Bubble position locked")
-        tint(Palette.argb(Palette.ON_SURFACE_MUTED)); bubble?.alpha = IDLE_ALPHA
+        tint(Palette.argb(Palette.ON_SURFACE_MUTED)); bubble?.alpha = idleAlpha()
     }
+
+    private fun idleAlpha() = if (pending) PENDING_ALPHA else IDLE_ALPHA
 
     val isShown: Boolean get() = bubble != null
 
@@ -62,7 +70,19 @@ class FloatingBubble(private val ctx: Context) {
             setPadding(32, 32, 32, 32)
             background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor((Palette.argb(Palette.SURFACE) and 0x00FFFFFF) or 0xCC000000.toInt()) }
         }
-        val container = FrameLayout(ctx).apply { alpha = IDLE_ALPHA; addView(icon, FrameLayout.LayoutParams(SIZE, SIZE)) }
+        // "Your latest copy hasn't been sent — tap to send" badge (ClipboardSync.pending).
+        val badge = View(ctx).apply {
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL; setColor(Palette.argb(Palette.WARNING)); setStroke(4, Palette.argb(Palette.SURFACE))
+            }
+            visibility = View.GONE
+        }
+        val container = FrameLayout(ctx).apply {
+            alpha = idleAlpha()
+            addView(icon, FrameLayout.LayoutParams(SIZE, SIZE))
+            addView(badge, FrameLayout.LayoutParams(DOT, DOT, Gravity.TOP or Gravity.END).apply { setMargins(0, 14, 14, 0) })
+        }
+        dot = badge
         val lp = WindowManager.LayoutParams(
             SIZE, SIZE, overlayType,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
@@ -113,7 +133,7 @@ class FloatingBubble(private val ctx: Context) {
                         }
                         isClick && e.action == MotionEvent.ACTION_UP -> {
                             hideMenu()
-                            v.alpha = IDLE_ALPHA
+                            v.alpha = idleAlpha()
                             ClipboardSync.pushNow("bubble")
                         }
                         !locked -> {
@@ -125,7 +145,7 @@ class FloatingBubble(private val ctx: Context) {
                                 start()
                             }
                         }
-                        else -> v.alpha = IDLE_ALPHA
+                        else -> v.alpha = idleAlpha()
                     }
                     true
                 }
@@ -136,17 +156,45 @@ class FloatingBubble(private val ctx: Context) {
             wm.addView(container, lp)
             bubble = container
             params = lp
+            renderPending(animate = false)
         } catch (_: Exception) {
             // Overlay permission revoked meanwhile.
         }
+    }
+
+    /** Show or clear the "not sent yet" dot. Main thread. */
+    fun setPending(on: Boolean) {
+        if (pending == on) return
+        pending = on
+        renderPending(animate = on)
+    }
+
+    private fun renderPending(animate: Boolean) {
+        val b = bubble ?: return
+        val d = dot ?: return
+        d.animate().cancel()
+        d.visibility = if (pending) View.VISIBLE else View.GONE
+        b.contentDescription = if (pending) "Clipboard not sent yet. Tap to send." else "Send clipboard"
+        if (locked) b.alpha = idleAlpha()
+        if (pending && animate) pulse(d, 3)
+    }
+
+    /** A few gentle pulses, then steady (no endless animation). */
+    private fun pulse(v: View, times: Int) {
+        if (times == 0 || !pending) { v.scaleX = 1f; v.scaleY = 1f; return }
+        v.animate().scaleX(1.35f).scaleY(1.35f).setDuration(260).withEndAction {
+            v.animate().scaleX(1f).scaleY(1f).setDuration(260).withEndAction { pulse(v, times - 1) }.start()
+        }.start()
     }
 
     fun hide() {
         main.removeCallbacks(autoLock)
         hideMenu()
         hideCloseZone()
+        dot?.animate()?.cancel()
         bubble?.let { safeRemove(it) }
         bubble = null
+        dot = null
     }
 
     private fun showMenu() {
