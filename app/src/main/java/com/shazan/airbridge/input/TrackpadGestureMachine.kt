@@ -19,8 +19,12 @@ sealed interface GestureIntent {
     data object DragEnd : GestureIntent
     /** Three- or four-finger swipe: direction the fingers moved; same meaning for both counts. */
     data class ThreeFingerSwipe(val dir: SwipeDir, val fingers: Int = 3) : GestureIntent
-    /** Four-finger pinch: [spread] = fingers moved apart (show desktop), else together (Launchpad). */
+    /** Four- or five-finger pinch: [spread] = fingers moved apart (show desktop), else together (Launchpad). */
     data class Pinch(val spread: Boolean) : GestureIntent
+    /** Two-finger pinch: one zoom step each time the fingers have moved [Config.zoomStepPx] apart/together. */
+    data class Zoom(val inward: Boolean) : GestureIntent
+    /** Quick tap with three fingers (Mac: Look Up). */
+    data class MultiTap(val fingers: Int) : GestureIntent
     /** The machine dropped all state (cancel / watchdog / external reset). Release anything held. */
     data object ResetAll : GestureIntent
 }
@@ -38,8 +42,11 @@ sealed interface GestureIntent {
  * - Long-press (stationary ≥ [Config.longPressMs]) → `DragStart`, moves, `DragEnd` on release.
  * - Two-finger tap: max 2 fingers, both lifted within [Config.twoFingerLiftSpreadMs] of each other,
  *   whole gesture ≤ [Config.twoFingerTapMaxMs], centroid moved < slop → `Click(1, 1)`.
- * - Two-finger move → `Scroll` of the centroid. Once any finger of a scroll lifts, the sequence is
+ * - Two-finger move → `Scroll` of the centroid, unless the distance between the two fingers changes by
+ *   [Config.zoomStartPx] and more than the centroid travelled: then it is a pinch and emits one `Zoom`
+ *   per [Config.zoomStepPx] of distance change. Once any finger of a scroll/zoom lifts, the sequence is
  *   finished: nothing else happens (no click, no move) until every finger is up.
+ * - Three fingers tapped quickly and lifted without moving → `MultiTap(3)`.
  * - Three or more fingers: `ThreeFingerSwipe` exactly once when the centroid travels > swipe distance
  *   (3 and 4 fingers behave the same; `fingers` is the maximum that were down at once).
  * - Four or more fingers: `Pinch` exactly once when the mean finger distance from the centroid
@@ -58,6 +65,10 @@ class TrackpadGestureMachine(
         val slopPx: Float = 16f,
         val swipePx: Float = 160f,
         val pinchPx: Float = 80f,
+        /** Two-finger pinch: distance change that starts zooming, and the change per zoom step. */
+        val zoomStartPx: Float = 40f,
+        val zoomStepPx: Float = 56f,
+        val multiTapMaxMs: Long = 250,
         val tapMaxMs: Long = 180,
         val doubleTapMs: Long = 300,
         val doubleTapSlopPx: Float = 100f,
@@ -72,7 +83,7 @@ class TrackpadGestureMachine(
         val naturalScroll: Boolean = true,
     )
 
-    enum class State { Idle, Pending, Moving, Dragging, MultiPending, Scrolling, Swiping, Finished }
+    enum class State { Idle, Pending, Moving, Dragging, MultiPending, Scrolling, Zooming, Swiping, Finished }
 
     private class Ptr(var x: Float, var y: Float)
 
@@ -91,6 +102,7 @@ class TrackpadGestureMachine(
     private var multiX = 0f // accumulated centroid travel (two/three fingers)
     private var multiY = 0f
     private var spreadStart = -1f // mean distance from the centroid when the 4-finger set formed
+    private var zoomBase = 0f     // distance between the two fingers at the last zoom step (or when they landed)
     private var tapAllowed = true
     private var firstLiftAt = -1L
     private var lastLiftAt = -1L
@@ -155,8 +167,9 @@ class TrackpadGestureMachine(
                 state = State.MultiPending
                 multiX = 0f; multiY = 0f
                 firstLiftAt = -1L; lastLiftAt = -1L
+                zoomBase = pairDistance()
             }
-            State.MultiPending, State.Scrolling -> if (ptrs.size >= 3) {
+            State.MultiPending, State.Scrolling, State.Zooming -> if (ptrs.size >= 3) {
                 state = State.Swiping
                 multiX = 0f; multiY = 0f
                 rebaseSpread()
@@ -207,7 +220,12 @@ class TrackpadGestureMachine(
             State.Moving, State.Dragging -> if (id == primary) emit(GestureIntent.Move(dx, dy))
             State.MultiPending -> {
                 multiX += dx / n; multiY += dy / n
-                if (hypot(multiX, multiY) >= config.slopPx) {
+                val travel = hypot(multiX, multiY)
+                val pinchDelta = if (ptrs.size == 2) pairDistance() - zoomBase else 0f
+                if (ptrs.size == 2 && abs(pinchDelta) >= config.zoomStartPx && abs(pinchDelta) > travel) {
+                    state = State.Zooming
+                    zoomSteps()
+                } else if (travel >= config.slopPx) {
                     if (ptrs.size >= 2) {
                         state = State.Scrolling
                         scroll(multiX, multiY)
@@ -217,6 +235,7 @@ class TrackpadGestureMachine(
                 }
             }
             State.Scrolling -> scroll(dx / n, dy / n)
+            State.Zooming -> if (ptrs.size == 2) zoomSteps()
             State.Swiping -> {
                 multiX += dx / n; multiY += dy / n
                 val travel = hypot(multiX, multiY)
@@ -271,8 +290,14 @@ class TrackpadGestureMachine(
                     emit(GestureIntent.Click(1, 1))
                 }
             }
-            State.Scrolling -> state = State.Finished // lifting one finger never clicks or moves
-            State.Swiping -> rebaseSpread()
+            State.Scrolling, State.Zooming -> state = State.Finished // lifting one finger never clicks or moves
+            State.Swiping -> {
+                if (remaining == 0 && maxFingers == 3 && t - seqStart <= config.multiTapMaxMs &&
+                    hypot(multiX, multiY) < config.slopPx
+                ) {
+                    emit(GestureIntent.MultiTap(3))
+                } else rebaseSpread()
+            }
             State.Finished, State.Idle -> Unit
         }
 
@@ -309,6 +334,19 @@ class TrackpadGestureMachine(
         var d = 0f
         for (p in ptrs.values) d += hypot(p.x - cx, p.y - cy)
         return d / ptrs.size
+    }
+
+    private fun pairDistance(): Float {
+        if (ptrs.size != 2) return 0f
+        val (a, b) = ptrs.values.toList()
+        return hypot(a.x - b.x, a.y - b.y)
+    }
+
+    /** Emits one [GestureIntent.Zoom] per [Config.zoomStepPx] of change in the two-finger distance. */
+    private fun zoomSteps() {
+        val d = pairDistance()
+        while (d - zoomBase >= config.zoomStepPx) { emit(GestureIntent.Zoom(inward = false)); zoomBase += config.zoomStepPx }
+        while (zoomBase - d >= config.zoomStepPx) { emit(GestureIntent.Zoom(inward = true)); zoomBase -= config.zoomStepPx }
     }
 
     private fun rebaseSpread() {
