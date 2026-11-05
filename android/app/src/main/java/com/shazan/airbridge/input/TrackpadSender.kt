@@ -66,10 +66,10 @@ class TrackpadSender {
             is GestureIntent.Click -> click(i.button, i.count)
             GestureIntent.DragStart -> button(true)
             GestureIntent.DragEnd -> button(false)
-            is GestureIntent.ThreeFingerSwipe -> action(swipeAction(i.dir))
+            is GestureIntent.Swipe -> action(swipeAction(i.dir))
             is GestureIntent.Pinch -> action(pinchAction(i.spread))
             is GestureIntent.Zoom -> action(if (i.inward) "zoom_out" else "zoom_in")
-            is GestureIntent.MultiTap -> action("look_up")
+            GestureIntent.FirmPress -> { flush(force = true); action(FIRM_PRESS_ACTION) }
             GestureIntent.ResetAll -> { flush(force = true); button(false) }
         }
     }
@@ -138,11 +138,14 @@ class TrackpadSender {
     }
 
     companion object {
-        /** Four-finger pinch (§8.5): together = Launchpad (`app_drawer`), apart = `show_desktop`. */
+        /** What a firm press does (§8.5): force click = Look Up / Quick Look on a Mac. */
+        const val FIRM_PRESS_ACTION = "look_up"
+
+        /** Four- / five-finger pinch (§8.5): together = Launchpad (`app_drawer`), apart = `show_desktop`. */
         fun pinchAction(spread: Boolean) = if (spread) "show_desktop" else "app_drawer"
 
         /**
-         * Three- and four-finger swipes (§8.5), same for both: up = Mission Control, down = App
+         * Four- and five-finger swipes (§8.5), same for both: up = Mission Control, down = App
          * Exposé. Fingers moving right reveal the desktop on the left (macOS convention).
          */
         fun swipeAction(dir: SwipeDir) = when (dir) {
@@ -159,33 +162,41 @@ class TrackpadSender {
 }
 
 /** Settings read at gesture time. */
-data class TrackpadPrefs(val naturalScroll: Boolean = true)
+data class TrackpadPrefs(val naturalScroll: Boolean = true, val firmPress: Boolean = true)
+
+/** One pointer event for the recognisers: id, action, position, time, pressure (NaN = unknown). */
+internal fun interface TouchSink {
+    fun touch(id: Long, action: TouchAction, x: Float, y: Float, t: Long, pressure: Float)
+}
 
 /**
- * Feeds one Compose [PointerEvent] into a recogniser as (id, DOWN|MOVE|UP|CANCEL, x, y, t).
+ * Feeds one Compose [PointerEvent] into a recogniser as (id, DOWN|MOVE|UP|CANCEL, x, y, t, pressure).
  *
  * - Finger identity is the pointer id; nothing is inferred from `changes.size` (a change list also
  *   contains pointers that went up in this very event).
  * - Compose's synthetic cancel (ACTION_CANCEL, node detached, hit path lost) arrives as pointer-ups
  *   that are *already consumed*; those are reported as CANCEL so they can never become a click.
  */
-internal fun feedPointerEvent(event: PointerEvent, sink: (Long, TouchAction, Float, Float, Long) -> Unit) {
+internal fun feedPointerEvent(event: PointerEvent, sink: TouchSink) {
     var cancelled = false
     for (c in event.changes) {
         val id = c.id.value
         val p = c.position
+        val pr = c.pressure
         when {
-            c.pressed && !c.previousPressed -> sink(id, TouchAction.DOWN, p.x, p.y, c.uptimeMillis)
+            c.pressed && !c.previousPressed -> sink.touch(id, TouchAction.DOWN, p.x, p.y, c.uptimeMillis, pr)
             !c.pressed && c.previousPressed -> {
                 if (c.isConsumed) cancelled = true
-                else sink(id, TouchAction.UP, p.x, p.y, c.uptimeMillis)
+                else sink.touch(id, TouchAction.UP, p.x, p.y, c.uptimeMillis, pr)
             }
-            c.pressed && p != c.previousPosition -> sink(id, TouchAction.MOVE, p.x, p.y, c.uptimeMillis)
+            // Every held finger is reported, moved or not: a firm press is a finger that does not move,
+            // only its pressure changes. The recognisers ignore zero-length moves otherwise.
+            c.pressed -> sink.touch(id, TouchAction.MOVE, p.x, p.y, c.uptimeMillis, pr)
         }
     }
     if (cancelled) {
         val t = event.changes.firstOrNull()?.uptimeMillis ?: SystemClock.uptimeMillis()
-        sink(-1, TouchAction.CANCEL, 0f, 0f, t)
+        sink.touch(-1, TouchAction.CANCEL, 0f, 0f, t, Float.NaN)
     }
     event.changes.forEach { it.consume() }
 }
@@ -200,10 +211,11 @@ suspend fun PointerInputScope.trackpadGestures(
     prefs: () -> TrackpadPrefs,
     haptic: (Int) -> Unit,
     onSystemTookGesture: (fingers: Int) -> Unit = {},
+    pressure: PressureFeed? = null,
 ) {
     val cfg = TrackpadGestureMachine.Config(
         slopPx = viewConfiguration.touchSlop,
-        swipePx = 80.dp.toPx(),
+        swipePx = 56.dp.toPx(),
         longPressMs = viewConfiguration.longPressTimeoutMillis,
         doubleTapMs = viewConfiguration.doubleTapTimeoutMillis,
         doubleTapSlopPx = 48.dp.toPx(),
@@ -219,21 +231,26 @@ suspend fun PointerInputScope.trackpadGestures(
         when (intent) {
             is GestureIntent.Click -> haptic(HapticFeedbackConstants.CONTEXT_CLICK)
             GestureIntent.DragStart -> haptic(HapticFeedbackConstants.LONG_PRESS)
-            is GestureIntent.ThreeFingerSwipe, is GestureIntent.Pinch, is GestureIntent.MultiTap -> {
+            is GestureIntent.Swipe, is GestureIntent.Pinch -> {
                 loss.markHandled()
-                haptic(HapticFeedbackConstants.CONTEXT_CLICK)
+                haptic(HapticFeedbackConstants.CONFIRM)
             }
+            GestureIntent.FirmPress -> haptic(HapticFeedbackConstants.LONG_PRESS)
             is GestureIntent.Zoom -> haptic(HapticFeedbackConstants.CLOCK_TICK)
             else -> Unit
         }
     }
     val lossReset: () -> Unit = { loss.reset() }
+    pressure?.listener = { p -> machine.onPressure(p); sender.flush() }
     sender.attach(machine)
     sender.addResetHook(lossReset)
     try {
         awaitPointerEventScope {
             while (true) {
-                machine.naturalScroll = prefs().naturalScroll
+                val p = prefs()
+                machine.naturalScroll = p.naturalScroll
+                FirmPress.enabled = p.firmPress
+                if (machine.isIdle) machine.firmPressAt = FirmPress.threshold()
                 val now = SystemClock.uptimeMillis()
                 val deadline = machine.nextDeadline()
                 val wait: Long? = when {
@@ -243,11 +260,22 @@ suspend fun PointerInputScope.trackpadGestures(
                 }
                 val event = if (wait == null) awaitPointerEvent()
                 else withTimeoutOrNull(wait) { awaitPointerEvent() }
-                if (event != null) feedPointerEvent(event) { id, a, x, y, t ->
+                if (event != null) feedPointerEvent(event) { id, a, x, y, t, pr ->
                     loss.onTouch(id, a, t)
-                    machine.onTouch(id, a, x, y, t)
+                    machine.onTouch(id, a, x, y, t, pr)
+                    if (a == TouchAction.UP && machine.isIdle) {
+                        FirmPress.touchEnded(machine.lastTouchFingers, machine.peakPressure, machine.lastWasFirm)
+                        if (com.shazan.airbridge.BuildConfig.DEBUG) android.util.Log.d(
+                            "AirBridgeTouch",
+                            "touch end fingers=${machine.lastTouchFingers} peak=${machine.peakPressure} firm=${machine.lastWasFirm} " +
+                                "threshold=${FirmPress.threshold()} samples=${FirmPress.calibrator.sampleCount}",
+                        )
+                    }
                 }
-                val t = SystemClock.uptimeMillis()
+                // Time runs on the touch events' own clock while events are flowing; the wall clock only
+                // when none arrived (timeout). A busy main thread that falls behind must never turn queued
+                // touches into a long-press or a watchdog reset.
+                val t = event?.changes?.maxOfOrNull { it.uptimeMillis } ?: SystemClock.uptimeMillis()
                 loss.tick(t)
                 machine.tick(t)
                 sender.flush()
@@ -256,6 +284,7 @@ suspend fun PointerInputScope.trackpadGestures(
     } finally {
         // Composable left / activity paused / pointer input restarted: never leave a button held.
         loss.reset()
+        pressure?.listener = null
         sender.removeResetHook(lossReset)
         machine.reset(SystemClock.uptimeMillis())
         sender.detach(machine)

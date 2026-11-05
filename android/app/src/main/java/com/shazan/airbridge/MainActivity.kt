@@ -148,7 +148,11 @@ private val pendingPairLink = mutableStateOf<String?>(null)
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
+        // The app is always dark: light status / navigation bar icons whatever the system theme is.
+        enableEdgeToEdge(
+            statusBarStyle = androidx.activity.SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
+            navigationBarStyle = androidx.activity.SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
+        )
         // A pairing link is one-shot: only a fresh launch carries it, and it is removed from the activity's intent so a
         // process restart, rotation or recreate never re-runs an old link (which would fail and drop the connection).
         if (savedInstanceState == null) {
@@ -550,7 +554,7 @@ private fun AddDeviceScreen(
                         leading = { PlatformAvatar(host.plat) },
                         trailing = {
                             if (isPaired) StatusChip("Paired", ChipTone.SUCCESS)
-                            else Text("Pair", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                            else Text("Pair", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.tertiary)
                         },
                     )
                 }
@@ -580,7 +584,7 @@ private fun AddDeviceScreen(
                         title = a.name,
                         subtitle = "Android · Nearby",
                         leading = { PlatformAvatar("android") },
-                        trailing = { Text("Pair", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary) },
+                        trailing = { Text("Pair", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.tertiary) },
                     )
                 }
             }
@@ -680,10 +684,11 @@ private fun DevicesScreen(
                     status = st,
                     controllingYou = st == PeerStatus.CONNECTED && controller == peer.id,
                     onForget = { forgetting = peer },
-                    onTrackpad = {
+                    onTrackpad = { mode ->
                         ctx.startActivity(
                             Intent(ctx, TrackpadActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
-                                .putExtra(TrackpadActivity.EXTRA_PEER, peer.id),
+                                .putExtra(TrackpadActivity.EXTRA_PEER, peer.id)
+                                .putExtra(TrackpadActivity.EXTRA_MODE, mode.name),
                         )
                     },
                     onDisconnect = { WsClient.disconnect(peer.id) },
@@ -703,7 +708,7 @@ private fun DeviceCard(
     status: PeerStatus,
     controllingYou: Boolean,
     onForget: () -> Unit,
-    onTrackpad: () -> Unit,
+    onTrackpad: (TrackpadActivity.Mode) -> Unit,
     onDisconnect: () -> Unit,
     onConnect: () -> Unit,
 ) {
@@ -746,7 +751,7 @@ private fun DeviceCard(
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                     if (desktop && status == PeerStatus.CONNECTED) DropdownMenuItem(
                         text = { Text("Use as trackpad") },
-                        onClick = { menu = false; onTrackpad() },
+                        onClick = { menu = false; onTrackpad(TrackpadActivity.Mode.Trackpad) },
                     )
                     if (canDisconnect) DropdownMenuItem(
                         text = { Text("Disconnect") },
@@ -762,6 +767,35 @@ private fun DeviceCard(
                     )
                 }
             }
+        }
+        // A connected computer: the three ways to control it, one tap away.
+        if (desktop && status == PeerStatus.CONNECTED && !controllingYou) {
+            Row(
+                Modifier.fillMaxWidth().padding(start = Dimens.md, end = Dimens.md, bottom = Dimens.md),
+                horizontalArrangement = Arrangement.spacedBy(Dimens.sm),
+            ) {
+                for (m in TrackpadActivity.Mode.entries) {
+                    CardAction(m.label, m.icon, Modifier.weight(1f)) { onTrackpad(m) }
+                }
+            }
+        }
+    }
+}
+
+/** Compact tonal action inside a device card: icon over a short label, 56 dp tall. */
+@Composable
+private fun CardAction(label: String, icon: ImageVector, modifier: Modifier, onClick: () -> Unit) {
+    Surface(
+        onClick = onClick,
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        modifier = modifier.height(56.dp),
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+            Icon(icon, contentDescription = null, modifier = Modifier.size(Dimens.iconSm))
+            Spacer(Modifier.height(2.dp))
+            Text(label, style = MaterialTheme.typography.labelMedium, maxLines = 1)
         }
     }
 }

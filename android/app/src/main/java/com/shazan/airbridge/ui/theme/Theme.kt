@@ -10,15 +10,15 @@ import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.ui.unit.dp
 
 private val AirBridgeColors = darkColorScheme(
-    primary = Accent,
-    onPrimary = OnAccent,
+    primary = Primary,
+    onPrimary = OnPrimary,
     primaryContainer = SurfaceHigh,
     onPrimaryContainer = OnSurface,
     secondary = Secondary,
     onSecondary = OnSurface,
     secondaryContainer = SurfaceHigh,
     onSecondaryContainer = OnSurface,
-    tertiary = Info,
+    tertiary = Accent,
     onTertiary = OnAccent,
     background = Background,
     onBackground = OnSurface,
