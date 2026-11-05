@@ -99,8 +99,9 @@ class ScreenGestureMachineTest {
     @Test fun firmPressForceClicksAtTheTouchPoint() {
         m.firmPressAt = 0.6f
         m.onTouch(1, DOWN, 300f, 200f, 0, 0.3f)
-        m.onTouch(1, MOVE, 301f, 200f, 50, 0.75f)
-        m.onTouch(1, UP, 301f, 200f, 120, 0.2f)
+        m.onTouch(1, MOVE, 301f, 200f, 50, 0.75f) // too soon
+        m.onTouch(1, MOVE, 301f, 200f, 160, 0.8f)
+        m.onTouch(1, UP, 301f, 200f, 220, 0.2f)
         assertEquals(listOf(ScreenIntent.FirmPress(300f, 200f)), out)
     }
 

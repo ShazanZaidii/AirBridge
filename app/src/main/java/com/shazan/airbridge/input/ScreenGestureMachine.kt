@@ -69,6 +69,8 @@ class ScreenGestureMachine(
     var lastTouchFingers: Int = 0; private set
 
     private val multi = MultiFingerGesture(config.swipePx, config.pinchPx)
+    /** Diagnostics for the last touch (see [GestureTrace]). */
+    val multiDiag: MultiFingerGesture get() = multi
     private var zoomBase = 0f
 
     var state = State.Idle; private set
@@ -103,17 +105,26 @@ class ScreenGestureMachine(
             TouchAction.UP -> up(id, x, y, t)
             TouchAction.CANCEL -> cancel()
         }
-        if (action == TouchAction.DOWN || action == TouchAction.MOVE) pressed(id, pressure)
+        if (action == TouchAction.DOWN || action == TouchAction.MOVE) pressed(id, pressure, t)
     }
 
-    /** Pressure of the only finger down, from the raw event stream ([PressureFeed]). */
-    fun onPressure(pressure: Float) {
-        if (ptrs.size == 1) pressed(primary, pressure)
+    /** Pressure of the only finger down, from the raw event stream ([PressureFeed]); [t] = its event time. */
+    fun onPressure(pressure: Float, t: Long = lastEvent) {
+        if (ptrs.size == 1) pressed(primary, pressure, t)
     }
 
-    private fun pressed(id: Long, pressure: Float) {
+    private var downPressure = Float.NaN
+
+    /**
+     * Firm press = the finger stays put for at least [FIRM_MIN_MS] and its pressure *rises* clearly
+     * after landing ([FIRM_RISE] × the landing pressure, and at least [firmPressAt]). A hard landing
+     * alone is never a firm press, so taps, drags and swipes are never eaten.
+     */
+    private fun pressed(id: Long, pressure: Float, t: Long = lastEvent) {
         if (pressure.isNaN() || id != primary || ptrs.size != 1) return
+        if (downPressure.isNaN()) downPressure = pressure
         if (pressure > peakPressure) peakPressure = pressure
+        if (t - seqStart < FIRM_MIN_MS || pressure < downPressure * FIRM_RISE) return
         val p = ptrs[id] ?: return
         if (state == State.Pending && pressure >= firmPressAt && hypot(p.x - p.x0, p.y - p.y0) < config.slopPx) {
             state = State.Finished
@@ -148,6 +159,7 @@ class ScreenGestureMachine(
             seqStart = t
             multi.reset()
             peakPressure = 0f
+            downPressure = Float.NaN
             lastWasFirm = false
             state = State.Pending
             return
@@ -280,5 +292,10 @@ class ScreenGestureMachine(
         maxFingers = 0
         tapCount = 0
         if (wasActive) emit(ScreenIntent.ResetAll)
+    }
+
+    private companion object {
+        const val FIRM_MIN_MS = 120L
+        const val FIRM_RISE = 1.25f
     }
 }

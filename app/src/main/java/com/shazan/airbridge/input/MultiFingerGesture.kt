@@ -38,6 +38,11 @@ class MultiFingerGesture(
     private val minFingers: Int = 4,
 ) {
     var fired = false; private set
+    /** Diagnostics: the furthest the 4/5-finger hand travelled / pinched during this touch. */
+    var maxTravel = 0f; private set
+    var maxPinch = 0f; private set
+    val swipeThreshold: Float get() = swipePx
+    val pinchThreshold: Float get() = pinchPx
     private var tx = 0f
     private var ty = 0f
     private var spread0 = -1f
@@ -45,6 +50,7 @@ class MultiFingerGesture(
 
     fun reset() {
         fired = false
+        maxTravel = 0f; maxPinch = 0f
         tx = 0f; ty = 0f
         spread0 = -1f
         maxFingers = 0
@@ -71,6 +77,8 @@ class MultiFingerGesture(
         tx += dx / n; ty += dy / n
         val travel = hypot(tx, ty)
         val pinch = spread(fingers) - spread0
+        maxTravel = maxOf(maxTravel, travel)
+        maxPinch = maxOf(maxPinch, abs(pinch))
         val result = when {
             abs(pinch) >= pinchPx && abs(pinch) > travel -> MultiFingerResult.Pinch(pinch > 0f, maxFingers)
             travel >= swipePx && travel > abs(pinch) -> MultiFingerResult.Swipe(

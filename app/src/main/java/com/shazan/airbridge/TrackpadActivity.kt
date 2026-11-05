@@ -161,12 +161,20 @@ class TrackpadActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         InputRouter.install(this)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        // Follows the phone, as the user holds it (and their rotation lock): portrait stays portrait.
-        // Touch coordinates are the window's, so every swipe direction matches what is on screen.
-        // The layout adapts to the real window size (portrait, landscape, multi-window).
+        // Always landscape, whichever way the phone is held and whatever auto-rotate is set to (the sensor
+        // only picks which landscape side). Touch coordinates are the window's, so swipe directions always
+        // match the landscape screen. The layout still adapts if a large screen ignores the request.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) setTranslucent(false)
         if (Build.VERSION.SDK_INT != Build.VERSION_CODES.O) {
-            try { requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_FULL_USER } catch (_: Throwable) {}
+            try { requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE } catch (_: Throwable) {}
+        }
+        // Works over the lock screen like v1 (the manifest says so too; this covers older releases).
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            setShowWhenLocked(true)
+            setTurnScreenOn(true)
+        } else {
+            @Suppress("DEPRECATION")
+            window.addFlags(WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON)
         }
         WindowCompat.setDecorFitsSystemWindows(window, false)
         // Edge to edge with the bars hidden: the window always reaches into the cutout band on the
@@ -279,6 +287,8 @@ class TrackpadActivity : ComponentActivity() {
         var firm by remember { mutableStateOf(prefs.getBoolean(PREF_FIRM, true)) }
         var screenKeyboard by remember { mutableStateOf(false) }
         var showStats by remember { mutableStateOf(false) }
+        val gestureLog by com.shazan.airbridge.input.GestureDebug.enabled.collectAsState()
+        LaunchedEffect(Unit) { com.shazan.airbridge.input.GestureDebug.setEnabled(prefs.getBoolean(com.shazan.airbridge.input.GestureDebug.PREF, true)) }
         var mirrorRun by remember { mutableStateOf(0) } // bump to restart the stream
         val trackpadPrefs by rememberUpdatedState(TrackpadPrefs(naturalScroll = natural, firmPress = firm))
 
@@ -371,6 +381,11 @@ class TrackpadActivity : ComponentActivity() {
                     },
                     onMode = ::switchMode,
                     onToggleStats = { showStats = !showStats },
+                    onToggleGestureLog = {
+                        val on = !gestureLog
+                        com.shazan.airbridge.input.GestureDebug.setEnabled(on)
+                        prefs.edit().putBoolean(com.shazan.airbridge.input.GestureDebug.PREF, on).apply()
+                    },
                     onToggleNatural = {
                         natural = !natural
                         prefs.edit().putBoolean(PREF_NATURAL, natural).apply()
@@ -401,7 +416,13 @@ class TrackpadActivity : ComponentActivity() {
                             val platform = active?.platform ?: "macos"
                             val left = remember(platform) { ScreenShortcuts.left(platform) }
                             val right = remember(platform) { ScreenShortcuts.right(platform) }
-                            val onShortcut: (String) -> Unit = { a -> sender.action(a) }
+                            val onShortcut: (String) -> Unit = { a ->
+                                if (a == com.shazan.airbridge.input.KEYBOARD_TOGGLE) {
+                                    if (screenKeyboard) keyboard.releaseAll()
+                                    screenKeyboard = !screenKeyboard
+                                } else sender.action(a) // logged by the gesture trace
+                            }
+                            val activeTiles = if (screenKeyboard) setOf(com.shazan.airbridge.input.KEYBOARD_TOGGLE) else emptySet()
                             val mirrorInfo by mirror.info.collectAsState()
                             val picture: @Composable (Modifier) -> Unit = { m ->
                                 MirrorScreen(
@@ -424,18 +445,19 @@ class TrackpadActivity : ComponentActivity() {
                                     val gap = (maxWidth - maxHeight * aspect) / 2
                                     val railW = gap.coerceIn(76.dp, 112.dp)
                                     Row(Modifier.fillMaxSize()) {
-                                        ShortcutRail(left, railW, active != null, onShortcut)
+                                        ShortcutRail(left, railW, active != null, onShortcut, active = activeTiles)
                                         picture(Modifier.weight(1f).fillMaxHeight())
-                                        ShortcutRail(right, railW, active != null, onShortcut)
+                                        ShortcutRail(right, railW, active != null, onShortcut, active = activeTiles)
                                     }
                                 } else Column(Modifier.fillMaxSize()) {
                                     picture(Modifier.fillMaxWidth().weight(1f))
-                                    ShortcutStrip(left + right, active != null, onShortcut)
+                                    ShortcutStrip(left + right, active != null, onShortcut, active = activeTiles)
                                 }
                             }
                             if (screenKeyboard) KeyboardPanel(active, Modifier.fillMaxWidth().fillMaxHeight(0.5f), safeSides)
                         }
                     }
+                    if (gestureLog && mode != Mode.Keyboard) GestureLogOverlay(Modifier.align(Alignment.TopStart).padding(start = 20.dp, top = 16.dp))
                     // Keyboard / Screen modes: say clearly that nothing is being sent.
                     if (active == null && mode != Mode.Trackpad && !(mode == Mode.Keyboard && !landscape)) {
                         StatusBanner(
@@ -523,6 +545,23 @@ class TrackpadActivity : ComponentActivity() {
                     fontSize = 13.sp, lineHeight = 19.sp, textAlign = TextAlign.Center,
                     modifier = Modifier.widthIn(max = 520.dp).padding(24.dp),
                 )
+            }
+        }
+    }
+
+    /** Live gesture log (GestureDebug): fingers on the pad now + the last touches. Takes no touches. */
+    @Composable
+    private fun GestureLogOverlay(modifier: Modifier) {
+        val lines by com.shazan.airbridge.input.GestureDebug.lines.collectAsState()
+        val fingers by com.shazan.airbridge.input.GestureDebug.fingers.collectAsState()
+        Column(
+            modifier.widthIn(max = 560.dp).clip(RoundedCornerShape(10.dp)).background(Color.Black.copy(alpha = 0.55f))
+                .padding(horizontal = 10.dp, vertical = 6.dp),
+        ) {
+            Text("Gesture log · fingers now: $fingers · long-press Trackpad to hide", color = Tp.Accent, fontSize = 11.sp, lineHeight = 14.sp)
+            for (l in lines.asReversed()) {
+                Text(l, color = Tp.Foreground.copy(alpha = 0.9f), fontSize = 11.sp, lineHeight = 14.sp,
+                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
             }
         }
     }
@@ -625,6 +664,7 @@ class TrackpadActivity : ComponentActivity() {
         onChoose: (PeerInfo) -> Unit,
         onMode: (Mode) -> Unit,
         onToggleStats: () -> Unit,
+        onToggleGestureLog: () -> Unit,
         onToggleNatural: () -> Unit,
         onToggleFirm: () -> Unit,
         onToggleScreenKeyboard: () -> Unit,
@@ -637,7 +677,7 @@ class TrackpadActivity : ComponentActivity() {
         ) {
             TargetChip(desktops, active, wanted, controlledBy, compact, narrow, onChoose, Modifier.weight(1f, fill = false))
             Spacer(Modifier.weight(0.01f))
-            ModeSwitcher(mode, compact, onMode, onToggleStats)
+            ModeSwitcher(mode, compact, onMode, onToggleStats, onToggleGestureLog)
             Spacer(Modifier.weight(0.01f))
             if (mode != Mode.Keyboard) ToggleButton(
                 icon = Icons.Default.Compress, label = if (compact || mode == Mode.Screen) null else "Firm press",
@@ -734,9 +774,9 @@ class TrackpadActivity : ComponentActivity() {
         }
     }
 
-    /** Segmented control; long-press on "Screen" toggles the stream stats overlay. */
+    /** Segmented control; long-press on "Screen" toggles the stream stats, on "Trackpad" the gesture log. */
     @Composable
-    private fun ModeSwitcher(mode: Mode, compact: Boolean, onMode: (Mode) -> Unit, onToggleStats: () -> Unit) {
+    private fun ModeSwitcher(mode: Mode, compact: Boolean, onMode: (Mode) -> Unit, onToggleStats: () -> Unit, onToggleGestureLog: () -> Unit) {
         Row(
             Modifier.height(Tp.TouchTarget).clip(RoundedCornerShape(Tp.Radius)).background(Tp.Surface).padding(3.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -750,7 +790,7 @@ class TrackpadActivity : ComponentActivity() {
                         .combinedClickable(
                             role = Role.Tab,
                             onClick = { onMode(m) },
-                            onLongClick = if (m == Mode.Screen) onToggleStats else null,
+                            onLongClick = when (m) { Mode.Screen -> onToggleStats; Mode.Trackpad -> onToggleGestureLog; else -> null },
                         )
                         .semantics(mergeDescendants = true) { this.selected = selected; contentDescription = m.label }
                         .padding(horizontal = if (compact) 10.dp else 14.dp),
