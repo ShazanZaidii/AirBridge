@@ -39,9 +39,49 @@ class TargetKeys(private val host: TargetController) {
         warnedNoField = false
     }
 
+    // ---- v1's one-key phone shortcuts: ⌘ / Win / Menu tapped on its own ----
+    // left ⌘ (or Win) = Home; right ⌘ (or Menu / right Win) = notification shade, again = quick
+    // settings (the full shade), again = close. Any other key in between makes it a normal modifier.
+    private var soloKey = -1
+    private var soloAt = 0L
+    private var shadeStep = 0
+    private var shadeAt = 0L
+
+    private fun soloTap(hid: Int) {
+        val now = SystemClock.uptimeMillis()
+        if (hid == Hid.LGUI) {
+            svc.performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME)
+            shadeStep = 0
+            return
+        }
+        if (now - shadeAt > SHADE_RESET_MS) shadeStep = 0 // the user closed it some other way meanwhile
+        shadeStep = (shadeStep + 1) % 3
+        shadeAt = now
+        when (shadeStep) {
+            1 -> svc.performGlobalAction(AccessibilityService.GLOBAL_ACTION_NOTIFICATIONS)
+            2 -> svc.performGlobalAction(AccessibilityService.GLOBAL_ACTION_QUICK_SETTINGS)
+            // Close it completely (from quick settings, Back would only step down to the shade).
+            else -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                svc.performGlobalAction(AccessibilityService.GLOBAL_ACTION_DISMISS_NOTIFICATION_SHADE)
+            } else {
+                svc.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK)
+                host.main.postDelayed({ svc.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK) }, 200)
+            }
+        }
+    }
+
     fun onKey(hid: Int, down: Boolean, mods: Int, rep: Boolean, text: String?) {
+        val now = SystemClock.uptimeMillis()
+        if (down) {
+            if (hid == Hid.LGUI || hid == Hid.RGUI || hid == Hid.APPLICATION) { if (!rep) { soloKey = hid; soloAt = now } }
+            else if (!rep) soloKey = -1
+        } else if (hid == soloKey) {
+            soloKey = -1
+            if (now - soloAt <= SOLO_TAP_MS) soloTap(hid)
+        }
         if (!down) { pressed.remove(hid); return }
         pressed.add(hid)
+        if (hid == Hid.APPLICATION) return
         if (Hid.isModifier(hid) || hid == Hid.CAPS_LOCK) return // caps state is ignored on Android
 
         val cmd = mods and (Mods.CTRL or Mods.GUI) != 0
@@ -342,5 +382,10 @@ class TargetKeys(private val host: TargetController) {
         ic.sendKeyEvent(KeyEvent(t, t, KeyEvent.ACTION_DOWN, code, 0, meta))
         ic.sendKeyEvent(KeyEvent(t, SystemClock.uptimeMillis(), KeyEvent.ACTION_UP, code, 0, meta))
         return true
+    }
+
+    private companion object {
+        const val SOLO_TAP_MS = 600L
+        const val SHADE_RESET_MS = 8_000L
     }
 }
