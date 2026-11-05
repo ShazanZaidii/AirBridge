@@ -973,6 +973,7 @@ private fun SettingsScreen(onBack: () -> Unit, onOpenLinkDebug: () -> Unit) {
                     },
                 )
             }
+            com.shazan.airbridge.ui.ClipboardAutoSyncCard()
 
             SectionHeader("Remote control")
             AbCard {
