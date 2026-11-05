@@ -691,7 +691,9 @@ namespace AirBridge.Input
                 case "last_app": Combo(KeyMap.VK_LMENU, KeyMap.VK_TAB); break;
                 case "desktop_left": Combo(KeyMap.VK_LCONTROL, KeyMap.VK_LWIN, KeyMap.VK_LEFT); break;
                 case "desktop_right": Combo(KeyMap.VK_LCONTROL, KeyMap.VK_LWIN, KeyMap.VK_RIGHT); break;
-                case "home": Combo(KeyMap.VK_LWIN, KeyMap.VK_D); break;
+                case "home":
+                case "show_desktop": Combo(KeyMap.VK_LWIN, KeyMap.VK_D); break;
+                case "screenshot": Combo(KeyMap.VK_LWIN, KeyMap.VK_LSHIFT, KeyMap.VK_S); break; // Snipping Tool
                 case "app_drawer": Combo(KeyMap.VK_LWIN); break;
                 case "notifications": Combo(KeyMap.VK_LWIN, KeyMap.VK_N); break;
                 case "quick_settings": Combo(KeyMap.VK_LWIN, KeyMap.VK_A); break;
