@@ -1,10 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- flagInputMethodEditor (API 33+) lets the target type into the focused field like a keyboard. -->
+<!--
+  Do NOT widen this file: changing a service's capabilities makes Android switch it off after an
+  update and makes banking/UPI apps flag it. Anything that needs screen content belongs in
+  AirBridgeTextService.
+
+  Core service "AirBridge Universal Control" (AirBridgeInputService): cursor overlay, gestures
+  (dispatchGesture) and global actions only. It cannot read the screen and receives no events.
+  Guarded by AccessibilityConfigTest.
+-->
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
-    android:accessibilityEventTypes="typeViewClicked|typeViewFocused|typeViewTextChanged|typeViewTextSelectionChanged|typeWindowStateChanged"
     android:accessibilityFeedbackType="feedbackGeneric"
-    android:accessibilityFlags="flagDefault|flagRetrieveInteractiveWindows|flagInputMethodEditor"
+    android:accessibilityFlags="flagDefault"
     android:canPerformGestures="true"
-    android:canRetrieveWindowContent="true"
     android:description="@string/accessibility_service_description"
     android:notificationTimeout="100" />

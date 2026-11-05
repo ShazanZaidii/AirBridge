@@ -9,19 +9,29 @@ import android.view.KeyEvent
 import android.view.View
 import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.Toast
+import com.shazan.airbridge.AirBridgeTextService
 
 /**
  * `key` messages on the target (§8.3/§8.4). Android cannot inject raw keys, so navigation keys map
  * to accessibility actions / swipes and printable keys type `text` into the focused editor —
  * through the accessibility input method on API 33+, otherwise via `ACTION_SET_TEXT`.
+ *
+ * Anything that touches a text field (typing, Enter, Backspace/Delete, Tab, Home/End, caret moves,
+ * Cmd/Ctrl+C/X/V/A) needs screen content, so it runs through the optional [AirBridgeTextService]
+ * ([textSvc]). While that is off those keys are dropped with a one-time hint; Esc (back), Cmd+H,
+ * Cmd/Alt+Tab, arrows and Page Up/Down (swipes) keep working through the core service ([svc]).
  * Main thread only.
  */
 class TargetKeys(private val host: TargetController) {
 
+    /** Core service: global actions, prefs, toasts. Has no access to screen content. */
     private val svc: AccessibilityService get() = host.service
+    /** "AirBridge Typing & Clipboard", or null while the user has it off. */
+    private val textSvc: AccessibilityService? get() = AirBridgeTextService.instance
     private val pressed = HashSet<Int>()
     private var lastArrowSwipe = 0L
     private var warnedNoField = false
+    private var hintedNoText = false
 
     fun releaseAll() {
         // Nothing is held on the Android side (each injected key is a complete press).
@@ -42,19 +52,32 @@ class TargetKeys(private val host: TargetController) {
         val shift = mods and Mods.SHIFT != 0
         when (hid) {
             Hid.ESC -> svc.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK)
-            Hid.ENTER, Hid.KP_ENTER -> enter()
-            Hid.BACKSPACE -> deleteChar(forward = false, mods)
-            Hid.DELETE -> deleteChar(forward = true, mods)
-            Hid.TAB -> tab(shift)
-            Hid.LEFT, Hid.RIGHT, Hid.UP, Hid.DOWN -> arrow(hid, mods)
-            Hid.HOME, Hid.END -> homeEnd(hid, mods)
+            Hid.ENTER, Hid.KP_ENTER -> if (textOn()) enter()
+            Hid.BACKSPACE -> if (textOn()) deleteChar(forward = false, mods)
+            Hid.DELETE -> if (textOn()) deleteChar(forward = true, mods)
+            Hid.TAB -> if (textOn()) tab(shift)
+            Hid.LEFT, Hid.RIGHT, Hid.UP, Hid.DOWN -> arrow(hid, mods) // scrolls without the text service
+            Hid.HOME, Hid.END -> if (textOn()) homeEnd(hid, mods)
             Hid.PAGE_UP -> if (!imeKey(hid, mods)) host.swipe("down")
             Hid.PAGE_DOWN -> if (!imeKey(hid, mods)) host.swipe("up")
             else -> {
                 val s = printable(text) ?: KeyMap.text(hid, mods)
-                if (!s.isNullOrEmpty()) type(s)
+                if (!s.isNullOrEmpty() && textOn()) type(s)
             }
         }
+    }
+
+    /**
+     * The text service is running; otherwise tell the user once (per core-service connection) how
+     * to turn it on and return false so the key is dropped.
+     */
+    private fun textOn(): Boolean {
+        if (AirBridgeTextService.isRunning) { hintedNoText = false; return true }
+        if (!hintedNoText) {
+            hintedNoText = true
+            Toast.makeText(svc, "Turn on 'AirBridge Typing & Clipboard' to type from your computer", Toast.LENGTH_LONG).show()
+        }
+        return false
     }
 
     // ---------------------------------------------------------------- shortcuts
@@ -78,18 +101,21 @@ class TargetKeys(private val host: TargetController) {
     }
 
     internal fun copy() {
+        if (!textOn()) return
         if (!contextAction(android.R.id.copy, AccessibilityNodeInfo.ACTION_COPY)) return
         host.main.postDelayed({ NetHooks.pushClipboard("copy") }, 300)
     }
 
     private fun cut() {
+        if (!textOn()) return
         if (!contextAction(android.R.id.cut, AccessibilityNodeInfo.ACTION_CUT)) return
         host.main.postDelayed({ NetHooks.pushClipboard("cut") }, 300)
     }
 
-    internal fun paste() { contextAction(android.R.id.paste, AccessibilityNodeInfo.ACTION_PASTE) }
+    internal fun paste() { if (textOn()) contextAction(android.R.id.paste, AccessibilityNodeInfo.ACTION_PASTE) }
 
     private fun selectAll() {
+        if (!textOn()) return
         if (Build.VERSION.SDK_INT >= 33) ime()?.let { it.performContextMenuAction(android.R.id.selectAll); return }
         val n = editable() ?: return
         setSelection(n, 0, textOf(n).length)
@@ -97,8 +123,9 @@ class TargetKeys(private val host: TargetController) {
 
     private fun contextAction(menuId: Int, nodeAction: Int): Boolean {
         if (Build.VERSION.SDK_INT >= 33) ime()?.let { it.performContextMenuAction(menuId); return true }
-        val n = svc.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
-            ?: svc.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY) ?: return false
+        val t = textSvc ?: return false
+        val n = t.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+            ?: t.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY) ?: return false
         return n.performAction(nodeAction)
     }
 
@@ -106,7 +133,8 @@ class TargetKeys(private val host: TargetController) {
 
     private fun enter() {
         if (imeKey(Hid.ENTER, 0)) return
-        val n = svc.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+        val t = textSvc ?: return
+        val n = t.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
         if (n != null && n.isEditable) {
             n.refresh()
             when {
@@ -117,7 +145,7 @@ class TargetKeys(private val host: TargetController) {
             }
             return
         }
-        (n ?: svc.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY))?.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+        (n ?: t.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY))?.performAction(AccessibilityNodeInfo.ACTION_CLICK)
     }
 
     private fun deleteChar(forward: Boolean, mods: Int) {
@@ -133,9 +161,10 @@ class TargetKeys(private val host: TargetController) {
     }
 
     private fun tab(backward: Boolean) {
-        val n = svc.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+        val t = textSvc ?: return
+        val n = t.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
         if (n != null && n.isEditable && imeKey(Hid.TAB, if (backward) Mods.SHIFT else 0)) return
-        val cur = n ?: svc.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+        val cur = n ?: t.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
         val next = cur?.focusSearch(if (backward) View.FOCUS_BACKWARD else View.FOCUS_FORWARD)
             ?: if (cur == null) firstFocusable() else null
         next ?: return
@@ -145,7 +174,7 @@ class TargetKeys(private val host: TargetController) {
     }
 
     private fun firstFocusable(): AccessibilityNodeInfo? {
-        val root = svc.rootInActiveWindow ?: return null
+        val root = textSvc?.rootInActiveWindow ?: return null
         val queue = ArrayDeque<AccessibilityNodeInfo>().apply { add(root) }
         var visited = 0
         while (queue.isNotEmpty() && visited++ < 400) {
@@ -157,7 +186,8 @@ class TargetKeys(private val host: TargetController) {
     }
 
     private fun arrow(hid: Int, mods: Int) {
-        val n = svc.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+        // Without the text service we can't see a field: arrows always scroll.
+        val n = textSvc?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
         if (n != null && n.isEditable) {
             if (imeKey(hid, mods)) return
             n.refresh()
@@ -246,7 +276,7 @@ class TargetKeys(private val host: TargetController) {
     }
 
     private fun editable(): AccessibilityNodeInfo? {
-        val n = svc.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) ?: return null
+        val n = textSvc?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) ?: return null
         n.refresh() // the node cache can be stale for text/selection
         return if (n.isEditable) n else null
     }
@@ -290,10 +320,13 @@ class TargetKeys(private val host: TargetController) {
         },
     )
 
-    /** Accessibility input connection to the focused editor (API 33+, needs flagInputMethodEditor). */
+    /**
+     * Accessibility input connection to the focused editor (API 33+; the text service declares
+     * flagInputMethodEditor, the core service does not).
+     */
     private fun ime(): android.accessibilityservice.InputMethod.AccessibilityInputConnection? {
         if (Build.VERSION.SDK_INT < 33) return null
-        val im = svc.inputMethod ?: return null
+        val im = textSvc?.inputMethod ?: return null
         if (!im.currentInputStarted) return null
         return im.currentInputConnection
     }

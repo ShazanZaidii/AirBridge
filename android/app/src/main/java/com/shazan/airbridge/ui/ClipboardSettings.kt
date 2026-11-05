@@ -71,7 +71,7 @@ fun ClipboardAutoSyncCard() {
             Column(Modifier.padding(horizontal = Dimens.md, vertical = Dimens.sm)) {
                 Text(
                     "If a copy can't be sent automatically, the bubble shows a dot. Tap it to send. " +
-                        "Some phones only let AirBridge notice copies while 'Control from your computer' is on. " +
+                        "Some phones only let AirBridge notice copies while the optional 'Typing & clipboard' service is on. " +
                         "If automatic sync does not work, allow 'Display pop-ups while running in the background' " +
                         "for AirBridge in your phone's app permissions.",
                     style = MaterialTheme.typography.bodySmall,

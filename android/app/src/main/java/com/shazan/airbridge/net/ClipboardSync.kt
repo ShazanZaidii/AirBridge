@@ -26,7 +26,8 @@ import org.json.JSONObject
  *  - the clipboard changes while the service runs and automatic sync is on → [onChangeSignal]: debounced,
  *    then read by briefly taking focus ([ClipFocusWindow], else the invisible [SyncActivity]). Signals come
  *    from the change listener (fires in the background on some ROMs, and whenever we are focused) and from
- *    our accessibility service when the user enabled it ([onAccessibilityEvent]). If the focused read is
+ *    the optional "AirBridge Typing & Clipboard" accessibility service when the user enabled it
+ *    ([onAccessibilityEvent]; without it the bubble / tile / focus paths below remain). If the focused read is
  *    blocked, the copy is marked [pending] and the bubble shows a dot.
  *  - the user pushes (tile / bubble / share / notification) → [pushNow] or [pushText], always sent
  *  - a controller asked for `copy`              → the input half calls `ClipboardSync.pushNow("copy")`
@@ -134,14 +135,22 @@ object ClipboardSync {
         if (copied) onChangeSignal("a11y")
     }
 
-    /** AOSP `clipboard_overlay.xml`: the root `clipboard_ui` carries `@string/clipboard_overlay_window_name`. */
-    private fun isClipboardOverlay(e: AccessibilityEvent): Boolean = try {
-        val root = e.source
-        root != null && (isOverlayNode(root) || (0 until minOf(root.childCount, 3)).any { i -> root.getChild(i)?.let { isOverlayNode(it) } == true })
-    } catch (_: Exception) { false }
+    /**
+     * AOSP `clipboard_overlay.xml`: the root `clipboard_ui` carries `@string/clipboard_overlay_window_name`.
+     * The overlay is not the active window: [AccessibilityEvent.getSource] needs the text service's
+     * flagRetrieveInteractiveWindows. The event's own description/text is checked first in case a ROM fills it.
+     */
+    private fun isClipboardOverlay(e: AccessibilityEvent): Boolean {
+        if (matchesOverlay(e.contentDescription) || e.text.any { matchesOverlay(it) }) return true
+        return try {
+            val root = e.source ?: return false
+            isOverlayNode(root) || (0 until minOf(root.childCount, 3)).any { i -> root.getChild(i)?.let { isOverlayNode(it) } == true }
+        } catch (_: Exception) { false }
+    }
 
-    private fun isOverlayNode(n: AccessibilityNodeInfo) =
-        n.contentDescription?.toString()?.equals(overlayName, ignoreCase = true) == true
+    private fun isOverlayNode(n: AccessibilityNodeInfo) = matchesOverlay(n.contentDescription)
+
+    private fun matchesOverlay(s: CharSequence?) = s?.toString()?.trim()?.equals(overlayName, ignoreCase = true) == true
 
     private val overlayName by lazy {
         try {
