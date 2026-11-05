@@ -69,7 +69,7 @@ class VirtualCursor(private val ctx: Context) {
     val attached: Boolean get() = container != null && dot != null
 
     /** The cursor is on screen (or fading in): overlay attached, dot visible, not on its way out. */
-    val shown: Boolean get() = visible && !fadingOut && attached && dot?.visibility == View.VISIBLE && container?.isAttachedToWindow != false
+    val shown: Boolean get() = visible && !fadingOut && attached && dot?.visibility == View.VISIBLE
 
     fun attach() {
         if (container != null) return
