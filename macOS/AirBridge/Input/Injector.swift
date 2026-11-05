@@ -106,6 +106,11 @@ nonisolated final class Injector: @unchecked Sendable {
         guard let t = m["t"] as? String else { return }
         switch t {
         case "ctl_enter":
+            // Loop guard (§8.6): this Mac is controlling `peer`, so `peer` may not control it back.
+            if ControlGate.shared.controlling == peer {
+                PeerBus.shared.send(to: peer, ["t": "ctl_leave", "reason": "loop"])
+                return
+            }
             let edge = (m["edge"] as? String).flatMap(ScreenEdge.init(rawValue:)) ?? .left
             enter(peer, edge, Msg.num(m["rel"]) ?? 0.5)
             return
@@ -150,6 +155,7 @@ nonisolated final class Injector: @unchecked Sendable {
         let before = lease?.peer
         let wasImplicit = lease?.edge == nil
         lease = l
+        ControlGate.shared.controlledBy = l?.peer
         if before != l?.peer || wasImplicit != (l?.edge == nil) {
             ControlStatus.shared.setControlledBy(l.map { name($0.peer) }, implicit: l?.edge == nil)
         }
@@ -166,6 +172,14 @@ nonisolated final class Injector: @unchecked Sendable {
     /// Input gate. Returns true if `peer` holds (or just took) the lease.
     private func admit(_ peer: String) -> Bool {
         let now = CFAbsoluteTimeGetCurrent()
+        if ControlGate.shared.controlling == peer {
+            // Loop guard (§8.6): we are driving this peer; its trackpad/keyboard must not drive us back.
+            if now - (busySent[peer] ?? 0) >= Self.busyInterval {
+                busySent[peer] = now
+                PeerBus.shared.send(to: peer, ["t": "ctl_busy", "holder": Identity.name])
+            }
+            return false
+        }
         if var l = lease {
             if l.peer == peer {
                 l.last = now

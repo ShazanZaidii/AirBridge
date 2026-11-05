@@ -181,7 +181,11 @@ nonisolated final class Controller: @unchecked Sendable {
 
     /// `ctl_ack` from the target: it showed its cursor and can inject input.
     func remoteAck(peer: String) {
-        if session?.peer == peer { session!.acked = true }
+        guard let s = session, s.peer == peer, !s.acked else { return }
+        session!.acked = true
+        let name = peerName(peer), anchor = s.anchor
+        // Hand-off: the target's cursor is up, now the Mac's disappears.
+        DispatchQueue.main.async { CursorHider.hide(); CaptureHUD.shared.show(deviceName: name, anchor: anchor) }
     }
 
     /// No ack in time: the target can't or won't take control. Never leave the user's cursor hostage.
@@ -339,6 +343,7 @@ nonisolated final class Controller: @unchecked Sendable {
         let dx = e.getDoubleValueField(.mouseEventDeltaX), dy = e.getDoubleValueField(.mouseEventDeltaY)
         let cfg = currentSettings()
         guard !dragging, localButtons.isEmpty, now - lastDragEnd >= CaptureSettings.dragCooldown,
+              ControlGate.shared.controlledBy == nil,          // no chaining while this Mac is itself controlled (§8.6)
               !peers.isEmpty, let c = candidate(at: p, dx: dx, dy: dy, cfg) else {
             resetCharge()
             return nil
@@ -432,12 +437,12 @@ nonisolated final class Controller: @unchecked Sendable {
         escDowns.removeAll()
         pendingDX = 0; pendingDY = 0
         CGAssociateMouseAndMouseCursorPosition(0)
-        DispatchQueue.main.async { CursorHider.hide() }
+        ControlGate.shared.controlling = peer
+        // The cursor stays visible (frozen at the edge) until the target confirms its own cursor is up, so there is
+        // never a moment with no cursor anywhere. It is hidden in remoteAck.
         PeerBus.shared.send(to: peer, ["t": "ctl_enter", "edge": edge.opposite.rawValue, "rel": Msg.round(rel, 10000)])
         PeerBus.shared.send(to: peer, ["t": "key_state", "caps": capsOn])
         ControlStatus.shared.setControlling(peerName(peer))
-        let name = peerName(peer)
-        DispatchQueue.main.async { CaptureHUD.shared.show(deviceName: name, anchor: anchor) }
     }
 
     private func end(resumeAt p: CGPoint, sendLeave: Bool) {
@@ -450,6 +455,7 @@ nonisolated final class Controller: @unchecked Sendable {
         remoteButtons.removeAll()
         escDowns.removeAll()
         session = nil
+        ControlGate.shared.controlling = nil
         let now = CFAbsoluteTimeGetCurrent()
         cooldownUntil[s.edge] = now + CaptureSettings.returnCooldown // no bounce back out
         lastEnded = (s.peer, now)
