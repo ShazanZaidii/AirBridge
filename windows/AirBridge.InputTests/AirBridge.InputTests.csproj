@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<!-- Self-check for the pure control logic (§8.1 ack/escape, §8.6 loop gate and stray-state watch, auto edge placement).
+	     Runs on any OS: dotnet run (project AirBridge.InputTests) (exit code 0 = all passed). -->
+	<PropertyGroup>
+		<OutputType>Exe</OutputType>
+		<TargetFramework>net8.0</TargetFramework>
+		<RollForward>Major</RollForward>
+		<Nullable>enable</Nullable>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+	</PropertyGroup>
+	<ItemGroup>
+		<Compile Include="../AirBridge/Input/Edge.cs" Link="Shared/Edge.cs" />
+		<Compile Include="../AirBridge/Input/ControlLogic.cs" Link="Shared/ControlLogic.cs" />
+		<Compile Include="../AirBridge/Input/Layout.cs" Link="Shared/Layout.cs" />
+		<Compile Include="../AirBridge/PeerBus.cs" Link="Shared/PeerBus.cs" />
+	</ItemGroup>
+</Project>
