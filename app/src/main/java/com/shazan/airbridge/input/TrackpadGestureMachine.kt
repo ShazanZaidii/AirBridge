@@ -99,6 +99,8 @@ class TrackpadGestureMachine(
     var lastTouchFingers: Int = 0; private set
 
     private val multi = MultiFingerGesture(config.swipePx, config.pinchPx)
+    /** Diagnostics for the last touch (see [GestureTrace]). */
+    val multiDiag: MultiFingerGesture get() = multi
 
     var state: State = State.Idle; private set
     private val ptrs = LinkedHashMap<Long, Ptr>()
@@ -143,17 +145,26 @@ class TrackpadGestureMachine(
             TouchAction.UP -> up(id, x, y, t)
             TouchAction.CANCEL -> cancel(t)
         }
-        if (action != TouchAction.CANCEL && action != TouchAction.UP) pressed(id, pressure)
+        if (action != TouchAction.CANCEL && action != TouchAction.UP) pressed(id, pressure, t)
     }
 
-    /** Pressure of the only finger down, from the raw event stream ([PressureFeed]). */
-    fun onPressure(pressure: Float) {
-        if (ptrs.size == 1) pressed(primary, pressure)
+    /** Pressure of the only finger down, from the raw event stream ([PressureFeed]); [t] = its event time. */
+    fun onPressure(pressure: Float, t: Long = lastEvent) {
+        if (ptrs.size == 1) pressed(primary, pressure, t)
     }
 
-    private fun pressed(id: Long, pressure: Float) {
+    private var downPressure = Float.NaN
+
+    /**
+     * Firm press = the finger stays put for at least [FIRM_MIN_MS] and its pressure *rises* clearly
+     * after landing ([FIRM_RISE] × the landing pressure, and at least [firmPressAt]). A hard landing
+     * alone is never a firm press, so taps, drags and swipes are never eaten.
+     */
+    private fun pressed(id: Long, pressure: Float, t: Long = lastEvent) {
         if (pressure.isNaN() || id != primary || ptrs.size != 1) return
+        if (downPressure.isNaN()) downPressure = pressure
         if (pressure > peakPressure) peakPressure = pressure
+        if (t - seqStart < FIRM_MIN_MS || pressure < downPressure * FIRM_RISE) return
         if (state == State.Pending && pressure >= firmPressAt && hypot(travelX, travelY) < config.slopPx) {
             state = State.Finished
             tapCount = 0
@@ -226,6 +237,7 @@ class TrackpadGestureMachine(
         tapAllowed = !adopted && t - lastMultiEnd >= config.multiCooldownMs
         multi.reset()
         peakPressure = 0f
+        downPressure = Float.NaN
         lastWasFirm = false
         state = if (adopted) State.Moving else State.Pending
     }
@@ -361,5 +373,10 @@ class TrackpadGestureMachine(
         // §8.2: positive dy = content moves up. Natural scrolling: content follows the fingers.
         val s = if (naturalScroll) -1f else 1f
         emit(GestureIntent.Scroll(fingerDx * s, fingerDy * s))
+    }
+
+    private companion object {
+        const val FIRM_MIN_MS = 120L
+        const val FIRM_RISE = 1.25f
     }
 }

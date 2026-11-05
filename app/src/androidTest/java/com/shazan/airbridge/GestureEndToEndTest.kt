@@ -196,12 +196,15 @@ class GestureEndToEndTest {
 
     // ------------------------------------------------------------------------------- tests
 
-    @Test fun trackpadGesturesPortrait() {
+    @Test fun trackpadStaysLandscapeWithThePhoneUpright() {
         open("Trackpad")
-        rotate(UiAutomation.ROTATION_FREEZE_0, landscape = false)
+        // The phone itself is upright (portrait, rotation locked): the controller is landscape anyway,
+        // and every direction is the landscape screen's.
+        ua.setRotation(UiAutomation.ROTATION_FREEZE_0)
+        SystemClock.sleep(1_500); compose.waitForIdle(); sent.clear()
         val (w, h) = display()
-        assertTrue("portrait window", h > w)
-        swipesAt(w / 2f, h * 0.6f, 26f, "portrait")
+        assertTrue("landscape window while the phone is portrait (${w}x$h)", w > h)
+        swipesAt(w / 2f, h * 0.6f, 22f, "phone upright")
 
         sent.clear()
         touch(listOf(PointF(w / 2f, h * 0.6f)), 0) { _, _ -> PointF(w / 2f, h * 0.6f) }
@@ -216,7 +219,7 @@ class GestureEndToEndTest {
         assertTrue(actions().isEmpty())
 
         sent.clear()
-        val c = PointF(w / 2f - 260, h * 0.6f); val d = PointF(w / 2f + 260, h * 0.6f)
+        val c = PointF(w / 2f - 220, h * 0.6f); val d = PointF(w / 2f + 220, h * 0.6f)
         touch(listOf(c, d), 12) { s, i -> val p = if (i == 0) c else d; PointF(p.x + (if (i == 0) 18f else -18f) * s, p.y) }
         settle()
         assertTrue("two-finger pinch zooms out, got ${actions()}", actions().isNotEmpty() && actions().all { it == "zoom_out" })
@@ -244,7 +247,8 @@ class GestureEndToEndTest {
         assertTrue("ordinary taps stay clicks", actions().isEmpty())
         sent.clear()
         val p = PointF(w / 2f, h * 0.6f)
-        val ramp = listOf(0.3f, 0.36f, 0.45f, 0.58f, 0.7f, 0.8f, 0.85f)
+        // A finger resting, then pressing harder over ~0.2 s (a firm press is a rise, not a hard landing).
+        val ramp = listOf(0.3f, 0.3f, 0.32f, 0.34f, 0.36f, 0.4f, 0.45f, 0.52f, 0.6f, 0.7f, 0.8f, 0.85f)
         // A real fingertip pressed harder wobbles by a fraction of a pixel (well under the touch slop);
         // the system drops move events whose position did not change at all.
         touch(listOf(p), ramp.size - 1, pressureAt = { ramp[it] }) { s, _ -> PointF(p.x + (s % 2) * 0.6f, p.y + (s % 3) * 0.4f) }
@@ -278,6 +282,16 @@ class GestureEndToEndTest {
             settle()
             assertEquals("shortcut $desc", listOf(action), actions())
         }
+
+        // The Keyboard tile shows the phone's full keyboard over the picture and sends nothing itself.
+        sent.clear()
+        compose.onNodeWithContentDescription("Show or hide the keyboard").performClick()
+        settle()
+        assertTrue("keyboard tile sends no action", actions().isEmpty())
+        assertTrue("keyboard is up", compose.onAllNodesWithText("esc").fetchSemanticsNodes().isNotEmpty())
+        compose.onNodeWithContentDescription("Show or hide the keyboard").performClick()
+        settle()
+        assertTrue("keyboard hidden again", compose.onAllNodesWithText("esc").fetchSemanticsNodes().isEmpty())
     }
 
     @Test fun commandHeldWhileTappingTabLikeAHardwareKeyboard() {

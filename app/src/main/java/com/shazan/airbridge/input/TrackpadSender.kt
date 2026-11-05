@@ -98,7 +98,13 @@ class TrackpadSender {
         absX = nx.coerceIn(0f, 1f); absY = ny.coerceIn(0f, 1f)
     }
 
-    fun action(name: String) = send(JSONObject().put("t", "action").put("name", name))
+    /** Diagnostics hook: every action as it goes out, and whether a computer was there to get it. */
+    var actionTap: ((name: String, connected: Boolean) -> Unit)? = null
+
+    fun action(name: String) {
+        actionTap?.invoke(name, peerId != null)
+        send(JSONObject().put("t", "action").put("name", name))
+    }
 
     fun key(hid: Int, down: Boolean, mods: Int, rep: Boolean = false, text: String? = null) {
         flush(force = true)
@@ -226,7 +232,19 @@ suspend fun PointerInputScope.trackpadGestures(
     )
     // Sees the same touches: a 3+ finger touch cancelled before we recognised anything = the system took it.
     val loss = MultiFingerLossDetector(cfg.watchdogMs, onSystemTookGesture)
+    val trace = GestureTrace("Trackpad", density)
     val machine = TrackpadGestureMachine(cfg) { intent ->
+        when (intent) {
+            is GestureIntent.Swipe -> trace.recognised("swipe ${intent.dir.name.lowercase()} (${intent.fingers} fingers)")
+            is GestureIntent.Pinch -> trace.recognised(if (intent.spread) "spread" else "pinch")
+            is GestureIntent.Click -> trace.recognised(if (intent.button == 1) "right click" else "click ×${intent.count}")
+            GestureIntent.DragStart -> trace.recognised("drag")
+            GestureIntent.FirmPress -> trace.recognised("firm press")
+            is GestureIntent.Zoom -> trace.zoomed()
+            is GestureIntent.Move -> trace.moved()
+            is GestureIntent.Scroll -> trace.scrolled(intent.dx, intent.dy)
+            else -> Unit
+        }
         sender.onIntent(intent)
         when (intent) {
             is GestureIntent.Click -> haptic(HapticFeedbackConstants.CONTEXT_CLICK)
@@ -241,7 +259,9 @@ suspend fun PointerInputScope.trackpadGestures(
         }
     }
     val lossReset: () -> Unit = { loss.reset() }
-    pressure?.listener = { p -> machine.onPressure(p); sender.flush() }
+    pressure?.listener = { p, t -> machine.onPressure(p, t); sender.flush() }
+    val tap: (String, Boolean) -> Unit = trace::sentAction
+    sender.actionTap = tap
     sender.attach(machine)
     sender.addResetHook(lossReset)
     try {
@@ -262,8 +282,12 @@ suspend fun PointerInputScope.trackpadGestures(
                 else withTimeoutOrNull(wait) { awaitPointerEvent() }
                 if (event != null) feedPointerEvent(event) { id, a, x, y, t, pr ->
                     loss.onTouch(id, a, t)
+                    trace.onTouch(id, a)
                     machine.onTouch(id, a, x, y, t, pr)
+                    if (a == TouchAction.CANCEL) trace.cancelled()
                     if (a == TouchAction.UP && machine.isIdle) {
+                        val m = machine.multiDiag
+                        trace.ended(m.maxTravel, m.maxPinch, m.swipeThreshold, m.pinchThreshold, machine.lastWasFirm)
                         FirmPress.touchEnded(machine.lastTouchFingers, machine.peakPressure, machine.lastWasFirm)
                         if (com.shazan.airbridge.BuildConfig.DEBUG) android.util.Log.d(
                             "AirBridgeTouch",
@@ -285,6 +309,7 @@ suspend fun PointerInputScope.trackpadGestures(
         // Composable left / activity paused / pointer input restarted: never leave a button held.
         loss.reset()
         pressure?.listener = null
+        if (sender.actionTap === tap) sender.actionTap = null
         sender.removeResetHook(lossReset)
         machine.reset(SystemClock.uptimeMillis())
         sender.detach(machine)

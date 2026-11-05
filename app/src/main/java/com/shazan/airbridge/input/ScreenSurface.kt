@@ -200,6 +200,7 @@ suspend fun PointerInputScope.screenGestures(
     pressure: PressureFeed? = null,
 ) {
     val loss = MultiFingerLossDetector(onLoss = onSystemTookGesture)
+    val trace = GestureTrace("Screen", density)
     fun nx(x: Float) = rect().let { (x - it.left) / max(1f, it.width) }
     fun ny(y: Float) = rect().let { (y - it.top) / max(1f, it.height) }
     val machine = ScreenGestureMachine(
@@ -214,6 +215,17 @@ suspend fun PointerInputScope.screenGestures(
             zoomStepPx = 24.dp.toPx(),
         ),
     ) { i ->
+        when (i) {
+            is ScreenIntent.Swipe -> trace.recognised("swipe ${i.dir.name.lowercase()} (${i.fingers} fingers)")
+            is ScreenIntent.Pinch -> trace.recognised(if (i.spread) "spread" else "pinch")
+            is ScreenIntent.Tap -> trace.recognised(if (i.button == 1) "right click" else "tap ×${i.count}")
+            is ScreenIntent.Press -> trace.recognised("press and drag")
+            is ScreenIntent.FirmPress -> trace.recognised("firm press")
+            is ScreenIntent.Zoom -> trace.zoomed()
+            is ScreenIntent.Hover -> trace.moved()
+            is ScreenIntent.Scroll -> trace.scrolled(i.dx, i.dy)
+            else -> Unit
+        }
         when (i) {
             is ScreenIntent.Hover -> sender.pointAt(nx(i.x), ny(i.y))
             is ScreenIntent.Tap -> {
@@ -259,7 +271,9 @@ suspend fun PointerInputScope.screenGestures(
         }
     }
     val hook: () -> Unit = { machine.reset(); loss.reset() }
-    pressure?.listener = { p -> machine.onPressure(p); sender.flush() }
+    pressure?.listener = { p, t -> machine.onPressure(p, t); sender.flush() }
+    val tap: (String, Boolean) -> Unit = trace::sentAction
+    sender.actionTap = tap
     sender.addResetHook(hook)
     try {
         awaitPointerEventScope {
@@ -276,8 +290,12 @@ suspend fun PointerInputScope.screenGestures(
                 else withTimeoutOrNull(wait) { awaitPointerEvent() }
                 if (event != null) feedPointerEvent(event) { id, a, x, y, t, pr ->
                     loss.onTouch(id, a, t)
+                    trace.onTouch(id, a)
                     machine.onTouch(id, a, x, y, t, pr)
+                    if (a == TouchAction.CANCEL) trace.cancelled()
                     if (a == TouchAction.UP && machine.isIdle) {
+                        val m = machine.multiDiag
+                        trace.ended(m.maxTravel, m.maxPinch, m.swipeThreshold, m.pinchThreshold, machine.lastWasFirm)
                         FirmPress.touchEnded(machine.lastTouchFingers, machine.peakPressure, machine.lastWasFirm)
                     }
                 }
@@ -290,6 +308,7 @@ suspend fun PointerInputScope.screenGestures(
         }
     } finally {
         pressure?.listener = null
+        if (sender.actionTap === tap) sender.actionTap = null
         sender.removeResetHook(hook)
         machine.reset()
         sender.flush(force = true)

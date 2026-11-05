@@ -150,13 +150,27 @@ class TrackpadGestureMachineTest {
         m.firmPressAt = 0.6f
         ev(1, DOWN, 100f, 100f, 0, p = 0.3f)
         ev(1, MOVE, 100f, 100f, 40, p = 0.45f)
+        ev(1, MOVE, 101f, 100f, 80, p = 0.7f) // hard already, but too soon: could still become a tap or drag
         assertTrue(out.isEmpty())
-        ev(1, MOVE, 101f, 100f, 80, p = 0.7f)
-        ev(1, MOVE, 101f, 100f, 100, p = 0.8f) // once only
-        ev(1, UP, 101f, 100f, 140, p = 0.2f)
+        ev(1, MOVE, 101f, 100f, 150, p = 0.75f)
+        ev(1, MOVE, 101f, 100f, 170, p = 0.8f) // once only
+        ev(1, UP, 101f, 100f, 200, p = 0.2f)
         m.tick(2_000)
         assertEquals(listOf(FirmPress), out)
         assertTrue(m.lastWasFirm)
+    }
+
+    @Test fun hardLandingIsStillAClickAndADragStillDrags() {
+        m.firmPressAt = 0.6f
+        ev(1, DOWN, 100f, 100f, 0, p = 0.95f) // lands hard, pressure never rises after that
+        ev(1, MOVE, 100f, 100f, 60, p = 0.95f)
+        ev(1, UP, 100f, 100f, 100, p = 0.5f)
+        assertEquals(listOf(Click(0, 1)), out)
+        out.clear()
+        ev(2, DOWN, 100f, 100f, 1000, p = 0.95f)
+        ev(2, MOVE, 100f, 100f, 1200, p = 0.95f)
+        m.tick(1500)
+        assertEquals(listOf(DragStart), out)
     }
 
     @Test fun lightTapStaysATapAndRecordsItsPeak() {
