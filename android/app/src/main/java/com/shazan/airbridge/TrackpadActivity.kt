@@ -56,6 +56,7 @@ import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.KeyboardHide
 import androidx.compose.material.icons.filled.LaptopMac
 import androidx.compose.material.icons.filled.PanTool
+import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.automirrored.filled.ScreenShare
 import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material.icons.filled.TouchApp
@@ -270,9 +271,10 @@ class TrackpadActivity : ComponentActivity() {
         val busyMap by InputRouter.busyByPeer.collectAsState()
         val controlledBy by InputRouter.controlledBy.collectAsState()
         val paired by PairStore.peers.collectAsState()
-        // Ready desktops only (PeerBus lists ready sessions).
-        val desktops = peers.filter { it.platform in DESKTOPS }
-        val chosenPaired = paired.firstOrNull { it.id == chosenId && it.plat in DESKTOPS }
+        // Ready peers this phone can drive (PeerBus lists ready sessions): computers, and phones whose
+        // AirBridge Universal Control service is on (they advertise ctl_target).
+        val desktops = peers.filter { canDrive(it) }
+        val chosenPaired = paired.firstOrNull { it.id == chosenId && (it.plat in DESKTOPS || it.plat == "android") }
         // §8.6 "No loops": never drive the peer that is controlling this phone. Input only goes to the
         // chosen peer while it is ready; without a (still paired) choice, the first ready desktop.
         val active = if (chosenPaired != null) desktops.firstOrNull { it.id == chosenPaired.id && it.id != controlledBy }
@@ -295,6 +297,7 @@ class TrackpadActivity : ComponentActivity() {
         SideEffect {
             FirmPress.enabled = firm
             InputRouter.driving = if (resumed) active?.id else null
+            sender.targetPlatform = active?.platform ?: "macos"
             if (sender.peerId != active?.id) {
                 keyboard.releaseAll() // to the previous peer, before switching
                 sender.peerId = active?.id
@@ -366,6 +369,7 @@ class TrackpadActivity : ComponentActivity() {
                 TopBar(
                     modifier = Modifier.windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Top)),
                     desktops = desktops,
+                    choices = targetChoices(peers, paired, controlledBy),
                     active = active,
                     wanted = wanted,
                     controlledBy = controlledBy,
@@ -538,9 +542,14 @@ class TrackpadActivity : ComponentActivity() {
                 Notice("No computer connected", "Connect a computer from the AirBridge home screen.")
             } else {
                 Text(
-                    "Tap to click · two-finger tap to right-click · hold, then move to drag · press firmly to force click\n" +
-                        "Two fingers: scroll, pinch to zoom · Four or five fingers: swipe up for Mission Control, " +
-                        "down for App Exposé, left / right for spaces, pinch for Launchpad, spread for the desktop",
+                    if (active.platform == "android")
+                        "Tap to tap · hold, then move to drag · two fingers to scroll\n" +
+                            "Three to five fingers: swipe up for recent apps, down for notifications, sideways for the previous app, " +
+                            "pinch for all apps, spread for home"
+                    else
+                        "Tap to click · two-finger tap to right-click · hold, then move to drag · press firmly to force click\n" +
+                            "Two fingers: scroll, pinch to zoom · Three to five fingers: swipe up for Mission Control, " +
+                            "down for App Exposé, left / right for spaces · four or five: pinch for Launchpad, spread for the desktop",
                     color = Tp.MutedForeground.copy(alpha = 0.6f),
                     fontSize = 13.sp, lineHeight = 19.sp, textAlign = TextAlign.Center,
                     modifier = Modifier.widthIn(max = 520.dp).padding(24.dp),
@@ -652,6 +661,7 @@ class TrackpadActivity : ComponentActivity() {
     private fun TopBar(
         modifier: Modifier,
         desktops: List<PeerInfo>,
+        choices: List<TargetChoice>,
         active: PeerInfo?,
         wanted: String?,
         controlledBy: String?,
@@ -675,7 +685,7 @@ class TrackpadActivity : ComponentActivity() {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            TargetChip(desktops, active, wanted, controlledBy, compact, narrow, onChoose, Modifier.weight(1f, fill = false))
+            TargetChip(desktops, choices, active, wanted, compact, narrow, onChoose, Modifier.weight(1f, fill = false))
             Spacer(Modifier.weight(0.01f))
             ModeSwitcher(mode, compact, onMode, onToggleStats, onToggleGestureLog)
             Spacer(Modifier.weight(0.01f))
@@ -700,12 +710,34 @@ class TrackpadActivity : ComponentActivity() {
         }
     }
 
+    /** One row of the device picker. */
+    data class TargetChoice(val id: String, val name: String, val plat: String, val state: ChoiceState)
+    enum class ChoiceState { READY, CONTROLLING_YOU, NEEDS_SERVICE, OFFLINE }
+
+    private fun canDrive(p: PeerInfo) =
+        p.platform in DESKTOPS || (p.platform == "android" && com.shazan.airbridge.net.Protocol.CAP_TARGET in p.caps)
+
+    /** Every paired computer and phone, with whether it can be driven right now (ready ones first). */
+    private fun targetChoices(peers: List<PeerInfo>, paired: List<com.shazan.airbridge.net.PairedPeer>, controlledBy: String?): List<TargetChoice> {
+        val ready = peers.associateBy { it.id }
+        return paired.filter { it.plat in DESKTOPS || it.plat == "android" }.map { p ->
+            val r = ready[p.id]
+            val state = when {
+                r == null -> ChoiceState.OFFLINE
+                p.id == controlledBy -> ChoiceState.CONTROLLING_YOU
+                !canDrive(r) -> ChoiceState.NEEDS_SERVICE
+                else -> ChoiceState.READY
+            }
+            TargetChoice(p.id, r?.name ?: p.name, p.plat, state)
+        }.sortedBy { it.state.ordinal }
+    }
+
     @Composable
     private fun TargetChip(
         desktops: List<PeerInfo>,
+        choices: List<TargetChoice>,
         active: PeerInfo?,
         wanted: String?,
-        controlledBy: String?,
         compact: Boolean,
         narrow: Boolean,
         onChoose: (PeerInfo) -> Unit,
@@ -715,10 +747,11 @@ class TrackpadActivity : ComponentActivity() {
         Box(modifier) {
             Row(
                 Modifier.height(Tp.TouchTarget).clip(RoundedCornerShape(Tp.Radius)).background(Tp.Surface)
-                    .clickable(enabled = desktops.size > 1 || narrow, role = Role.DropdownList) { menu = true }
+                    // Always opens the picker: shows what can be controlled, even when there is one device.
+                    .clickable(role = Role.DropdownList) { menu = true }
                     .semantics(mergeDescendants = true) {
-                        contentDescription = active?.let { "Controlling ${it.name}" }
-                            ?: wanted?.let { "Not connected to $it" } ?: "No computer connected"
+                        contentDescription = (active?.let { "Controlling ${it.name}" }
+                            ?: wanted?.let { "Not connected to $it" } ?: "No computer connected") + ". Tap to choose a device"
                     }
                     .padding(horizontal = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -737,36 +770,46 @@ class TrackpadActivity : ComponentActivity() {
                 // Narrow (portrait phone): the icon and its status dot only; the name is in the menu.
                 if (!narrow) Spacer(Modifier.width(10.dp))
                 if (!narrow) Text(
-                    active?.name ?: wanted ?: "No computer",
+                    active?.name ?: wanted ?: "No device",
                     color = if (active != null) Tp.Foreground else Tp.MutedForeground,
                     fontSize = 15.sp, fontWeight = FontWeight.Medium,
                     maxLines = 1, overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.widthIn(max = if (compact) 120.dp else 260.dp),
                 )
-                if (desktops.size > 1) {
-                    Spacer(Modifier.width(4.dp))
-                    Icon(Icons.Default.ExpandMore, contentDescription = null, tint = Tp.MutedForeground, modifier = Modifier.size(20.dp))
-                }
+                Spacer(Modifier.width(4.dp))
+                Icon(Icons.Default.ExpandMore, contentDescription = null, tint = Tp.MutedForeground, modifier = Modifier.size(20.dp))
             }
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }, containerColor = Tp.Surface) {
-                desktops.forEach { p ->
-                    val controlling = p.id == controlledBy
+                if (choices.isEmpty()) DropdownMenuItem(
+                    enabled = false,
+                    text = { Text("No paired computers or phones yet. Pair one from the AirBridge home screen.", color = Tp.MutedForeground) },
+                    onClick = {},
+                )
+                choices.forEach { c ->
+                    val peer = desktops.firstOrNull { it.id == c.id }
+                    val selectable = c.state == ChoiceState.READY && peer != null
                     DropdownMenuItem(
-                        enabled = !controlling,
-                        leadingIcon = { Icon(platformIcon(p.platform), contentDescription = null, tint = Tp.Foreground) },
+                        enabled = selectable,
+                        leadingIcon = { Icon(platformIcon(c.plat), contentDescription = null, tint = if (selectable) Tp.Foreground else Tp.MutedForeground) },
                         text = {
                             Column {
-                                Text(p.name, color = Tp.Foreground, fontWeight = if (p.id == active?.id) FontWeight.SemiBold else FontWeight.Normal)
+                                Text(c.name, color = if (selectable) Tp.Foreground else Tp.MutedForeground,
+                                    fontWeight = if (c.id == active?.id) FontWeight.SemiBold else FontWeight.Normal)
                                 Text(
-                                    if (controlling) "Being controlled by ${p.name}" else platformLabel(p.platform),
+                                    when (c.state) {
+                                        ChoiceState.READY -> platformLabel(c.plat)
+                                        ChoiceState.CONTROLLING_YOU -> "Controlling this phone"
+                                        ChoiceState.NEEDS_SERVICE -> "Turn on AirBridge Universal Control on it"
+                                        ChoiceState.OFFLINE -> "Not connected"
+                                    },
                                     color = Tp.MutedForeground, fontSize = 12.sp,
                                 )
                             }
                         },
-                        trailingIcon = if (p.id == active?.id) {
+                        trailingIcon = if (c.id == active?.id) {
                             { Icon(Icons.Default.Check, contentDescription = "Selected", tint = Tp.Accent) }
                         } else null,
-                        onClick = { menu = false; onChoose(p) },
+                        onClick = { menu = false; peer?.let(onChoose) },
                         modifier = Modifier.height(Tp.BarHeight),
                     )
                 }
@@ -844,10 +887,11 @@ class TrackpadActivity : ComponentActivity() {
     private fun platformIcon(p: String?): ImageVector = when (p) {
         "macos" -> Icons.Default.LaptopMac
         "windows" -> Icons.Default.DesktopWindows
+        "android" -> Icons.Default.PhoneAndroid
         else -> Icons.Default.Computer
     }
 
     private fun platformLabel(p: String) = when (p) {
-        "macos" -> "Mac"; "windows" -> "Windows"; "linux" -> "Linux"; else -> p
+        "macos" -> "Mac"; "windows" -> "Windows"; "linux" -> "Linux"; "android" -> "Android phone"; else -> p
     }
 }

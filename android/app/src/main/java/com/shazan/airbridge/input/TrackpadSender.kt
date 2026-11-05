@@ -16,6 +16,9 @@ import kotlin.math.max
  * in practice is once per input frame. Main thread only.
  */
 class TrackpadSender {
+    /** Platform of the device being driven ("macos", "windows", "android"…): picks gesture actions. */
+    @Volatile var targetPlatform: String = "macos"
+
     var peerId: String? = null
         set(value) {
             if (value != field) releaseAll() // releases go to the previous peer
@@ -66,8 +69,8 @@ class TrackpadSender {
             is GestureIntent.Click -> click(i.button, i.count)
             GestureIntent.DragStart -> button(true)
             GestureIntent.DragEnd -> button(false)
-            is GestureIntent.Swipe -> action(swipeAction(i.dir))
-            is GestureIntent.Pinch -> action(pinchAction(i.spread))
+            is GestureIntent.Swipe -> action(swipeAction(i.dir, targetPlatform))
+            is GestureIntent.Pinch -> action(pinchAction(i.spread, targetPlatform))
             is GestureIntent.Zoom -> action(if (i.inward) "zoom_out" else "zoom_in")
             GestureIntent.FirmPress -> { flush(force = true); action(FIRM_PRESS_ACTION) }
             GestureIntent.ResetAll -> { flush(force = true); button(false) }
@@ -148,13 +151,20 @@ class TrackpadSender {
         const val FIRM_PRESS_ACTION = "look_up"
 
         /** Four- / five-finger pinch (§8.5): together = Launchpad (`app_drawer`), apart = `show_desktop`. */
-        fun pinchAction(spread: Boolean) = if (spread) "show_desktop" else "app_drawer"
+        fun pinchAction(spread: Boolean, platform: String = "macos") =
+            if (platform == "android") (if (spread) "home" else "app_drawer")
+            else (if (spread) "show_desktop" else "app_drawer")
 
         /**
          * Four- and five-finger swipes (§8.5), same for both: up = Mission Control, down = App
          * Exposé. Fingers moving right reveal the desktop on the left (macOS convention).
          */
-        fun swipeAction(dir: SwipeDir) = when (dir) {
+        fun swipeAction(dir: SwipeDir, platform: String = "macos") = if (platform == "android") when (dir) {
+            // A phone being driven: up = recent apps, down = notifications, sideways = previous app.
+            SwipeDir.UP -> "recents"
+            SwipeDir.DOWN -> "notifications"
+            SwipeDir.LEFT, SwipeDir.RIGHT -> "last_app"
+        } else when (dir) {
             SwipeDir.UP -> "mission_control"
             SwipeDir.DOWN -> "app_expose"
             SwipeDir.RIGHT -> "desktop_left"

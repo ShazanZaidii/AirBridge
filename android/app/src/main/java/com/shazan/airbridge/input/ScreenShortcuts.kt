@@ -26,7 +26,12 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.automirrored.outlined.VolumeDown
+import androidx.compose.material.icons.automirrored.outlined.VolumeUp
 import androidx.compose.material.icons.outlined.Apps
+import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material.icons.outlined.CallToAction
 import androidx.compose.material.icons.outlined.Crop
 import androidx.compose.material.icons.outlined.FilterNone
@@ -77,6 +82,13 @@ const val KEYBOARD_TOGGLE = "@keyboard"
  */
 object ScreenShortcuts {
     fun left(platform: String): List<Shortcut> = when (platform) {
+        "android" -> listOf(
+            Shortcut(KEYBOARD_TOGGLE, "Keyboard", Icons.Outlined.Keyboard, "Show or hide the keyboard"),
+            Shortcut("back", "Back", Icons.AutoMirrored.Outlined.ArrowBack),
+            Shortcut("home", "Home", Icons.Outlined.Home),
+            Shortcut("recents", "Recents", Icons.Outlined.FilterNone, "Recent apps"),
+            Shortcut("app_drawer", "Apps", Icons.Outlined.Apps, "All apps"),
+        )
         "windows" -> listOf(
             Shortcut(KEYBOARD_TOGGLE, "Keyboard", Icons.Outlined.Keyboard, "Show or hide the keyboard"),
             Shortcut("mission_control", "Task View", Icons.Outlined.SpaceDashboard),
@@ -96,6 +108,13 @@ object ScreenShortcuts {
     }
 
     fun right(platform: String): List<Shortcut> = when (platform) {
+        "android" -> listOf(
+            Shortcut("notifications", "Alerts", Icons.Outlined.Notifications, "Notifications"),
+            Shortcut("quick_settings", "Settings", Icons.Outlined.Tune, "Quick settings"),
+            Shortcut("vol_up", "Vol +", Icons.AutoMirrored.Outlined.VolumeUp, "Volume up"),
+            Shortcut("vol_down", "Vol −", Icons.AutoMirrored.Outlined.VolumeDown, "Volume down"),
+            Shortcut("lock", "Lock", Icons.Outlined.Lock, "Lock screen"),
+        )
         "windows" -> listOf(
             Shortcut("spotlight", "Search", Icons.Outlined.Search),
             Shortcut("notifications", "Alerts", Icons.Outlined.Notifications, "Notifications"),

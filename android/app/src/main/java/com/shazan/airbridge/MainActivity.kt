@@ -54,6 +54,7 @@ import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.Layers
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.NearMe
+import androidx.compose.material.icons.outlined.QrCode2
 import androidx.compose.material.icons.outlined.QrCodeScanner
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Wifi
@@ -82,6 +83,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
@@ -535,6 +537,8 @@ private fun AddDeviceScreen(
     // A phone already listed on this Wi-Fi (faster) is not listed again under Nearby.
     val androidList = androids.filter { (it.peerId == null || it.peerId !in pairedIds) && it.peerId !in hosts.keys }
     var askAddress by remember { mutableStateOf(false) }
+    var showQr by remember { mutableStateOf(false) }
+    if (showQr) ShowQrDialog(onDismiss = { showQr = false })
     if (askAddress) AddressDialog(onDismiss = { askAddress = false }, onConnect = { h, p -> askAddress = false; onPickAddress(h, p) })
 
     AbScaffold(
@@ -542,10 +546,11 @@ private fun AddDeviceScreen(
         onBack = onBack,
         actions = { if (onBack == null) IconButton(onClick = onOpenSettings) { Icon(Icons.Outlined.Settings, contentDescription = "Settings") } },
         bottomBar = {
-            Column(Modifier.navigationBarsPadding().padding(Dimens.md)) {
-                SecondaryButton("Scan QR code", icon = Icons.Outlined.QrCodeScanner, onClick = {
+            Row(Modifier.navigationBarsPadding().padding(Dimens.md), horizontalArrangement = Arrangement.spacedBy(Dimens.sm)) {
+                SecondaryButton("Scan QR code", icon = Icons.Outlined.QrCodeScanner, modifier = Modifier.weight(1f), onClick = {
                     if (granted(ctx, Manifest.permission.CAMERA)) onOpenScanner() else cameraLauncher.launch(Manifest.permission.CAMERA)
                 })
+                SecondaryButton("Show QR code", icon = Icons.Outlined.QrCode2, modifier = Modifier.weight(1f), onClick = { showQr = true })
             }
         },
     ) {
@@ -582,8 +587,12 @@ private fun AddDeviceScreen(
                 AbCard(onClick = { askAddress = true }) {
                     InfoRow(
                         title = "Connect by address",
-                        subtitle = if (mine.isNotEmpty() && port > 0) "Can't see it? Enter its address. This phone is ${mine.first()}${if (port != 47632) ":$port" else ""}"
-                        else "Can't see it? Enter its address.",
+                        subtitle = when {
+                            // An emulator's address only exists inside the computer it runs on: nobody can dial it.
+                            com.shazan.airbridge.net.EmulatorHost.isEmulator -> "Can't see it? Enter its address. This is an emulator: start pairing from here, other devices can't reach it."
+                            mine.isNotEmpty() && port > 0 -> "Can't see it? Enter its address. This phone is ${mine.first()}${if (port != 47632) ":$port" else ""}"
+                            else -> "Can't see it? Enter its address."
+                        },
                         leading = { PlatformAvatar("") },
                         trailing = { Text("Enter", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.tertiary) },
                     )
@@ -621,6 +630,59 @@ private fun AddDeviceScreen(
             item { Spacer(Modifier.height(Dimens.md)) }
         }
     }
+}
+
+/**
+ * This phone's pairing QR code (mode qr, §2.4): the other phone scans it with "Scan QR code" and pairs
+ * at once, no digits to compare. The secret is fresh each time and dies when the dialog closes.
+ */
+@Composable
+private fun ShowQrDialog(onDismiss: () -> Unit) {
+    val link by com.shazan.airbridge.net.LanHost.qrLink.collectAsState()
+    val pairedCount = PairStore.peers.collectAsState().value.size
+    val startCount = remember { pairedCount }
+    DisposableEffect(Unit) {
+        com.shazan.airbridge.net.LanHost.openQr()
+        onDispose { com.shazan.airbridge.net.LanHost.closeQr() }
+    }
+    LaunchedEffect(pairedCount) { if (pairedCount > startCount) onDismiss() } // paired: done
+    val addr = remember(link) { com.shazan.airbridge.net.LanHost.localAddresses().firstOrNull() }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Scan to pair") },
+        text = {
+            Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(Dimens.md)) {
+                val l = link
+                if (l == null) {
+                    Text("Connect this phone to Wi-Fi first: the other device reaches it over the network.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                } else {
+                    QrImage(l, 240.dp)
+                    Text("On the other phone: AirBridge › Add a device › Scan QR code.",
+                        style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
+                    Text("${Identity.name} · ${addr ?: ""}", style = MaterialTheme.typography.labelLarge)
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } },
+    )
+}
+
+/** A QR code drawn with ZXing, black on white with a quiet zone (scanners need the contrast). */
+@Composable
+private fun QrImage(text: String, size: androidx.compose.ui.unit.Dp) {
+    val bmp = remember(text) {
+        val m = com.google.zxing.qrcode.QRCodeWriter().encode(
+            text, com.google.zxing.BarcodeFormat.QR_CODE, 600, 600,
+            mapOf(com.google.zxing.EncodeHintType.MARGIN to 2),
+        )
+        val px = IntArray(m.width * m.height) { i -> if (m.get(i % m.width, i / m.width)) android.graphics.Color.BLACK else android.graphics.Color.WHITE }
+        android.graphics.Bitmap.createBitmap(px, m.width, m.height, android.graphics.Bitmap.Config.ARGB_8888).asImageBitmap()
+    }
+    androidx.compose.foundation.Image(
+        bmp, contentDescription = "Pairing QR code",
+        modifier = Modifier.size(size).background(androidx.compose.ui.graphics.Color.White, MaterialTheme.shapes.medium).padding(Dimens.sm),
+    )
 }
 
 /** "192.168.1.20" or "192.168.1.20:47633" → pair with whatever AirBridge device answers there. */
@@ -683,6 +745,7 @@ private fun DevicesScreen(
     // The lease holder as the input half reports it: cleared the moment its session ends (§8.6).
     val controller by InputRouter.controlledBy.collectAsState()
     var forgetting by remember { mutableStateOf<PairedPeer?>(null) }
+    val readyPeers by InputRouter.peers.collectAsState()
     val resumeTick = rememberResumeTick()
     val serviceRunning by AirBridgeInputService.runningFlow.collectAsState()
     val setupDismissed by RemoteControlSetup.cardDismissed.collectAsState()
@@ -736,6 +799,7 @@ private fun DevicesScreen(
                 val st = status[peer.id] ?: PeerStatus.OFFLINE
                 DeviceCard(
                     peer = peer,
+                    caps = readyPeers.firstOrNull { it.id == peer.id }?.caps.orEmpty(),
                     status = st,
                     controllingYou = st == PeerStatus.CONNECTED && controller == peer.id,
                     onForget = { forgetting = peer },
@@ -760,6 +824,7 @@ private fun DevicesScreen(
 @Composable
 private fun DeviceCard(
     peer: PairedPeer,
+    caps: Set<String>,
     status: PeerStatus,
     controllingYou: Boolean,
     onForget: () -> Unit,
@@ -804,7 +869,7 @@ private fun DeviceCard(
             Box {
                 IconButton(onClick = { menu = true }) { Icon(Icons.Outlined.MoreVert, contentDescription = "More options for ${peer.name}") }
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                    if (desktop && status == PeerStatus.CONNECTED) DropdownMenuItem(
+                    if ((desktop || (peer.plat == "android" && com.shazan.airbridge.net.Protocol.CAP_TARGET in caps)) && status == PeerStatus.CONNECTED) DropdownMenuItem(
                         text = { Text("Use as trackpad") },
                         onClick = { menu = false; onTrackpad(TrackpadActivity.Mode.Trackpad) },
                     )
@@ -823,16 +888,27 @@ private fun DeviceCard(
                 }
             }
         }
-        // A connected computer: the three ways to control it, one tap away.
-        if (desktop && status == PeerStatus.CONNECTED && !controllingYou) {
+        // A connected computer or phone: the ways to control it, one tap away. A phone is controllable
+        // once its AirBridge Universal Control service is on (it then advertises ctl_target); it can't
+        // share its screen, so it gets Trackpad and Keyboard only.
+        val phone = peer.plat == "android"
+        val drivable = desktop || (phone && com.shazan.airbridge.net.Protocol.CAP_TARGET in caps)
+        if (status == PeerStatus.CONNECTED && !controllingYou && drivable) {
             Row(
                 Modifier.fillMaxWidth().padding(start = Dimens.md, end = Dimens.md, bottom = Dimens.md),
                 horizontalArrangement = Arrangement.spacedBy(Dimens.sm),
             ) {
                 for (m in TrackpadActivity.Mode.entries) {
+                    if (phone && m == TrackpadActivity.Mode.Screen && "mirror_source" !in caps) continue
                     CardAction(m.label, m.icon, Modifier.weight(1f)) { onTrackpad(m) }
                 }
             }
+        } else if (status == PeerStatus.CONNECTED && phone && !controllingYou) {
+            Text(
+                "To control ${peer.name} from here, turn on AirBridge Universal Control in its Accessibility settings.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = Dimens.md, end = Dimens.md, bottom = Dimens.md),
+            )
         }
     }
 }
