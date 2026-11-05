@@ -297,6 +297,14 @@ An active attacker cannot pair (confirm digits mismatch) nor hijack an existing 
 - Android: because Android 10+ only allows clipboard reads from the focused app, the Android app sends `clip`
   when the user triggers a push (tile, bubble, share) and **automatically** after a `copy` action requested by
   a controller (§8.5) and when the app comes to the foreground with changed content.
+- Android automatic sync (setting "Send copies to my computers automatically", default on): while the service
+  runs, a local copy (clipboard listener where the ROM delivers it in the background; on stock Android 10+ only
+  via the accessibility service, from the system clipboard overlay or a "Copy"/"Cut" tap) is debounced (400 ms),
+  then read by briefly taking focus (a 1×1 overlay window, else the invisible activity) and sent as `clip`.
+  Never sent automatically: clips flagged `android.content.extra.IS_SENSITIVE`, clips from another device
+  (`IS_REMOTE_DEVICE`), file lists, and AirBridge's own clips (label `AirBridge`, 2 s echo window, hash). If the
+  focused read cannot happen, the bubble shows a dot ("not sent yet"); tapping it sends. Nothing runs while the
+  service is not running.
 - Android floating bubble: it exists only for manual pushes. It is **hidden** while the phone is under a control
   lease (§8.6) or while the trackpad/mirror screen is open (copies are automatic there), and comes back when
   that ends.
