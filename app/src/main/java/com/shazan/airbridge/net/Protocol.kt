@@ -16,19 +16,39 @@ object Protocol {
     const val PLATFORM = "android"
     val APP_VERSION: String = BuildConfig.VERSION_NAME
     const val CAP_TARGET = "ctl_target"
+    const val CAP_TYPE = "type_target"
+
+    /** Caps that follow the accessibility services at runtime; [CapsRefresh] keeps them current. */
+    val DYNAMIC_CAPS: Set<String> = setOf(CAP_TARGET, CAP_TYPE)
 
     /**
-     * §3.1 caps for the next `hello`. `ctl_target` only while the accessibility service runs (we can
-     * show a cursor and inject input), so a controller never captures its pointer for a phone that
-     * can't answer; [CapsRefresh] reconnects ready sessions when that changes.
+     * §3.1 caps for the next `hello`. `ctl_target` only while the core accessibility service runs (we
+     * can show a cursor and inject input), so a controller never captures its pointer for a phone
+     * that can't answer. `type_target` only while the optional typing service runs as well (we can
+     * type into the focused field). [CapsRefresh] reconnects ready sessions when either changes.
      */
-    fun caps(): List<String> = capsFor(targetAvailable())
+    fun caps(): List<String> = capsFor(targetAvailable(), typingAvailable())
 
-    fun capsFor(target: Boolean): List<String> =
-        if (target) STATIC_CAPS.take(2) + CAP_TARGET + STATIC_CAPS.drop(2) else STATIC_CAPS
+    fun capsFor(target: Boolean, typing: Boolean = false): List<String> =
+        STATIC_CAPS.take(2) + dynamicFor(target, typing) + STATIC_CAPS.drop(2)
+
+    /** `type_target` never without `ctl_target`: a phone that can't be a target receives no `key`. */
+    private fun dynamicFor(target: Boolean, typing: Boolean): List<String> = when {
+        !target -> emptyList()
+        typing -> listOf(CAP_TARGET, CAP_TYPE)
+        else -> listOf(CAP_TARGET)
+    }
+
+    /** The [DYNAMIC_CAPS] a `hello` sent now would carry. */
+    fun dynamicCaps(): Set<String> = dynamicFor(targetAvailable(), typingAvailable()).toSet()
 
     fun targetAvailable(): Boolean = try {
         com.shazan.airbridge.AirBridgeInputService.isRunning
+    } catch (_: Throwable) { false }
+
+    /** Typing needs both: the core service receives `key`, the text service reaches the field. */
+    fun typingAvailable(): Boolean = targetAvailable() && try {
+        com.shazan.airbridge.AirBridgeTextService.isRunning
     } catch (_: Throwable) { false }
 
     /**

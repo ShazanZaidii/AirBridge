@@ -11,8 +11,13 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
 /**
- * Accessibility service hosting the target role (virtual cursor + input injection). All protocol
- * logic lives in [TargetController]; messages arrive via [InputRouter] / PeerBus.
+ * Core accessibility service "AirBridge Universal Control": hosts the target role (virtual cursor,
+ * gestures, global actions). All protocol logic lives in [TargetController]; messages arrive via
+ * [InputRouter] / PeerBus.
+ *
+ * Gestures-only profile (res/xml/accessibility_service_config.xml): it cannot read the screen and
+ * receives no events. Typing, copy/paste and copy detection need screen content and live in the
+ * optional [AirBridgeTextService].
  */
 class AirBridgeInputService : AccessibilityService() {
 
@@ -51,7 +56,8 @@ class AirBridgeInputService : AccessibilityService() {
         controller?.onConfigurationChanged()
     }
 
-    override fun onAccessibilityEvent(event: AccessibilityEvent?) { event?.let { com.shazan.airbridge.net.ClipboardSync.onAccessibilityEvent(it) } }
+    /** No event types are declared, so nothing arrives here. */
+    override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
 
     override fun onInterrupt() {}
 

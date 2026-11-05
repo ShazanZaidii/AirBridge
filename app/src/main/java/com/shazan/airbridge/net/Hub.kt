@@ -179,8 +179,8 @@ object Hub : PeerBus.Transport {
         if (pairingSession === s) { pairingSession = null; _pairing.value = null }
         if (s.isPairing) _events.tryEmit(NetEvent.PairResult(true, s.peerName))
         peersChanged()
-        // ctl_target flipped during this handshake: its hello is already stale.
-        if (s.advertisedTarget != null && s.advertisedTarget != Protocol.targetAvailable()) CapsRefresh.poke()
+        // ctl_target / type_target flipped during this handshake: its hello is already stale.
+        if (s.advertisedDynamic.let { it != null && it != Protocol.dynamicCaps() }) CapsRefresh.poke()
         LinkManager.onSessionReady(s) // after the old session was retired: a held xfer_offer goes on [s]
     }
 
@@ -293,7 +293,7 @@ object Hub : PeerBus.Transport {
                     if (t == "ctl_enter") s.send(Protocol.withReason("ctl_leave", "unavailable"))
                     if (t in PeerBus.CONTROL_TYPES && !accessibilityToastShown) {
                         accessibilityToastShown = true
-                        toast("Enable Accessibility Service in Android Settings to simulate Mouse (or from the App)", long = true)
+                        toast("Turn on \"AirBridge Universal Control\" in Accessibility settings so your computer can control this phone", long = true)
                     }
                 } else {
                     try { PeerBus.dispatchControl(id, m) } catch (e: Exception) { Log.w(TAG, "controlHandler", e) }

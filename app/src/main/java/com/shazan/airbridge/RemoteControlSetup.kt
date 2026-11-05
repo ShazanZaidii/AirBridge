@@ -64,7 +64,7 @@ object RemoteControlSetup {
             setDismissed(false)
             if (!notifyLimit.tryAcquire(System.currentTimeMillis())) return
             val title = "${controllerNoun(plat)} can't control this phone yet"
-            val text = "Turn on the AirBridge accessibility service"
+            val text = "Turn on \"AirBridge Universal Control\" in Accessibility settings"
             val open = PendingIntent.getActivity(
                 ctx, 7, settingsIntent(), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
@@ -72,7 +72,7 @@ object RemoteControlSetup {
                 .setSmallIcon(R.drawable.ic_stat_name)
                 .setContentTitle(title)
                 .setContentText(text)
-                .setStyle(NotificationCompat.BigTextStyle().bigText("$text so the cursor can appear and your clicks and typing reach this phone."))
+                .setStyle(NotificationCompat.BigTextStyle().bigText("$text so the cursor can appear and your clicks reach this phone."))
                 .setContentIntent(open)
                 .addAction(0, "Turn on", open)
                 .setAutoCancel(true)
