@@ -62,6 +62,13 @@ over mDNS and encoded in the pairing QR. Clients must never assume the port.
 
 WebSocket path: **`/v2`**. A host must reject any other path (HTTP 404) so v1 clients fail fast.
 
+**Phones host too.** Android also listens and advertises (§2.3) while AirBridge runs, so two phones on
+the same network pair over Wi-Fi without Bluetooth (Nearby, §10, remains the route when there is no
+shared network). The phone that dials is the client; the hosting phone accepts pairing only after its
+user confirmed the same 6 digits (§3.3 `confirm`), stores the peer as incoming-only and never dials it,
+so two phones never race to connect to each other. A host that cannot be discovered (networks that block
+multicast, an emulator behind NAT) can still be paired by entering its address on the other device.
+
 ### 2.3 mDNS / Bonjour
 
 Service type **`_airbridge._tcp`**, domain `local.`. Instance name = the device `name` (the OS may append
