@@ -42,6 +42,7 @@ class TargetKeys(private val host: TargetController) {
     // ---- v1's one-key phone shortcuts: ⌘ / Win / Menu tapped on its own ----
     // left ⌘ (or Win) = Home; right ⌘ (or Menu / right Win) = notification shade, again = quick
     // settings (the full shade), again = close. Any other key in between makes it a normal modifier.
+    private var dHeld = false
     private var soloKey = -1
     private var soloAt = 0L
     private var shadeStep = 0
@@ -54,6 +55,7 @@ class TargetKeys(private val host: TargetController) {
             shadeStep = 0
             return
         }
+        // right ⌘ / right Win / Menu / Ctrl (v1 on Windows: Ctrl = shade, Ctrl twice = quick settings)
         if (now - shadeAt > SHADE_RESET_MS) shadeStep = 0 // the user closed it some other way meanwhile
         shadeStep = (shadeStep + 1) % 3
         shadeAt = now
@@ -73,15 +75,28 @@ class TargetKeys(private val host: TargetController) {
     fun onKey(hid: Int, down: Boolean, mods: Int, rep: Boolean, text: String?) {
         val now = SystemClock.uptimeMillis()
         if (down) {
-            if (hid == Hid.LGUI || hid == Hid.RGUI || hid == Hid.APPLICATION) { if (!rep) { soloKey = hid; soloAt = now } }
+            if (hid in SOLO_KEYS) { if (!rep) { soloKey = hid; soloAt = now } }
             else if (!rep) soloKey = -1
         } else if (hid == soloKey) {
             soloKey = -1
             if (now - soloAt <= SOLO_TAP_MS) soloTap(hid)
         }
-        if (!down) { pressed.remove(hid); return }
+        if (!down) {
+            pressed.remove(hid)
+            if (hid == Hid.D && dHeld) { dHeld = false; host.keyButton(false) }
+            return
+        }
         pressed.add(hid)
         if (hid == Hid.APPLICATION) return
+        // v1 phone keys while nothing is being typed into (no focused text field):
+        // delete = recent apps, hold H = long-press at the cursor, hold D = press and drag.
+        if (mods and (Mods.CTRL or Mods.GUI or Mods.ALT) == 0 && !typing()) {
+            when (hid) {
+                Hid.BACKSPACE, Hid.DELETE -> { if (!rep) svc.performGlobalAction(AccessibilityService.GLOBAL_ACTION_RECENTS); return }
+                Hid.H -> { if (!rep) host.longPress(host.x, host.y); return }
+                Hid.D -> { if (!rep && !dHeld) { dHeld = true; host.keyButton(true) }; return }
+            }
+        }
         if (Hid.isModifier(hid) || hid == Hid.CAPS_LOCK) return // caps state is ignored on Android
 
         val cmd = mods and (Mods.CTRL or Mods.GUI) != 0
@@ -126,6 +141,7 @@ class TargetKeys(private val host: TargetController) {
         val gui = mods and Mods.GUI != 0
         when {
             hid == Hid.TAB -> lastApp()
+            hid == Hid.SPACE -> host.appDrawerSwipe() // ⌘ Space / Win Space = app drawer (v1)
             gui && hid == Hid.H -> svc.performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME)
             hid == Hid.C -> copy()
             hid == Hid.X -> cut()
@@ -384,7 +400,11 @@ class TargetKeys(private val host: TargetController) {
         return true
     }
 
+    /** A focused text field: keys type. Without one, the v1 phone shortcuts apply. */
+    private fun typing(): Boolean = editable() != null
+
     private companion object {
+        val SOLO_KEYS = setOf(Hid.LGUI, Hid.RGUI, Hid.APPLICATION, Hid.LCTRL, Hid.RCTRL)
         const val SOLO_TAP_MS = 600L
         const val SHADE_RESET_MS = 8_000L
     }

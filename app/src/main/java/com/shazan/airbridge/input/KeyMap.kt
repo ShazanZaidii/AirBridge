@@ -7,6 +7,7 @@ object Hid {
     const val A = 0x04
     const val Z = 0x1D
     const val C = 0x06
+    const val D = 0x07
     const val H = 0x0B
     const val V = 0x19
     const val X = 0x1B

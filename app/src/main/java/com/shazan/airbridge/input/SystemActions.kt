@@ -27,6 +27,11 @@ class SystemActions(private val host: TargetController) {
                 "home" -> global(AccessibilityService.GLOBAL_ACTION_HOME)
                 "back" -> global(AccessibilityService.GLOBAL_ACTION_BACK)
                 "recents" -> global(AccessibilityService.GLOBAL_ACTION_RECENTS)
+                // A Mac's own keys / gestures aimed at a phone: their phone meaning.
+                "mission_control", "app_expose" -> global(AccessibilityService.GLOBAL_ACTION_RECENTS)
+                "spotlight" -> host.appDrawerSwipe()
+                "show_desktop" -> global(AccessibilityService.GLOBAL_ACTION_HOME)
+                "desktop_left", "desktop_right" -> host.keys.lastApp()
                 "last_app" -> host.keys.lastApp()
                 "app_drawer" -> host.appDrawerSwipe()
                 "notifications" -> global(AccessibilityService.GLOBAL_ACTION_NOTIFICATIONS)
