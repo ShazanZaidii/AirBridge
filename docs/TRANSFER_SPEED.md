@@ -182,8 +182,8 @@ identical file exists) needs a hash up front, so only offer it for resume.
 
 Go 1.26, Apple M1 Pro (10 cores), macOS 26.5.1, loopback TCP, NODELAY, 1 GiB per run, 3 runs (median).
 **Loopback has no Wi-Fi and no disk. It measures CPU/crypto/framing cost only**, both ends on one machine.
-CPU = user+sys seconds per GiB for both ends combined. Harness: `/private/tmp/claude-501/-Users-xaidi-AndroidStudioProjects-AirBridge/794ba934-b867-422e-8a6e-a6047cb2814a/scratchpad/bench/main.go` (temporary session
-scratchpad, not in the repo). `ws` copies like the Android code. `wsopt` keeps the same v2 wire format with zero copies.
+CPU = user+sys seconds per GiB for both ends combined. Harness: a local Go benchmark (`bench/main.go`, kept outside
+the repo). `ws` copies like the Android code. `wsopt` keeps the same v2 wire format with zero copies.
 
 | Design | MiB/s | CPU s/GiB | 1 core (GOMAXPROCS=1) |
 |---|---|---|---|
@@ -226,6 +226,6 @@ The raw path (c) costs about as much CPU as TLS, and is cheaper per byte than ou
 6. **Report**: MB/s = bytes ÷ wall time, % of iperf3 `-P1` and `-P4`, phone CPU (`adb shell top -d 1`)
    and battery temperature. Target: AirBridge ≥ LocalSend-fastest on every dataset, and ≥ 90% of iperf3 `-P1` on 1 GiB.
 
-To rerun the localhost numbers: `cd /private/tmp/claude-501/-Users-xaidi-AndroidStudioProjects-AirBridge/794ba934-b867-422e-8a6e-a6047cb2814a/scratchpad/bench && go build -o bench . && ./bench -mode micro &&
+To rerun the localhost numbers: `cd bench && go build -o bench . && ./bench -mode micro &&
 ./bench -mode ws && ./bench -mode wsopt && ./bench -mode raw -frame 262144 -streams 3` (modes: plain|tls|ws|wsopt|raw;
 flags `-frame -streams -mb -runs -window`).
