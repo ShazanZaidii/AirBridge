@@ -1,21 +1,23 @@
-# Add project specific ProGuard rules here.
-# You can control the set of applied configuration files using the
-# proguardFiles setting in build.gradle.
-#
-# For more details, see
-#   http://developer.android.com/guide/developing/tools/proguard.html
+# Readable crash traces.
+-keepattributes SourceFile,LineNumberTable
+-renamesourcefileattribute SourceFile
 
-# If your project uses WebView with JS, uncomment the following
-# and specify the fully qualified class name to the JavaScript interface
-# class:
-#-keepclassmembers class fqcn.of.javascript.interface.for.webview {
-#   public *;
-#}
+# OkHttp, Okio, Play Services (Nearby), ML Kit and CameraX ship their own consumer rules.
+# OkHttp optionally probes these TLS providers; they are not present on Android.
+-dontwarn org.conscrypt.**
+-dontwarn org.bouncycastle.**
+-dontwarn org.openjsse.**
 
-# Uncomment this to preserve the line number information for
-# debugging stack traces.
-#-keepattributes SourceFile,LineNumberTable
-
-# If you keep the line number information, uncomment this to
-# hide the original source file name.
-#-renamesourcefileattribute SourceFile
+# The input half calls BubbleController.INSTANCE.setSuppressed(String, boolean) (and optionally
+# setLeaseHolder(String)) by reflection; keep the class name, INSTANCE and those methods.
+-keep class com.shazan.airbridge.BubbleController {
+    public static final com.shazan.airbridge.BubbleController INSTANCE;
+    public final void setSuppressed(java.lang.String, boolean);
+    public final void setLeaseHolder(java.lang.String);
+}
+# NetHooks falls back to ClipboardSync.pushNow(String) by reflection.
+-keep class com.shazan.airbridge.net.ClipboardSync {
+    public static final com.shazan.airbridge.net.ClipboardSync INSTANCE;
+    public final void pushNow(java.lang.String);
+    public static void pushNow(java.lang.String);
+}
