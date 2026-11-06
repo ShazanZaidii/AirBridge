@@ -13,17 +13,18 @@ android {
 
     defaultConfig {
         applicationId = "com.shazan.airbridge"
-        minSdk = 24
+        minSdk = 26
         targetSdk = 36
-        versionCode = 2
-        versionName = "2.1"
+        versionCode = 3
+        versionName = "3.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -36,6 +37,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 
@@ -48,25 +50,17 @@ dependencies {
     implementation(libs.androidx.compose.ui.graphics)
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
+    implementation(libs.androidx.compose.material.icons.extended)
+    implementation(libs.androidx.lifecycle.runtime.compose)
 
-    implementation("com.squareup.okhttp3:okhttp:4.12.0")
-    // CameraX for the camera preview
-    val camerax_version = "1.4.0"
-    implementation("androidx.camera:camera-core:$camerax_version")
-    implementation("androidx.camera:camera-camera2:$camerax_version")
-    implementation("androidx.camera:camera-lifecycle:$camerax_version")
-    implementation("androidx.camera:camera-view:$camerax_version")
-
-    // Google ML Kit for lightning-fast local QR scanning
-    implementation("com.google.mlkit:barcode-scanning:17.3.0")
-    implementation("androidx.datastore:datastore-preferences:1.1.1")
-    implementation("androidx.graphics:graphics-path:1.0.1")
-
-    // Nearby share api for P2P between 2 android:
-    implementation("com.google.android.gms:play-services-nearby:19.0.0")
-
-    implementation("com.github.ShazanZaidii:DriftUI-kt:v3.8.2")
-
+    implementation(libs.okhttp)
+    implementation(libs.androidx.camera.core)
+    implementation(libs.androidx.camera.camera2)
+    implementation(libs.androidx.camera.lifecycle)
+    implementation(libs.androidx.camera.view)
+    implementation(libs.mlkit.barcode.scanning)
+    implementation(libs.zxing.core) // drawing the "Show QR code" pairing code
+    implementation(libs.play.services.nearby)
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
