@@ -1,15 +1,67 @@
-*.iml
-.gradle
-/local.properties
-/.idea/caches
-/.idea/libraries
-/.idea/modules.xml
-/.idea/workspace.xml
-/.idea/navEditor.xml
-/.idea/assetWizardSettings.xml
-.DS_Store
-/build
-/captures
-.externalNativeBuild
-.cxx
+# ---- Build output -------------------------------------------------------
+build/
+.gradle/
+.kotlin/
+.externalNativeBuild/
+.cxx/
+captures/
+/out/
+
+# Release / debug artifacts (built by Android Studio or Gradle; never commit)
+*.apk
+*.aab
+*.apks
+*.ap_
+*.dex
+*.dm
+output-metadata.json
+/app/release/
+/app/debug/
+/app/benchmark/
+/app/nonMinifiedRelease/
+/app/benchmarkRelease/
+mapping.txt
+
+# ---- Signing secrets ----------------------------------------------------
+*.jks
+*.keystore
+keystore.properties
+signing.properties
+google-services.json
+play-service-account*.json
+
+# ---- Local machine config -----------------------------------------------
 local.properties
+*.iml
+
+# Android Studio / IntelliJ: keep the shared project settings, ignore the
+# per-machine and per-run files that change on every launch.
+/.idea/*
+!/.idea/.gitignore
+!/.idea/codeStyles/
+!/.idea/inspectionProfiles/
+!/.idea/compiler.xml
+!/.idea/gradle.xml
+!/.idea/vcs.xml
+!/.idea/runConfigurations.xml
+!/.idea/AndroidProjectSystem.xml
+
+# ---- Logs, dumps, temp --------------------------------------------------
+*.log
+*.hprof
+*.trace
+*.tmp
+*.swp
+*~
+
+# ---- Tooling ------------------------------------------------------------
+# Python probe (tools/v2probe.py)
+__pycache__/
+*.pyc
+.venv/
+.airbridge-probe.json
+
+# ---- OS junk ------------------------------------------------------------
+.DS_Store
+Thumbs.db
+desktop.ini
