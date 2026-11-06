@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
 	<PropertyGroup>
 		<OutputType>WinExe</OutputType>
@@ -7,6 +7,7 @@
 		<ImplicitUsings>enable</ImplicitUsings>
 		<UseWPF>true</UseWPF>
 		<ApplicationIcon>icon.ico</ApplicationIcon>
+		<Version>2.0.0</Version>
 
 		<Platforms>x86;x64;ARM64</Platforms>
 		<RuntimeIdentifiers>win-x86;win-x64;win-arm64</RuntimeIdentifiers>
@@ -19,15 +20,10 @@
 		<Resource Include="icon.ico" />
 	</ItemGroup>
 
-  <ItemGroup>
-    <PackageReference Include="Fleck" Version="1.2.0" />
-    <PackageReference Include="Hardcodet.NotifyIcon.Wpf" Version="2.0.1" />
-    <PackageReference Include="Makaretu.Dns.Multicast" Version="0.27.0" />
-    <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.8.260317003" />
-    <PackageReference Include="QRCoder" Version="1.8.0" />
-    <PackageReference Include="Zeroconf" Version="3.7.16" />
-  </ItemGroup>
-
-  
+	<ItemGroup>
+		<PackageReference Include="Hardcodet.NotifyIcon.Wpf" Version="2.0.1" />
+		<PackageReference Include="Makaretu.Dns.Multicast" Version="0.27.0" />
+		<PackageReference Include="QRCoder" Version="1.8.0" />
+	</ItemGroup>
 
 </Project>

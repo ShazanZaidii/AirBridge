@@ -1,12 +1,12 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
-using System.Diagnostics;
+using System.Collections.Specialized;
 using System.IO;
-using System.Runtime.InteropServices;
 using System.Text.Json;
-using System.Threading.Tasks;
+using System.Threading;
 using System.Windows;
 using System.Windows.Interop;
+using AirBridge.Net;
 
 namespace AirBridge
 {
@@ -15,46 +15,54 @@ namespace AirBridge
     public class ClipboardFilter
     {
         public FilterType Type { get; set; }
-        public string Keyword { get; set; }
+        public string Keyword { get; set; } = "";
     }
 
-    public class ClipboardManager
+    /// <summary>
+    /// STA-side clipboard access: WM_CLIPBOARDUPDATE listener on a hidden window, safe get/set with retries,
+    /// and the user's ignore filters (%APPDATA%\AirBridge\filters.json).
+    /// </summary>
+    public sealed class ClipboardManager
     {
         private const int WM_CLIPBOARDUPDATE = 0x031D;
-        private HwndSource _hwndSource;
-        private Window _window;
-        private bool _isUpdatingFromNetwork = false;
-        private string _lastClipboardText = string.Empty;
+        private HwndSource? _hwndSource;
+        private IntPtr _hwnd;
 
-        // Filtering Engine
+        /// <summary>Raised on the STA thread with the new clipboard text (non-text changes are ignored).</summary>
+        public event Action<string>? LocalTextChanged;
+
         public static List<ClipboardFilter> Filters { get; private set; } = new();
-        private static readonly string SettingsPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "AirBridge", "filters.json");
+        private static readonly string SettingsPath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "AirBridge", "filters.json");
 
-        public ClipboardManager()
-        {
-            LoadFilters();
-        }
+        public ClipboardManager() => LoadFilters();
 
         public static void SaveFilters()
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(SettingsPath));
-            File.WriteAllText(SettingsPath, JsonSerializer.Serialize(Filters));
-        }
-
-        private void LoadFilters()
-        {
-            if (File.Exists(SettingsPath))
+            try
             {
-                try { Filters = JsonSerializer.Deserialize<List<ClipboardFilter>>(File.ReadAllText(SettingsPath)) ?? new(); }
-                catch { Filters = new(); }
+                Directory.CreateDirectory(Path.GetDirectoryName(SettingsPath)!);
+                File.WriteAllText(SettingsPath, JsonSerializer.Serialize(Filters));
             }
+            catch (Exception ex) { Log.Error("Failed to save filters", ex); }
         }
 
-        private bool ShouldIgnore(string text)
+        private static void LoadFilters()
+        {
+            try
+            {
+                if (File.Exists(SettingsPath))
+                    Filters = JsonSerializer.Deserialize<List<ClipboardFilter>>(File.ReadAllText(SettingsPath)) ?? new();
+            }
+            catch { Filters = new(); }
+        }
+
+        public static bool ShouldIgnore(string text)
         {
             if (string.IsNullOrEmpty(text)) return true;
             foreach (var filter in Filters)
             {
+                if (string.IsNullOrEmpty(filter.Keyword)) continue;
                 if (filter.Type == FilterType.StartsWith && text.StartsWith(filter.Keyword, StringComparison.OrdinalIgnoreCase)) return true;
                 if (filter.Type == FilterType.EndsWith && text.EndsWith(filter.Keyword, StringComparison.OrdinalIgnoreCase)) return true;
                 if (filter.Type == FilterType.Contains && text.Contains(filter.Keyword, StringComparison.OrdinalIgnoreCase)) return true;
@@ -62,23 +70,18 @@ namespace AirBridge
             return false;
         }
 
-        public void Start(Window window)
+        /// <summary>STA: attach the listener to a hidden window's handle (created without showing it).</summary>
+        public void Start(Window hiddenWindow)
         {
-            _window = window;
-            var helper = new WindowInteropHelper(_window);
-            IntPtr hwnd = helper.EnsureHandle();
-            _hwndSource = HwndSource.FromHwnd(hwnd);
+            _hwnd = new WindowInteropHelper(hiddenWindow).EnsureHandle();
+            _hwndSource = HwndSource.FromHwnd(_hwnd);
             _hwndSource.AddHook(HwndHook);
-            NativeMethods.AddClipboardFormatListener(hwnd);
+            if (!Win32.AddClipboardFormatListener(_hwnd)) Log.Warn("AddClipboardFormatListener failed");
         }
 
         public void Stop()
         {
-            if (_window != null)
-            {
-                var helper = new WindowInteropHelper(_window);
-                NativeMethods.RemoveClipboardFormatListener(helper.Handle);
-            }
+            if (_hwnd != IntPtr.Zero) Win32.RemoveClipboardFormatListener(_hwnd);
             _hwndSource?.RemoveHook(HwndHook);
         }
 
@@ -86,54 +89,45 @@ namespace AirBridge
         {
             if (msg == WM_CLIPBOARDUPDATE)
             {
-                if (_isUpdatingFromNetwork) return IntPtr.Zero;
-
-                string newText = GetClipboardTextSafe();
-
-                // Apply Filters before sending
-                if (!string.IsNullOrEmpty(newText) && newText != _lastClipboardText && !ShouldIgnore(newText))
+                try
                 {
-                    _lastClipboardText = newText;
-                    _ = App.Server?.SendAsync(newText);
-                    _ = App.Client?.SendAsync(newText);
+                    string text = GetTextSafe();
+                    if (!string.IsNullOrEmpty(text)) LocalTextChanged?.Invoke(text);
                 }
+                catch (Exception ex) { Log.Error("Clipboard change handling failed", ex); }
             }
             return IntPtr.Zero;
         }
 
-        public void SetClipboardFromNetwork(string text)
-        {
-            if (string.IsNullOrEmpty(text) || text == _lastClipboardText || ShouldIgnore(text)) return;
-
-            _isUpdatingFromNetwork = true;
-            _lastClipboardText = text;
-
-            Application.Current.Dispatcher.Invoke(() =>
-            {
-                SetClipboardTextSafe(text);
-                Task.Delay(500).ContinueWith(_ => _isUpdatingFromNetwork = false);
-            });
-        }
-
-        public void LockNetworkEcho(bool isLocked) => _isUpdatingFromNetwork = isLocked;
-
-        private string GetClipboardTextSafe()
+        private static string GetTextSafe()
         {
             for (int i = 0; i < 5; i++)
             {
-                try { if (Clipboard.ContainsText()) return Clipboard.GetText(); return string.Empty; }
-                catch (COMException) { System.Threading.Thread.Sleep(20); }
+                try { return Clipboard.ContainsText() ? Clipboard.GetText() : string.Empty; }
+                catch (Exception) { Thread.Sleep(20); } // clipboard busy (COMException/ExternalException)
             }
             return string.Empty;
         }
 
-        private void SetClipboardTextSafe(string text)
+        public static bool TrySetText(string text)
         {
-            for (int i = 0; i < 5; i++)
+            for (int i = 0; i < 10; i++)
             {
-                try { Clipboard.SetText(text); return; }
-                catch (COMException) { System.Threading.Thread.Sleep(20); }
+                try { Clipboard.SetText(text); return true; }
+                catch (Exception) { Thread.Sleep(30); }
             }
+            return false;
+        }
+
+        public static bool TrySetFiles(StringCollection paths)
+        {
+            for (int i = 0; i < 10; i++)
+            {
+                try { Clipboard.SetFileDropList(paths); return true; }
+                catch (Exception) { Thread.Sleep(30); }
+            }
+            Log.Warn("Could not put received files on the clipboard");
+            return false;
         }
     }
 }
