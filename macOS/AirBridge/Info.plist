@@ -13,5 +13,13 @@
 			</array>
 		</dict>
 	</array>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>AirBridge finds and connects to your phone and other computers on this network to sync the clipboard, send files and share the keyboard and mouse.</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>AirBridge asks System Events to show or hide the menu bar when you tap the menu bar shortcut on your phone.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_airbridge._tcp</string>
+	</array>
 </dict>
 </plist>

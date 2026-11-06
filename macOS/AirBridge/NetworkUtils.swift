@@ -1,13 +1,7 @@
-//
-//  ContentView.swift
-//  AirBridge
-//
-//  Created by Shazan Zaidi on 29/03/26.
-//
-
 import Foundation
 
-struct NetworkUtils {
+/// Primary LAN IPv4 address, used for the pairing QR `addr` hint and the menu header.
+nonisolated enum NetworkUtils {
     static func getLocalIPAddress() -> String? {
         var address: String?
         var fallbackAddress: String?
