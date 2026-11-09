@@ -27,14 +27,14 @@
     <string name="aw_start_failed">AirWeb konnte nicht gestartet werden</string>
     <string name="aw_start_failed_sub">Eventuell nutzt eine andere App die Netzwerkports. Versuche es noch einmal.</string>
     <string name="aw_try_again">Noch einmal versuchen</string>
-    <string name="aw_files_to_send">Zu sendende Dateien</string>
+    <string name="aw_files_to_send">Von diesem Smartphone geteilt</string>
     <string name="aw_nothing_added">Nichts hinzugefügt</string>
-    <string name="aw_nothing_added_sub">Die andere Person kann trotzdem Dateien an dieses Smartphone senden. Füge Dateien hinzu, um ihr welche zu schicken.</string>
+    <string name="aw_nothing_added_sub">Alle Verbundenen können auch Dateien hinzufügen. Füge hier welche hinzu, um sie zu teilen.</string>
     <string name="aw_downloaded_ago">Heruntergeladen: %1$s</string>
     <string name="aw_remove">%1$s entfernen</string>
-    <string name="aw_received">Empfangen</string>
+    <string name="aw_received">Von anderen hinzugefügt</string>
     <string name="aw_nothing_yet">Noch nichts</string>
-    <string name="aw_nothing_yet_sub">Vom anderen Gerät gesendete Dateien erscheinen hier und in %1$s.</string>
+    <string name="aw_nothing_yet_sub">Dateien, die andere hinzufügen, erscheinen hier und in %1$s.</string>
     <string name="aw_tap_to_open">Zum Öffnen tippen</string>
     <string name="aw_didnt_finish">Nicht abgeschlossen</string>
     <string name="aw_receiving_pct">Empfang · %1$d%%</string>
@@ -425,4 +425,14 @@
     <string name="xf_cancelled_by">Abgebrochen von %1$s</string>
     <string name="xf_in_failed">Übertragung von %1$s fehlgeschlagen</string>
     <string name="xf_received_from">Empfangen von %1$s</string>
+    <string name="xfer_tap_open">Zum Öffnen tippen</string>
+    <string name="aw_connected_none">Noch niemand verbunden</string>
+    <string name="aw_connected_none_sub">Alle, die beitreten, sehen dieselben Dateien und können welche hinzufügen oder herunterladen.</string>
+    <string name="aw_from">Von %1$s</string>
+    <string name="aw_stop_sharing">%1$s nicht mehr teilen</string>
+    <string name="aw_not_shared">Nicht geteilt</string>
+    <plurals name="aw_connected">
+        <item quantity="one">%d Gerät verbunden</item>
+        <item quantity="other">%d Geräte verbunden</item>
+    </plurals>
 </resources>

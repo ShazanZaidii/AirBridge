@@ -15,7 +15,7 @@ Requires: python3 >= 3.9, `websockets` (>= 10) and `cryptography`.
 
 Interactive commands (client): clip <text> | send <path> | ping | enter <edge> <rel> |
   move <dx> <dy> | scroll <dx> <dy> | btn <b> <down|up> | click <b> [n] | abs <x> <y> |
-  key <hid> [text] | kd|ku <hid> [mods] | action <name> | mirror [w h fps] | mirror_stop | leave | unpair | quit
+  key <hid> [text] | mkey <hid> [mods] | kd|ku <hid> [mods] | action <name> | mirror [w h fps] | mirror_stop | leave | unpair | quit
 
 State (device id + peer keys) is kept in ~/.airbridge-probe.json (override: AIRBRIDGE_PROBE_STATE).
 """
@@ -538,6 +538,10 @@ async def run_command(s: "Session", st: dict, cmd: str, rest: str) -> bool:
             m["text"] = a[1]
         await s.send(m)
         await s.send({"t": "key", "hid": hid, "down": False, "mods": 0})
+    elif cmd == "mkey":  # a key typed into a mirror window: mkey <hid> [mods]  (§8.7: no cursor-mode shortcuts)
+        hid, mods = int(a[0], 0), int(a[1], 0) if len(a) > 1 else 0
+        await s.send({"t": "key", "hid": hid, "down": True, "mods": mods, "mirror": True})
+        await s.send({"t": "key", "hid": hid, "down": False, "mods": mods, "mirror": True})
     elif cmd in ("kd", "ku"):  # raw key down / up: kd <hid> [mods]  (hold modifiers like a real keyboard)
         await s.send({"t": "key", "hid": int(a[0], 0), "down": cmd == "kd", "mods": int(a[1], 0) if len(a) > 1 else 0})
     elif cmd == "action":

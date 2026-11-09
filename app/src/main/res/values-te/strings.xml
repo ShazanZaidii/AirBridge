@@ -27,14 +27,14 @@
     <string name="aw_start_failed">ఎయిర్‌వెబ్‌ను ప్రారంభించడం సాధ్యపడలేదు</string>
     <string name="aw_start_failed_sub">నెట్‌వర్క్ పోర్ట్‌లను వేరే యాప్ ఉపయోగిస్తూ ఉండవచ్చు. మళ్లీ ప్రయత్నించండి.</string>
     <string name="aw_try_again">మళ్లీ ప్రయత్నించండి</string>
-    <string name="aw_files_to_send">పంపాల్సిన ఫైల్‌లు</string>
+    <string name="aw_files_to_send">ఈ ఫోన్ షేర్ చేసిన ఫైళ్లు</string>
     <string name="aw_nothing_added">ఏమీ జోడించలేదు</string>
-    <string name="aw_nothing_added_sub">అవతలి వ్యక్తి ఇప్పటికీ ఈ ఫోన్‌కు ఫైల్‌లు పంపగలరు. వారికి పంపడానికి ఫైల్‌లను జోడించండి.</string>
+    <string name="aw_nothing_added_sub">కనెక్ట్ అయిన అందరూ ఫైళ్లను జోడించవచ్చు. షేర్ చేయడానికి ఇక్కడ కొన్ని ఫైళ్లను జోడించండి.</string>
     <string name="aw_downloaded_ago">డౌన్‌లోడ్ అయింది: %1$s</string>
     <string name="aw_remove">%1$s తీసివేయండి</string>
-    <string name="aw_received">అందినవి</string>
+    <string name="aw_received">ఇతరులు జోడించిన ఫైళ్లు</string>
     <string name="aw_nothing_yet">ఇంకా ఏమీ లేవు</string>
-    <string name="aw_nothing_yet_sub">అవతలి పరికరం నుండి పంపిన ఫైల్‌లు ఇక్కడ, %1$sలో కనిపిస్తాయి.</string>
+    <string name="aw_nothing_yet_sub">ఇతరులు జోడించిన ఫైళ్లు ఇక్కడ, %1$sలో కనిపిస్తాయి.</string>
     <string name="aw_tap_to_open">తెరవడానికి ట్యాప్ చేయండి</string>
     <string name="aw_didnt_finish">పూర్తి కాలేదు</string>
     <string name="aw_receiving_pct">స్వీకరిస్తోంది · %1$d%%</string>
@@ -425,4 +425,14 @@
     <string name="xf_cancelled_by">%1$s రద్దు చేసింది</string>
     <string name="xf_in_failed">%1$s నుండి బదిలీ విఫలమైంది</string>
     <string name="xf_received_from">%1$s నుండి అందింది</string>
+    <string name="xfer_tap_open">తెరవడానికి ట్యాప్ చేయండి</string>
+    <string name="aw_connected_none">ఇంకా ఎవరూ కనెక్ట్ కాలేదు</string>
+    <string name="aw_connected_none_sub">కనెక్ట్ అయ్యే ప్రతి ఒక్కరికి అవే ఫైళ్లు కనిపిస్తాయి, వారు ఫైళ్లను జోడించవచ్చు లేదా డౌన్‌లోడ్ చేయవచ్చు.</string>
+    <string name="aw_from">%1$s నుండి</string>
+    <string name="aw_stop_sharing">%1$s షేర్ చేయడం ఆపండి</string>
+    <string name="aw_not_shared">షేర్ చేయలేదు</string>
+    <plurals name="aw_connected">
+        <item quantity="one">%d పరికరం కనెక్ట్ అయింది</item>
+        <item quantity="other">%d పరికరాలు కనెక్ట్ అయ్యాయి</item>
+    </plurals>
 </resources>

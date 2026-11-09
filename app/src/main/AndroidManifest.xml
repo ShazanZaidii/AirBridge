@@ -158,6 +158,17 @@
             android:launchMode="singleTop"
             android:theme="@style/Theme.AirBridge" />
 
+        <!-- Lets other apps open files received before Android 10 (saved as plain files). -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.files"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
         <!-- Puts the transfer notification back if it is swiped away while the transfer still runs. -->
         <receiver android:name=".net.TransferNotifs$Deleted" android:exported="false" />
 

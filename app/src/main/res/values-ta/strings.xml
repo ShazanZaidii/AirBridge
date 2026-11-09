@@ -27,14 +27,14 @@
     <string name="aw_start_failed">ஏர்வெப்பைத் தொடங்க முடியவில்லை</string>
     <string name="aw_start_failed_sub">நெட்வொர்க் போர்ட்களை வேறொரு ஆப்ஸ் பயன்படுத்தக்கூடும். மீண்டும் முயலவும்.</string>
     <string name="aw_try_again">மீண்டும் முயல்க</string>
-    <string name="aw_files_to_send">அனுப்ப வேண்டிய ஃபைல்கள்</string>
+    <string name="aw_files_to_send">இந்த ஃபோன் பகிர்ந்த கோப்புகள்</string>
     <string name="aw_nothing_added">எதுவும் சேர்க்கவில்லை</string>
-    <string name="aw_nothing_added_sub">மற்றவர் இப்போதும் இந்த ஃபோனுக்கு ஃபைல்களை அனுப்பலாம். அவருக்கு அனுப்ப ஃபைல்களைச் சேர்க்கவும்.</string>
+    <string name="aw_nothing_added_sub">இணைந்துள்ள அனைவரும் கோப்புகளைச் சேர்க்கலாம். பகிர இங்கே சில கோப்புகளைச் சேர்க்கவும்.</string>
     <string name="aw_downloaded_ago">பதிவிறக்கியது: %1$s</string>
     <string name="aw_remove">%1$s-ஐ அகற்று</string>
-    <string name="aw_received">பெறப்பட்டவை</string>
+    <string name="aw_received">மற்றவர்கள் சேர்த்த கோப்புகள்</string>
     <string name="aw_nothing_yet">இன்னும் எதுவுமில்லை</string>
-    <string name="aw_nothing_yet_sub">மற்ற சாதனத்திலிருந்து அனுப்பும் ஃபைல்கள் இங்கேயும் %1$s-லும் தோன்றும்.</string>
+    <string name="aw_nothing_yet_sub">மற்றவர்கள் சேர்த்த கோப்புகள் இங்கும் %1$s இலும் தோன்றும்.</string>
     <string name="aw_tap_to_open">திறக்கத் தட்டவும்</string>
     <string name="aw_didnt_finish">முடியவில்லை</string>
     <string name="aw_receiving_pct">பெறுகிறது · %1$d%%</string>
@@ -425,4 +425,14 @@
     <string name="xf_cancelled_by">%1$s ரத்துசெய்தது</string>
     <string name="xf_in_failed">%1$s-இலிருந்து பரிமாற்றம் தோல்வியடைந்தது</string>
     <string name="xf_received_from">%1$s-இலிருந்து பெறப்பட்டது</string>
+    <string name="xfer_tap_open">திறக்கத் தட்டவும்</string>
+    <string name="aw_connected_none">இன்னும் யாரும் இணையவில்லை</string>
+    <string name="aw_connected_none_sub">இணையும் அனைவருக்கும் ஒரே கோப்புகள் தெரியும்; அவர்கள் கோப்புகளைச் சேர்க்கவும் பதிவிறக்கவும் முடியும்.</string>
+    <string name="aw_from">%1$s இடமிருந்து</string>
+    <string name="aw_stop_sharing">%1$s பகிர்வதை நிறுத்து</string>
+    <string name="aw_not_shared">பகிரப்படவில்லை</string>
+    <plurals name="aw_connected">
+        <item quantity="one">%d சாதனம் இணைந்துள்ளது</item>
+        <item quantity="other">%d சாதனங்கள் இணைந்துள்ளன</item>
+    </plurals>
 </resources>

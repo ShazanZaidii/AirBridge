@@ -999,9 +999,15 @@ private fun RemoteControlSetupCard(noun: String, onOpen: () -> Unit, onDismiss: 
 
 @Composable
 private fun TransferCard(t: TransferUi) {
-    AbCard {
+    val ctx = LocalContext.current
+    val open = t.received
+    AbCard(onClick = open?.let { r -> { r.open(ctx) } }) {
         Column(Modifier.padding(Dimens.md), verticalArrangement = Arrangement.spacedBy(Dimens.sm)) {
-            Text(if (t.incoming) stringResource(R.string.receiving_from, t.peerName) else stringResource(R.string.sending_to, t.peerName), style = MaterialTheme.typography.titleSmall)
+            Text(when {
+                t.incoming && t.result != null -> stringResource(R.string.xf_received_from, t.peerName)
+                t.incoming -> stringResource(R.string.receiving_from, t.peerName)
+                else -> stringResource(R.string.sending_to, t.peerName)
+            }, style = MaterialTheme.typography.titleSmall)
             Text(t.fileName, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
             if (t.result == null) {
@@ -1022,6 +1028,11 @@ private fun TransferCard(t: TransferUi) {
                         modifier = Modifier.size(Dimens.iconSm))
                     Spacer(Modifier.width(Dimens.sm))
                     Text(t.result, style = MaterialTheme.typography.labelLarge, color = c)
+                    if (open != null) {
+                        Spacer(Modifier.weight(1f))
+                        Text(stringResource(R.string.xfer_tap_open), style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary)
+                    }
                 }
             }
         }

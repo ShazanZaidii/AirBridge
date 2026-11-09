@@ -27,14 +27,14 @@
     <string name="aw_start_failed">এয়ারওয়েব চালু করা যায়নি</string>
     <string name="aw_start_failed_sub">হয়তো অন্য কোনও অ্যাপ নেটওয়ার্ক পোর্ট ব্যবহার করছে। আবার চেষ্টা করুন।</string>
     <string name="aw_try_again">আবার চেষ্টা করুন</string>
-    <string name="aw_files_to_send">পাঠানোর ফাইল</string>
+    <string name="aw_files_to_send">এই ফোন থেকে শেয়ার করা ফাইল</string>
     <string name="aw_nothing_added">কিছু যোগ করা হয়নি</string>
-    <string name="aw_nothing_added_sub">অন্য ব্যক্তি তবুও এই ফোনে ফাইল পাঠাতে পারবেন। তাঁকে কিছু পাঠাতে ফাইল যোগ করুন।</string>
+    <string name="aw_nothing_added_sub">যুক্ত থাকা সবাই ফাইল যোগ করতে পারেন। শেয়ার করতে এখানে কিছু ফাইল যোগ করুন।</string>
     <string name="aw_downloaded_ago">ডাউনলোড হয়েছে: %1$s</string>
     <string name="aw_remove">%1$s সরান</string>
-    <string name="aw_received">পাওয়া গেছে</string>
+    <string name="aw_received">অন্যদের যোগ করা ফাইল</string>
     <string name="aw_nothing_yet">এখনও কিছু নেই</string>
-    <string name="aw_nothing_yet_sub">অন্য ডিভাইস থেকে পাঠানো ফাইল এখানে এবং %1$s-এ দেখা যাবে।</string>
+    <string name="aw_nothing_yet_sub">অন্যদের যোগ করা ফাইল এখানে এবং %1$s-এ দেখা যাবে।</string>
     <string name="aw_tap_to_open">খুলতে ট্যাপ করুন</string>
     <string name="aw_didnt_finish">শেষ হয়নি</string>
     <string name="aw_receiving_pct">আসছে · %1$d%%</string>
@@ -425,4 +425,14 @@
     <string name="xf_cancelled_by">%1$s বাতিল করেছে</string>
     <string name="xf_in_failed">%1$s থেকে ট্রান্সফার ব্যর্থ হয়েছে</string>
     <string name="xf_received_from">%1$s থেকে পাওয়া গেছে</string>
+    <string name="xfer_tap_open">খুলতে ট্যাপ করুন</string>
+    <string name="aw_connected_none">এখনও কেউ যুক্ত হননি</string>
+    <string name="aw_connected_none_sub">যে-ই যুক্ত হবেন তিনি একই ফাইল দেখবেন এবং ফাইল যোগ বা ডাউনলোড করতে পারবেন।</string>
+    <string name="aw_from">%1$s-এর কাছ থেকে</string>
+    <string name="aw_stop_sharing">%1$s শেয়ার করা বন্ধ করুন</string>
+    <string name="aw_not_shared">শেয়ার করা নেই</string>
+    <plurals name="aw_connected">
+        <item quantity="one">%d টি ডিভাইস যুক্ত</item>
+        <item quantity="other">%d টি ডিভাইস যুক্ত</item>
+    </plurals>
 </resources>

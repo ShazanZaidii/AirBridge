@@ -89,7 +89,6 @@ fun PhoneNotifsSection() {
     val access = remember(tick) { PhoneRelaySettings.hasNotificationAccess(ctx) }
     val phonePerm = remember(tick) { PhoneRelaySettings.canWatchCalls(ctx) }
     val numberPerm = remember(tick) { PhoneRelaySettings.canSeeNumber(ctx) }
-    var speaker by remember { mutableStateOf(PhoneRelaySettings.speakerOnAnswer) }
     var explainAccess by remember { mutableStateOf(false) }
     var explainCalls by remember { mutableStateOf(false) }
     var showApps by remember { mutableStateOf(false) }
@@ -214,12 +213,6 @@ fun PhoneNotifsSection() {
                     }
                 },
             )
-        }
-        if (callsOn) {
-            RowDivider()
-            SwitchRow(stringResource(R.string.pn_speaker_title), stringResource(R.string.pn_speaker_sub), speaker, {
-                speaker = it; PhoneRelaySettings.speakerOnAnswer = it
-            })
         }
     }
 }

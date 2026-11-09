@@ -27,14 +27,14 @@
     <string name="aw_start_failed">एअरवेब सुरू करता आले नाही</string>
     <string name="aw_start_failed_sub">दुसरे ॲप नेटवर्क पोर्ट वापरत असू शकते. पुन्हा प्रयत्न करा.</string>
     <string name="aw_try_again">पुन्हा प्रयत्न करा</string>
-    <string name="aw_files_to_send">पाठवायच्या फाइल</string>
+    <string name="aw_files_to_send">या फोनवरून शेअर केलेल्या फाइल्स</string>
     <string name="aw_nothing_added">काहीही जोडले नाही</string>
-    <string name="aw_nothing_added_sub">समोरची व्यक्ती तरीही या फोनवर फाइल पाठवू शकते. त्यांना काही पाठवण्यासाठी फाइल जोडा.</string>
+    <string name="aw_nothing_added_sub">जोडलेले सर्वजण फाइल्स जोडू शकतात. शेअर करण्यासाठी इथे काही फाइल्स जोडा.</string>
     <string name="aw_downloaded_ago">डाउनलोड केले: %1$s</string>
     <string name="aw_remove">%1$s काढा</string>
-    <string name="aw_received">मिळालेल्या फाइल</string>
+    <string name="aw_received">इतरांनी जोडलेल्या फाइल्स</string>
     <string name="aw_nothing_yet">अजून काहीही नाही</string>
-    <string name="aw_nothing_yet_sub">दुसऱ्या डिव्हाइसवरून पाठवलेल्या फाइल इथे आणि %1$s मध्ये दिसतील.</string>
+    <string name="aw_nothing_yet_sub">इतरांनी जोडलेल्या फाइल्स इथे आणि %1$s मध्ये दिसतील.</string>
     <string name="aw_tap_to_open">उघडण्यासाठी टॅप करा</string>
     <string name="aw_didnt_finish">पूर्ण झाले नाही</string>
     <string name="aw_receiving_pct">मिळवत आहे · %1$d%%</string>
@@ -425,4 +425,14 @@
     <string name="xf_cancelled_by">%1$s ने रद्द केले</string>
     <string name="xf_in_failed">%1$s कडून ट्रान्सफर अयशस्वी</string>
     <string name="xf_received_from">%1$s कडून मिळाले</string>
+    <string name="xfer_tap_open">उघडण्यासाठी टॅप करा</string>
+    <string name="aw_connected_none">अजून कोणी जोडलेले नाही</string>
+    <string name="aw_connected_none_sub">जो कोणी जोडला जाईल त्याला त्याच फाइल्स दिसतील आणि तो फाइल्स जोडू किंवा डाउनलोड करू शकेल.</string>
+    <string name="aw_from">%1$s कडून</string>
+    <string name="aw_stop_sharing">%1$s शेअर करणे थांबवा</string>
+    <string name="aw_not_shared">शेअर केलेले नाही</string>
+    <plurals name="aw_connected">
+        <item quantity="one">%d डिव्हाइस जोडले आहे</item>
+        <item quantity="other">%d डिव्हाइस जोडलेली आहेत</item>
+    </plurals>
 </resources>

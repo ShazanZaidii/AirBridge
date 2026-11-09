@@ -25,12 +25,10 @@
     <string name="pn_private_hint">Si l\'écran de verrouillage masque le contenu sensible, les notifications attendent que vous ayez déverrouillé le téléphone.</string>
 
     <string name="pn_calls_title">Les appels sur votre ordinateur</string>
-    <string name="pn_calls_sub">Voyez qui vous appelle, puis répondez, refusez ou raccrochez depuis votre ordinateur. Sur un Mac, vous pouvez aussi parler depuis l\'ordinateur.</string>
+    <string name="pn_calls_sub">Voyez qui vous appelle, puis répondez, refusez ou raccrochez depuis votre ordinateur. Le son de l\'appel reste sur votre téléphone.</string>
     <string name="pn_calls_dialog_body">Pour afficher les appels et vous permettre d\'y répondre ou de raccrocher, AirBridge a besoin de l\'autorisation Téléphone. L\'autorisation Contacts est facultative et sert seulement à afficher les noms à la place des numéros.\n\nL\'appel lui-même reste sur votre téléphone : parlez via son haut-parleur, son écouteur ou un casque Bluetooth. Android ne permet pas aux applis de transférer le son d\'un appel vers un ordinateur.\n\nLes détails des appels sont chiffrés et envoyés uniquement à vos propres appareils associés.</string>
     <string name="pn_calls_limited_title">L\'autorisation Téléphone est désactivée</string>
     <string name="pn_calls_limited_sub">Seuls les appels que votre appli Téléphone affiche dans une notification arrivent sur votre ordinateur, et il est possible que vous ne puissiez pas répondre. Autorisez Téléphone dans les autorisations de l\'appli.</string>
-    <string name="pn_speaker_title">Haut-parleur activé quand vous répondez depuis l\'ordinateur</string>
-    <string name="pn_speaker_sub">Pour parler sans quitter votre bureau. Certains téléphones ne le permettent pas.</string>
 
     <string name="promirror_notif_title">Activez le débogage sans fil</string>
     <string name="promirror_notif_text">Touchez pour ouvrir les Options pour les développeurs et utiliser la duplication d\'écran Pro</string>

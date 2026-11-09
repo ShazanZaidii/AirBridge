@@ -9,12 +9,12 @@
 <style>
   :root {
     --bg: #f4f4f3; --card: #ffffff; --line: #dcdcda; --text: #1b1b1b; --muted: #5f5f5c;
-    --btn: #1b1b1b; --btn-text: #ffffff; --track: #e6e6e4; --fill: #3a3a3a; --bad: #9a2c22;
+    --btn: #1b1b1b; --btn-text: #ffffff; --track: #e6e6e4; --fill: #3a3a3a; --bad: #9a2c22; --chip: #ececea;
   }
   @media (prefers-color-scheme: dark) {
     :root {
       --bg: #161616; --card: #1f1f1f; --line: #353533; --text: #ececea; --muted: #a3a3a0;
-      --btn: #ececea; --btn-text: #161616; --track: #333331; --fill: #cfcfcc; --bad: #e08a80;
+      --btn: #ececea; --btn-text: #161616; --track: #333331; --fill: #cfcfcc; --bad: #e08a80; --chip: #2b2b29;
     }
   }
   * { box-sizing: border-box; }
@@ -28,15 +28,19 @@
   header { margin: 0.5rem 0 1.25rem; }
   .eyebrow { font-size: 0.8rem; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); margin: 0; }
   h1 { font-size: 1.5rem; line-height: 1.25; margin: 0.2rem 0 0.4rem; word-wrap: break-word; overflow-wrap: anywhere; }
-  h2 { font-size: 1.05rem; margin: 0 0 0.75rem; }
+  h2 { font-size: 1.05rem; margin: 0 0 0.25rem; }
   .status { display: flex; align-items: flex-start; gap: 0.5rem; color: var(--muted); font-size: 0.95rem; margin: 0; }
   .dot { flex: none; width: 0.55rem; height: 0.55rem; border-radius: 50%; background: var(--muted); margin-top: 0.45rem; }
   .status.bad { color: var(--bad); }
   .status.bad .dot { background: var(--bad); }
+  .who { display: flex; flex-wrap: wrap; gap: 0.35rem; margin: 0.6rem 0 0; padding: 0; list-style: none; }
+  .who li { display: block; padding: 0.15rem 0.6rem; border-radius: 999px; background: var(--chip); font-size: 0.82rem; color: var(--muted); border: 0; }
+  .who li.me { color: var(--text); font-weight: 600; }
   section { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 1rem; margin-bottom: 1rem; }
-  ul { list-style: none; margin: 0; padding: 0; }
-  li { display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem 0; border-top: 1px solid var(--line); }
-  li:first-child { border-top: 0; padding-top: 0.25rem; }
+  .lead { color: var(--muted); font-size: 0.9rem; margin: 0 0 0.75rem; }
+  ul.list { list-style: none; margin: 0; padding: 0; }
+  ul.list li { display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem 0; border-top: 1px solid var(--line); }
+  ul.list li:first-child { border-top: 0; padding-top: 0.25rem; }
   .info { flex: 1 1 auto; min-width: 0; }
   .name { margin: 0; word-wrap: break-word; overflow-wrap: anywhere; }
   .sub { margin: 0.1rem 0 0; color: var(--muted); font-size: 0.875rem; }
@@ -58,7 +62,18 @@
   .bar span { display: block; height: 100%; width: 0; background: var(--fill); }
   #uploads { margin-top: 0.75rem; }
   #uploads li:first-child { border-top: 1px solid var(--line); padding-top: 0.75rem; }
+  .invite { display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; }
+  .invite .qrbox { flex: none; width: 9.5rem; height: 9.5rem; background: #fff; border-radius: 10px; padding: 0.25rem; border: 1px solid var(--line); }
+  .invite .qrbox img { display: block; width: 100%; height: 100%; }
+  .invite .side { flex: 1 1 12rem; min-width: 0; }
+  .link { font-size: 0.85rem; color: var(--muted); word-break: break-all; margin: 0 0 0.6rem; user-select: all; -webkit-user-select: all; }
   .hidden { display: none; }
+  #drop {
+    position: fixed; inset: 0.6rem; z-index: 10; border: 2px dashed var(--muted); border-radius: 16px;
+    background: color-mix(in srgb, var(--bg) 88%, transparent); display: none; align-items: center; justify-content: center;
+    font-size: 1.2rem; font-weight: 600; color: var(--muted); pointer-events: none;
+  }
+  #drop.on { display: flex; }
 </style>
 </head>
 <body data-name="{{NAME}}">
@@ -66,40 +81,94 @@
   <header>
     <p class="eyebrow">AirWeb</p>
     <h1 id="title">{{NAME}}</h1>
-    <p id="status" class="status"><span class="dot"></span><span id="status-text">Connected</span></p>
+    <p id="status" class="status" aria-live="polite"><span class="dot"></span><span id="status-text">Connected</span></p>
+    <ul id="who" class="who" aria-label="Devices connected"></ul>
   </header>
 
   <section aria-labelledby="dl-h">
-    <h2 id="dl-h">Files from <span class="pname">{{NAME}}</span></h2>
-    <p id="dl-empty" class="empty">Nothing shared yet. Files added on <span class="pname">{{NAME}}</span> show up here.</p>
-    <ul id="files"></ul>
+    <h2 id="dl-h">Shared files</h2>
+    <p class="lead">Everyone connected to <span class="pname">{{NAME}}</span> sees these and can download them.</p>
+    <p id="dl-empty" class="empty">Nothing yet. Files that you, anyone else or <span class="pname">{{NAME}}</span> add show up here for everyone.</p>
+    <ul id="files" class="list"></ul>
     <div id="dl-all-wrap" class="row-actions hidden">
       <button id="dl-all" class="btn wide" type="button">Download all</button>
     </div>
   </section>
 
   <section aria-labelledby="ul-h">
-    <h2 id="ul-h">Send files to <span class="pname">{{NAME}}</span></h2>
+    <h2 id="ul-h">Add files</h2>
+    <p class="lead">What you add is shared with everyone connected.</p>
     <label class="btn primary wide picker">
       <span>Choose files</span>
-      <input id="pick" type="file" multiple aria-label="Choose files to send">
+      <input id="pick" type="file" multiple aria-label="Choose files to share">
     </label>
-    <p class="hint">Files are saved in Downloads on <span class="pname">{{NAME}}</span>. Keep this page open until they are sent.</p>
-    <ul id="uploads"></ul>
+    <p class="hint">A copy is saved on <span class="pname">{{NAME}}</span>. Keep this page open until the files are sent. On a computer you can also drop files anywhere on this page.</p>
+    <ul id="uploads" class="list"></ul>
+  </section>
+
+  <section aria-labelledby="inv-h">
+    <h2 id="inv-h">Invite someone</h2>
+    <p class="lead">Anyone on the same Wi-Fi who opens this link joins the same files, no matter who showed it to them.</p>
+    <div class="invite">
+      <div class="qrbox"><img id="qr" alt="QR code of this page's link" width="152" height="152"></div>
+      <div class="side">
+        <p id="link" class="link"></p>
+        <button id="copy" class="btn" type="button">Copy link</button>
+      </div>
+    </div>
   </section>
 </main>
+<div id="drop" aria-hidden="true">Drop files to share them</div>
 
 <script>
 (function () {
   "use strict";
   var m = /[?&]t=([^&#]+)/.exec(location.search);
   var token = m ? m[1] : "";
-  var phone = document.body.getAttribute("data-name") || "the phone";
+  var host = document.body.getAttribute("data-name") || "the host";
   var free = -1;
-  var lastList = "";
   var offline = false;
+  var version = "";
+  var polling = null;
 
-  function api(path) { return path + (path.indexOf("?") < 0 ? "?" : "&") + "t=" + token; }
+  // ---- who this page is: a random id for this tab and a label such as "Chrome on Windows" ----
+
+  function randomId() {
+    var a = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789", s = "", i;
+    var bytes = null;
+    try { bytes = new Uint8Array(16); (window.crypto || window.msCrypto).getRandomValues(bytes); } catch (e) { bytes = null; }
+    for (i = 0; i < 16; i++) s += a.charAt((bytes ? bytes[i] : Math.floor(Math.random() * 256)) % a.length);
+    return s;
+  }
+  var me = null;
+  try { me = sessionStorage.getItem("airweb-id"); } catch (e) {}
+  if (!me || !/^[A-Za-z0-9_-]{8,40}$/.test(me)) {
+    me = randomId();
+    try { sessionStorage.setItem("airweb-id", me); } catch (e) {}
+  }
+  function deviceLabel() {
+    var ua = navigator.userAgent || "", b = "Browser", os = "";
+    if (/Edg\//.test(ua)) b = "Edge";
+    else if (/OPR\/|Opera/.test(ua)) b = "Opera";
+    else if (/SamsungBrowser/.test(ua)) b = "Samsung Internet";
+    else if (/Firefox\/|FxiOS/.test(ua)) b = "Firefox";
+    else if (/Chrome\/|CriOS/.test(ua)) b = "Chrome";
+    else if (/Safari\//.test(ua)) b = "Safari";
+    if (/iPhone/.test(ua)) os = "iPhone";
+    else if (/iPad/.test(ua)) os = "iPad";
+    else if (/Android/.test(ua)) os = "Android";
+    else if (/Windows/.test(ua)) os = "Windows";
+    else if (/Macintosh|Mac OS X/.test(ua)) os = (navigator.maxTouchPoints > 1 ? "iPad" : "Mac");
+    else if (/CrOS/.test(ua)) os = "ChromeOS";
+    else if (/Linux/.test(ua)) os = "Linux";
+    return os ? b + " on " + os : b;
+  }
+  var label = deviceLabel();
+
+  function api(path) {
+    return path + (path.indexOf("?") < 0 ? "?" : "&") + "t=" + token;
+  }
+  function who() { return "&c=" + encodeURIComponent(me) + "&w=" + encodeURIComponent(label); }
   function $(id) { return document.getElementById(id); }
   function el(tag, cls, text) {
     var e = document.createElement(tag);
@@ -116,7 +185,7 @@
   }
 
   // "Now", "10 sec ago", "1 min ago", "2 hr ago", then the date. Times are local-clock ms.
-  var skew = 0; // phone clock minus this device's clock
+  var skew = 0; // host clock minus this device's clock
   function ago(t) {
     var s = Math.max(0, Math.floor((Date.now() - t) / 1000));
     if (s < 10) return "Now";
@@ -137,23 +206,46 @@
     for (var i = 0; i < es.length; i++) es[i].textContent = es[i].getAttribute("data-p") + ago(+es[i].getAttribute("data-t"));
   }, 2000);
 
+  var statusBase = "Connected";
   function setStatus(text, bad) {
     $("status-text").textContent = text;
     $("status").className = bad ? "status bad" : "status";
   }
 
-  function setPhone(name) {
-    if (!name || name === phone) return;
-    phone = name;
+  function setHost(name) {
+    if (!name || name === host) return;
+    host = name;
     $("title").textContent = name;
     document.title = name + " · AirWeb";
     var ps = document.querySelectorAll(".pname");
     for (var i = 0; i < ps.length; i++) ps[i].textContent = name;
   }
 
-  // ---- files offered by the phone ----
+  // ---- who is here ----
+
+  var lastPeers = "";
+  function renderPeers(list, count) {
+    var key = JSON.stringify(list) + count;
+    if (key === lastPeers) return;
+    lastPeers = key;
+    var ul = $("who");
+    while (ul.firstChild) ul.removeChild(ul.firstChild);
+    var others = 0;
+    for (var i = 0; i < list.length; i++) {
+      var mine = list[i].id === me;
+      if (!mine) others++;
+      ul.appendChild(el("li", mine ? "me" : "", mine ? list[i].name + " (you)" : list[i].name));
+    }
+    if (count > list.length) ul.appendChild(el("li", "", "+" + (count - list.length) + " more"));
+    var here = Math.max(count, list.length);
+    statusBase = here > 1 ? "Connected · " + here + " devices here" : "Connected";
+    if (!offline && $("status").className === "status") setStatus(statusBase, false);
+  }
+
+  // ---- the shared pool ----
 
   var files = [];
+  var lastList = "";
 
   function fileUrl(f) { return api("/d/" + f.id + "/" + encodeURIComponent(f.name)); }
 
@@ -161,17 +253,18 @@
     var key = JSON.stringify(list);
     if (key === lastList) return;
     lastList = key;
-    files = list;
+    // Newest first: what was just added is what people are looking for.
+    files = list.slice().sort(function (a, b) { return (b.added || 0) - (a.added || 0) || b.id - a.id; });
     var ul = $("files");
     while (ul.firstChild) ul.removeChild(ul.firstChild);
-    for (var i = 0; i < list.length; i++) {
-      var f = list[i];
+    for (var i = 0; i < files.length; i++) {
+      var f = files[i];
       var li = el("li");
       var info = el("div", "info");
       info.appendChild(el("p", "name", f.name));
       var sub = el("p", "sub");
-      var pre = f.size >= 0 ? size(f.size) + " \u00b7 " : "";
-      if (f.added > 0) timed(sub, pre, f.added - skew); else sub.textContent = size(f.size);
+      var pre = (f.size >= 0 ? size(f.size) + " · " : "") + (f.own ? "From you" : (f.by ? "From " + f.by : "From " + host)) + " · ";
+      if (f.added > 0) timed(sub, pre, f.added - skew); else sub.textContent = pre.replace(/ · $/, "");
       info.appendChild(sub);
       var a = el("a", "btn", "Download");
       a.href = fileUrl(f);
@@ -181,8 +274,8 @@
       li.appendChild(a);
       ul.appendChild(li);
     }
-    $("dl-empty").className = list.length ? "empty hidden" : "empty";
-    $("dl-all-wrap").className = list.length > 1 ? "row-actions" : "row-actions hidden";
+    $("dl-empty").className = files.length ? "empty hidden" : "empty";
+    $("dl-all-wrap").className = files.length > 1 ? "row-actions" : "row-actions hidden";
   }
 
   var downloadingAll = false;
@@ -211,25 +304,36 @@
     })();
   };
 
+  // ---- polling: the host says how often (slower with more people); hidden tabs ask less ----
+
+  var pollMs = 3000;
+  function schedule(ms) {
+    if (polling) clearTimeout(polling);
+    polling = setTimeout(poll, ms);
+  }
   function poll() {
     var x = new XMLHttpRequest();
-    x.open("GET", api("/api/state"), true);
+    x.open("GET", api("/api/state?v=" + encodeURIComponent(version)) + who(), true);
     x.timeout = 8000;
     x.onload = function () {
       if (x.status === 200) {
         try {
           var s = JSON.parse(x.responseText);
-          setPhone(s.name);
+          setHost(s.name);
           free = typeof s.free === "number" ? s.free : -1;
           if (typeof s.now === "number") skew = s.now - Date.now();
-          renderFiles(s.files || []);
-          if (offline || $("status").className !== "status") setStatus("Connected", false);
+          if (typeof s.poll === "number") pollMs = Math.min(Math.max(s.poll, 1500), 15000);
+          if (s.files) { renderFiles(s.files); version = s.v || ""; }
+          renderPeers(s.peers || [], typeof s.count === "number" ? s.count : (s.peers || []).length);
+          if (offline || $("status").className !== "status") setStatus(statusBase, false);
           offline = false;
         } catch (e) {}
-        setTimeout(poll, 3000);
+        schedule(document.hidden ? pollMs * 3 : pollMs);
       } else if (x.status === 403) {
-        setStatus("This link has stopped working. Scan the new code on " + phone + ".", true);
-        setTimeout(poll, 10000);
+        setStatus("This link has stopped working. Scan the new code on " + host + ".", true);
+        schedule(10000);
+      } else if (x.status === 503) {
+        schedule(5000); // the host is busy; try again in a moment
       } else {
         lost();
       }
@@ -239,11 +343,12 @@
   }
   function lost() {
     offline = true;
-    setStatus("Can't reach " + phone + ". Keep AirWeb open on it and stay on the same Wi-Fi.", true);
-    setTimeout(poll, 4000);
+    setStatus("Can't reach " + host + ". Keep AirWeb open on it and stay on the same Wi-Fi.", true);
+    schedule(4000);
   }
+  document.addEventListener("visibilitychange", function () { if (!document.hidden) schedule(0); });
 
-  // ---- files sent to the phone ----
+  // ---- adding files to the pool ----
 
   var queue = [], busy = false, pending = 0;
 
@@ -266,7 +371,7 @@
     info.appendChild(bar);
     li.appendChild(info);
     $("uploads").appendChild(li);
-    var job = { file: file, li: li, sub: sub, bar: bar, fill: fill, retry: null };
+    var job = { file: file, li: li, sub: sub, bar: bar, fill: fill, tries: 0 };
     queue.push(job);
     pending++;
   }
@@ -283,10 +388,11 @@
     busy = false;
     pending--;
     job.sub.className = ok ? "sub" : "sub bad";
-    timed(job.sub, text + " \u00b7 ", Date.now());
+    timed(job.sub, text + " · ", Date.now());
     if (ok) {
       job.fill.style.width = "100%";
       job.bar.className = "bar hidden";
+      schedule(0); // show it in the list right away
     } else {
       var b = el("button", "btn", "Try again");
       b.type = "button";
@@ -297,6 +403,7 @@
         job.sub.textContent = "Waiting · " + size(job.file.size);
         job.fill.style.width = "0";
         job.bar.className = "bar";
+        job.tries = 0;
         queue.push(job);
         pending++;
         pump();
@@ -306,15 +413,27 @@
     pump();
   }
 
+  // The host takes a few files at a time; when it is busy it asks us to wait. Retry quietly a few times.
+  function retryLater(job, why) {
+    job.tries++;
+    if (job.tries > 5) { finish(job, false, "Couldn't send. Check the Wi-Fi and try again."); return; }
+    job.fill.style.width = "0";
+    job.sub.textContent = why + " · " + size(job.file.size);
+    var wait = Math.min(3000 * job.tries, 12000) + Math.floor(Math.random() * 1500);
+    setTimeout(function () { send(job); }, wait);
+  }
+
   function send(job) {
     var f = job.file;
-    if (free >= 0 && f.size > free) { finish(job, false, "Not enough space on " + phone); return; }
+    if (free >= 0 && f.size > free) { finish(job, false, "Not enough space on " + host); return; }
     job.sub.textContent = "Sending · 0%";
     var x = new XMLHttpRequest();
-    x.open("POST", api("/u") + "&n=" + encodeURIComponent(f.name), true);
+    var loaded = 0;
+    x.open("POST", api("/u") + "&n=" + encodeURIComponent(f.name) + who(), true);
     x.setRequestHeader("Content-Type", f.type || "application/octet-stream");
     if (x.upload) {
       x.upload.onprogress = function (e) {
+        loaded = e.loaded;
         if (!e.lengthComputable || !e.total) return;
         var pct = Math.floor(e.loaded * 100 / e.total);
         job.fill.style.width = pct + "%";
@@ -323,17 +442,71 @@
     }
     x.onload = function () {
       if (x.status === 200) finish(job, true, "Sent · " + size(f.size));
-      else if (x.status === 507) finish(job, false, "Not enough space on " + phone);
+      else if (x.status === 503) retryLater(job, "Waiting for a turn");
+      else if (x.status === 507) {
+        var full = /"error":"full"/.test(x.responseText);
+        finish(job, false, full ? "Too many files here already" : "Not enough space on " + host);
+      }
       else if (x.status === 403) finish(job, false, "This link has stopped working");
       else finish(job, false, "Couldn't send");
     };
-    x.onerror = function () { finish(job, false, "Couldn't send. Check the Wi-Fi and try again."); };
+    // A busy host may close the connection before it reads the file: that looks like a network error. Retry a few times.
+    x.onerror = function () {
+      if (loaded < f.size && job.tries < 3) retryLater(job, "Waiting for a turn");
+      else finish(job, false, "Couldn't send. Check the Wi-Fi and try again.");
+    };
     x.send(f);
   }
 
   window.addEventListener("beforeunload", function (e) {
     if (pending > 0) { e.preventDefault(); e.returnValue = ""; return ""; }
   });
+
+  // ---- drop files anywhere (computers) ----
+
+  var dragDepth = 0;
+  function hasFiles(e) {
+    var t = e.dataTransfer && e.dataTransfer.types;
+    if (!t) return false;
+    for (var i = 0; i < t.length; i++) if (t[i] === "Files") return true;
+    return false;
+  }
+  document.addEventListener("dragenter", function (e) { if (hasFiles(e)) { dragDepth++; $("drop").className = "on"; e.preventDefault(); } });
+  document.addEventListener("dragover", function (e) { if (hasFiles(e)) e.preventDefault(); });
+  document.addEventListener("dragleave", function () { dragDepth = Math.max(0, dragDepth - 1); if (!dragDepth) $("drop").className = ""; });
+  document.addEventListener("drop", function (e) {
+    dragDepth = 0;
+    $("drop").className = "";
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    var dropped = e.dataTransfer.files;
+    for (var i = 0; i < dropped.length; i++) if (dropped[i].size > 0 || dropped[i].type) add(dropped[i]); // skips folders
+    pump();
+  });
+
+  // ---- invite: this page's link as a QR code (drawn by the host) and a copy button ----
+
+  var link = location.protocol + "//" + location.host + "/?t=" + token;
+  $("link").textContent = link;
+  $("qr").src = api("/qr.svg");
+  $("copy").onclick = function () {
+    var b = $("copy");
+    function done(ok) {
+      b.textContent = ok ? "Copied" : "Select the link and copy it";
+      setTimeout(function () { b.textContent = "Copy link"; }, 1800);
+    }
+    try {
+      if (navigator.clipboard && window.isSecureContext) { navigator.clipboard.writeText(link).then(function () { done(true); }, function () { done(false); }); return; }
+    } catch (e) {}
+    var t = document.createElement("textarea");
+    t.value = link; t.setAttribute("readonly", ""); t.style.position = "fixed"; t.style.opacity = "0";
+    document.body.appendChild(t);
+    t.select();
+    var ok = false;
+    try { ok = document.execCommand("copy"); } catch (e) {}
+    document.body.removeChild(t);
+    done(ok);
+  };
 
   poll();
 })();

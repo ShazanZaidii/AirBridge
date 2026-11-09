@@ -243,6 +243,7 @@ class TargetController(internal val service: AccessibilityService) {
             "key" -> keys.onKey(
                 msg.optInt("hid", 0), msg.optBoolean("down", false), msg.optInt("mods", 0),
                 msg.optBoolean("rep", false), msg.optString("text", "").ifEmpty { null },
+                msg.optBoolean("mirror", false),
             )
             "action" -> actions.perform(msg.optString("name"))
         }

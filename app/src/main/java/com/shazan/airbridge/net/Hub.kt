@@ -74,6 +74,8 @@ data class TransferUi(
     val bytesPerSec: Long,
     /** null while running; then "Sent"/"Received" or a failure text. */
     val result: String? = null,
+    /** What a finished incoming transfer saved: the card opens it when tapped. */
+    val received: ReceivedFiles? = null,
 )
 
 /**
@@ -409,7 +411,8 @@ object Hub : PeerBus.Transport {
 
     fun putTransfer(t: TransferUi) {
         _transfers.value = _transfers.value + (t.key to t)
-        if (t.result != null) scheduler.schedule({ _transfers.value = _transfers.value - t.key }, 4, TimeUnit.SECONDS)
+        // A finished card stays a while; one with files to open long enough to tap it.
+        if (t.result != null) scheduler.schedule({ _transfers.value = _transfers.value - t.key }, if (t.received != null) 20L else 5L, TimeUnit.SECONDS)
     }
 
     fun removeTransfer(key: String) {
