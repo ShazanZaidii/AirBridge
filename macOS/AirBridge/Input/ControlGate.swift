@@ -9,11 +9,19 @@ nonisolated final class ControlGate: @unchecked Sendable {
     private let lock = NSLock()
     private var _controlling: String?
     private var _controlledBy: String?
+    private var _mirrorFocus: String?
 
     /// Peer whose cursor/keyboard the Mac's own mouse and keyboard currently drive (set by `Controller`).
     var controlling: String? {
         get { lock.lock(); defer { lock.unlock() }; return _controlling }
         set { lock.lock(); _controlling = newValue; lock.unlock() }
+    }
+
+    /// Phone whose mirror window has keyboard focus (set by the mirror window). While it is set, that window is
+    /// the phone's controller and pushing through a screen edge never captures the cursor for the same phone.
+    var mirrorFocus: String? {
+        get { lock.lock(); defer { lock.unlock() }; return _mirrorFocus }
+        set { lock.lock(); _mirrorFocus = newValue; lock.unlock() }
     }
 
     /// Peer that currently holds the Mac's control lease (set by `Injector`).

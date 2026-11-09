@@ -1,21 +1,6 @@
 import Foundation
 import UniformTypeIdentifiers
 
-/// UI-facing snapshot of one transfer.
-nonisolated struct TransferStatus: Identifiable, Equatable, Sendable {
-    enum Direction: Sendable { case incoming, outgoing }
-    enum Phase: Equatable, Sendable { case waiting, active, done, failed(String) }
-    let id: String
-    let direction: Direction
-    let peerName: String
-    let fileCount: Int
-    let firstName: String
-    var total: Int64
-    var done: Int64
-    var phase: Phase
-    var bytesPerSec: Double = 0
-}
-
 /// Per-session file transfers (§6). State lives on the session queue; disk I/O runs on
 /// one serial queue per transfer.
 nonisolated final class TransferService: @unchecked Sendable {
@@ -82,7 +67,12 @@ nonisolated final class TransferService: @unchecked Sendable {
     }
 
     func cancelOutgoing(_ id: UInt32) {
-        outgoing[id]?.finish(.failed("Cancelled"), notifyPeer: "user")
+        outgoing[id]?.finish(.failed(TransferStatus.cancelledMessage), notifyPeer: "user")
+    }
+
+    /// The user stopped a file coming in: tell the sender and delete what was written.
+    func cancelIncoming(_ id: UInt32) {
+        incoming[id]?.abort(notifyPeer: "user", message: TransferStatus.cancelledMessage)
     }
 
     /// Session ended: delete partial files, stop senders.
@@ -131,6 +121,7 @@ nonisolated final class IncomingTransfer: @unchecked Sendable {
     private let dir: URL
     private weak var session: Session?
     private let peerName: String
+    private let peerId: String
     private let queue: DispatchQueue
     private let io = DispatchQueue(label: "com.shazan.airbridge.xfer.write", qos: .userInitiated)
     private let onEnd: () -> Void
@@ -143,6 +134,7 @@ nonisolated final class IncomingTransfer: @unchecked Sendable {
     private var ended = false
     private var startedAt = Date()
     private var lastReport = Date.distantPast
+    private var savedURLs: [URL] = []
 
     // io-queue state.
     private var fds: [Int: Int32] = [:]
@@ -159,9 +151,11 @@ nonisolated final class IncomingTransfer: @unchecked Sendable {
         self.dir = dir
         self.session = session
         self.peerName = session.peerName
+        self.peerId = session.peerId
         self.queue = queue
         self.onEnd = onEnd
         self.key = "in-\(session.peerId)-\(id)-\(UUID().uuidString.prefix(4))"
+        TransferRegistry.register(key: key, peerId: session.peerId, id: id, incoming: true)
     }
 
     func chunk(_ c: Proto.Chunk) {
@@ -211,6 +205,7 @@ nonisolated final class IncomingTransfer: @unchecked Sendable {
                 if writtenBytes != lastAcked { sendAck() }
                 session?.send(["t": "xfer_complete", "id": Int(id), "ok": true,
                                "saved": saved.map { $0.lastPathComponent }])
+                savedURLs = saved
                 end(.done)
                 let from = peerName
                 onMain { TransferUI.receivedFiles(saved, from: from) }
@@ -233,6 +228,7 @@ nonisolated final class IncomingTransfer: @unchecked Sendable {
     private func end(_ phase: TransferStatus.Phase) {
         ended = true
         onEnd()
+        TransferRegistry.unregister(key: key)
         report(phase)
     }
 
@@ -252,7 +248,8 @@ nonisolated final class IncomingTransfer: @unchecked Sendable {
         let elapsed = Date().timeIntervalSince(startedAt)
         let s = TransferStatus(id: key, direction: .incoming, peerName: peerName, fileCount: files.count,
                                firstName: files.first?.name ?? "", total: total, done: writtenBytes, phase: phase,
-                               bytesPerSec: elapsed > 0.5 ? Double(writtenBytes) / elapsed : 0)
+                               bytesPerSec: elapsed > 0.5 ? Double(writtenBytes) / elapsed : 0,
+                               peerId: peerId, savedPaths: savedURLs.map(\.path))
         onMain { TransferUI.update(s) }
     }
 
@@ -308,6 +305,7 @@ nonisolated final class OutgoingTransfer: @unchecked Sendable {
     private let total: Int64
     private weak var session: Session?
     private let peerName: String
+    private let peerId: String
     private let queue: DispatchQueue
     private let io = DispatchQueue(label: "com.shazan.airbridge.xfer.read", qos: .userInitiated)
     private let cleanup: (() -> Void)?
@@ -341,11 +339,12 @@ nonisolated final class OutgoingTransfer: @unchecked Sendable {
         self.total = files.reduce(0) { $0 + $1.size }
         self.session = session
         self.peerName = session.peerName
+        self.peerId = session.peerId
         self.queue = queue
         self.cleanup = cleanup
         self.onEnd = onEnd
         self.key = "out-\(session.peerId)-\(id)-\(UUID().uuidString.prefix(4))"
-        TransferRegistry.register(key: key, peerId: session.peerId, id: id)
+        TransferRegistry.register(key: key, peerId: session.peerId, id: id, incoming: false)
     }
 
     func start() {
@@ -447,23 +446,24 @@ nonisolated final class OutgoingTransfer: @unchecked Sendable {
         let elapsed = Date().timeIntervalSince(startedAt)
         let s = TransferStatus(id: key, direction: .outgoing, peerName: peerName, fileCount: files.count,
                                firstName: files.first?.name ?? "", total: total, done: acked, phase: phase,
-                               bytesPerSec: elapsed > 0.5 && phase == .active ? Double(acked) / elapsed : 0)
+                               bytesPerSec: elapsed > 0.5 && phase == .active ? Double(acked) / elapsed : 0,
+                               peerId: peerId, sourcePaths: files.map(\.url.path))
         onMain { TransferUI.update(s) }
     }
 }
 
-/// Maps UI transfer keys back to (peer, transfer id) so the UI can cancel.
+/// Maps UI transfer keys back to (peer, transfer id, direction) so the UI can cancel.
 nonisolated enum TransferRegistry {
     private static let lock = NSLock()
-    nonisolated(unsafe) private static var map: [String: (peerId: String, id: UInt32)] = [:]
+    nonisolated(unsafe) private static var map: [String: (peerId: String, id: UInt32, incoming: Bool)] = [:]
 
-    static func register(key: String, peerId: String, id: UInt32) {
-        lock.lock(); map[key] = (peerId, id); lock.unlock()
+    static func register(key: String, peerId: String, id: UInt32, incoming: Bool) {
+        lock.lock(); map[key] = (peerId, id, incoming); lock.unlock()
     }
     static func unregister(key: String) {
         lock.lock(); map[key] = nil; lock.unlock()
     }
-    static func lookup(_ key: String) -> (peerId: String, id: UInt32)? {
+    static func lookup(_ key: String) -> (peerId: String, id: UInt32, incoming: Bool)? {
         lock.lock(); defer { lock.unlock() }; return map[key]
     }
 }

@@ -74,6 +74,8 @@ nonisolated final class Injector: @unchecked Sendable {
     private var geo = DisplayGeometry.current()
     private var geoAt: CFAbsoluteTime = 0
     private var lastDown: (button: Int, time: CFAbsoluteTime, pos: CGPoint, count: Int64) = (-1, 0, .zero, 0)
+    /// §8.8: the ghost of a drag carried over by the explicit controller.
+    private var ghost = DragGhostState()
     private var scrollRemainder = (x: 0.0, y: 0.0)
 
     // MARK: entry points (any thread)
@@ -87,6 +89,7 @@ nonisolated final class Injector: @unchecked Sendable {
         queue.async {
             for p in peers { self.names[p.id] = p.name }
             for peer in self.states.keys where !ready.contains(peer) { self.release(peer) }
+            if let g = self.ghost.shown, !ready.contains(g.from) { self.apply(self.ghost.peerGone(g.from)) }
             if let l = self.lease, !ready.contains(l.peer) { self.setLease(nil) }
             self.busySent = self.busySent.filter { ready.contains($0.key) }
             self.startWatchdog()
@@ -115,8 +118,12 @@ nonisolated final class Injector: @unchecked Sendable {
             enter(peer, edge, Msg.num(m["rel"]) ?? 0.5)
             return
         case "ctl_leave":
+            apply(ghost.leave(peer))
             if lease?.peer == peer { setLease(nil) }
             release(peer)
+            return
+        case "drag_carry", "drag_drop", "drag_cancel":
+            dragMessage(peer, t, m)
             return
         case "ptr_move", "ptr_scroll", "ptr_btn", "ptr_click", "ptr_abs", "key", "action":
             guard admit(peer) else {
@@ -156,12 +163,52 @@ nonisolated final class Injector: @unchecked Sendable {
         }
     }
 
+    // MARK: carried drag (§8.8)
+
+    /// Only the explicit (ctl_enter) holder may carry; the files themselves come as a normal transfer (§6) and
+    /// are saved to ~/Downloads/AirBridge Transfers like any other.
+    private func dragMessage(_ peer: String, _ t: String, _ m: [String: Any]) {
+        let id = Msg.num(m["id"]).flatMap { $0.isFinite && $0 >= 0 && $0 < 9e15 ? Int($0) : nil } ?? -1
+        switch t {
+        case "drag_carry":
+            guard let info = DragGhostState.info(from: peer, m) else { return }
+            apply(ghost.carry(from: peer, holder: entered?.peer, info))
+        case "drag_drop":
+            apply(ghost.drop(from: peer, id: id))
+        default:
+            apply(ghost.cancel(from: peer, id: id))
+        }
+    }
+
+    private func apply(_ e: DragGhostState.Effect) {
+        let at = currentCursor()
+        switch e {
+        case .none:
+            return
+        case .show(let info):
+            InputLog.shared.log("drag: \(name(info.from)) carries \(info.count) item(s)")
+            DispatchQueue.main.async { DragGhost.shared.show(info, at: at) }
+        case .hide:
+            DispatchQueue.main.async { DragGhost.shared.hide(dropped: false) }
+        case .dropped(let info, _):
+            let from = name(info.from)
+            let text = info.count == 1 && !info.firstName.isEmpty
+                ? "Receiving \(info.firstName) from \(from)" : "Receiving \(info.count) items from \(from)"
+            InputLog.shared.log("drag: \(from) dropped \(info.count) item(s) here")
+            DispatchQueue.main.async {
+                DragGhost.shared.hide(dropped: true)
+                DragGhost.shared.note(text, at: at)
+            }
+        }
+    }
+
     // MARK: lease (§8.6)
 
     private func name(_ peer: String) -> String { names[peer] ?? "another device" }
 
     private func setLease(_ l: Lease?) {
         let before = lease?.peer
+        if let b = before, b != l?.peer || l?.edge == nil { apply(ghost.leave(b)) }
         let wasImplicit = lease?.edge == nil
         lease = l
         ControlGate.shared.controlledBy = l?.peer
@@ -330,6 +377,7 @@ nonisolated final class Injector: @unchecked Sendable {
         syncCursor(p)
         cursor = p
         lastPost = CFAbsoluteTimeGetCurrent()
+        if ghost.shown != nil { DispatchQueue.main.async { DragGhost.shared.move(to: p) } }
     }
 
     /// Posting a mouse-moved event shows the cursor at `p`, but the HID layer keeps its own position. Without

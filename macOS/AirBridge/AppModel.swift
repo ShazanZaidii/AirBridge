@@ -134,6 +134,7 @@ import UserNotifications
     }
 
     func updateTransfer(_ s: TransferStatus) {
+        TransferHUD.shared.ingest(s)
         if let i = transfers.firstIndex(where: { $0.id == s.id }) { transfers[i] = s } else { transfers.append(s) }
         switch s.phase {
         case .done, .failed:
@@ -166,6 +167,12 @@ import UserNotifications
         guard !peerIds.isEmpty, !files.isEmpty else { ShareInbox.remove(batches); return }
         let left = Countdown(peerIds.count) { ShareInbox.remove(batches) }
         for id in peerIds { PeerManager.shared.sendFiles(files, to: id) { left.tick() } }
+    }
+
+    /// Hands the shared files (and their staging folders, which the taker now deletes) to someone else, e.g. AirWeb.
+    func takePendingShare() -> (files: [URL], batches: [URL]) {
+        defer { pendingBatches = []; pendingShare = [] }
+        return (pendingShare, pendingBatches)
     }
 
     func cancelPendingShare() {

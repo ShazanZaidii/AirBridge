@@ -1,3 +1,4 @@
+import CoreImage
 import SwiftUI
 import UserNotifications
 import AppKit
@@ -27,13 +28,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        AppWindows.shared.start()
         let center = UNUserNotificationCenter.current()
         center.delegate = self
         let show = UNNotificationAction(identifier: "SHOW_IN_FINDER", title: "Show in Finder", options: [])
         let open = UNNotificationAction(identifier: "OPEN_FILE", title: "Open", options: [])
-        center.setNotificationCategories([
+        center.setNotificationCategories(Set([
             UNNotificationCategory(identifier: "FILE_TRANSFER", actions: [show, open], intentIdentifiers: [], options: []),
-        ])
+        ] + PhoneNotifCenter.categories))
         center.requestAuthorization(options: [.alert, .sound]) { _, _ in }
 
         AppModel.shared.startObservingControlStatus()
@@ -41,9 +43,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         ClipboardSync.shared.start()
         ShareInbox.purgeStale()
         InputInterceptor.shared.start()
+        DropDock.shared.start()
+        PhoneNotifCenter.shared.start()
+        CallAudioController.shared.install()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        AirWebWindow.shared.shutdown()
         PeerManager.shared.shutdown()
     }
 
@@ -77,6 +83,79 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
                 AppModel.shared.sendPendingShare(to: ids)
                 closeTargetSelection()
             }
+            // airbridge://debug/mirror?to=ID — open the phone mirror window for that phone (test rigs).
+            // airbridge://debug/mirror_tap?to=ID&x=0.5&y=0.5 — a click at that spot of the mirrored phone.
+            // airbridge://debug/drop_send?to=ID&file=/path — what a drop on the dock does with one device
+            //   (undo card, then the transfer card).
+            let to = q.first(where: { $0.name == "to" })?.value
+            let peer = AppModel.shared.readyPeers.first { $0.id == to }
+            if url.path == "/mirror", let peer { PhoneMirrorWindows.shared.show(peer) }
+            if url.path == "/mirror_tap", let peer,
+               let x = Double(q.first(where: { $0.name == "x" })?.value ?? ""), let y = Double(q.first(where: { $0.name == "y" })?.value ?? "") {
+                PeerBus.shared.send(to: peer.id, ["t": "ptr_abs", "x": x, "y": y])
+                PeerBus.shared.send(to: peer.id, ["t": "ptr_btn", "b": 0, "down": true])
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+                    PeerBus.shared.send(to: peer.id, ["t": "ptr_btn", "b": 0, "down": false])
+                }
+            }
+            // airbridge://debug/mirror_snapshot?out=/path.png — save the frame the mirror window shows last.
+            if url.path == "/mirror_snapshot", let out = q.first(where: { $0.name == "out" })?.value,
+               let pb = MirrorRenderer.lastFrame {
+                let shownAt = MirrorRenderer.lastFrameAt
+                try? String(format: "%.0f", shownAt * 1000).write(toFile: out + ".txt", atomically: true, encoding: .utf8)
+                let ci = CIImage(cvPixelBuffer: pb)
+                if let cg = CIContext().createCGImage(ci, from: ci.extent),
+                   let png = NSBitmapImageRep(cgImage: cg).representation(using: .png, properties: [:]) {
+                    try? png.write(to: URL(fileURLWithPath: out))
+                }
+            }
+            // airbridge://debug/render_menu?out=/path.png — the menu bar window as an image (layout checks).
+            if url.path == "/render_menu", let out = q.first(where: { $0.name == "out" })?.value {
+                let open = q.first(where: { $0.name == "settings" })?.value == "1"
+                let host = NSHostingView(rootView: MenuView(model: AppModel.shared, startWithSettingsOpen: open).background(Color(nsColor: .windowBackgroundColor)))
+                host.appearance = NSAppearance(named: .darkAqua)
+                let w = NSWindow(contentRect: NSRect(x: -4000, y: 0, width: 320, height: 900), styleMask: [.borderless], backing: .buffered, defer: false)
+                w.contentView = host
+                host.frame.size = host.fittingSize
+                w.setContentSize(host.fittingSize)
+                w.orderFrontRegardless()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    host.layoutSubtreeIfNeeded()
+                    if let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) {
+                        host.cacheDisplay(in: host.bounds, to: rep)
+                        if let png = rep.representation(using: .png, properties: [:]) { try? png.write(to: URL(fileURLWithPath: out)) }
+                    }
+                    w.orderOut(nil)
+                }
+            }
+            // airbridge://debug/notif_dump?out=/path.txt — phone notifications the Mac holds now (test rigs).
+            if url.path == "/notif_dump", let out = q.first(where: { $0.name == "out" })?.value {
+                let lines = PhoneNotifCenter.shared.store.items.values.sorted { $0.ts < $1.ts }
+                    .map { "\($0.app) | \($0.title) | \($0.text) | reply=\($0.canReply) | msgs=\($0.msgs.count)" }
+                let calls = PhoneNotifCenter.shared.calls.values.map { "CALL \($0.state) | \($0.name ?? "-") | \($0.number ?? "-") | muted=\($0.muted) speaker=\($0.speaker) | can=\($0.can.sorted()) | route=\($0.route ?? "-") routes=\($0.routes.map { "\($0.id)\($0.computer ? "*" : "")" })" }
+                try? (lines + calls).joined(separator: "\n").write(toFile: out, atomically: true, encoding: .utf8)
+            }
+            // airbridge://debug/call?op=answer|decline|end — the call panel's buttons for the current call.
+            if url.path == "/call", let op = q.first(where: { $0.name == "op" })?.value,
+               let c = PhoneNotifCenter.shared.calls.values.first {
+                PhoneNotifCenter.shared.callAction(c, op)
+            }
+            // airbridge://debug/close_windows — ⌘W (performClose) on every open app window.
+            if url.path == "/close_windows" {
+                for w in NSApp.windows where AppWindows.isAppWindow(w) { w.performClose(nil) }
+            }
+            // airbridge://debug/fake_call?state=ringing|active|ended&name=Asha&label=Mobile — the call UI without a phone.
+            if url.path == "/fake_call" { CallPanels.debugFakeCall(q) }
+            // airbridge://debug/talk_setup — the "Talk from your Mac" window; pro_setup?to=ID — the Pro Mirroring one.
+            if url.path == "/talk_setup" { TalkFromMacWindow.shared.show() }
+            if url.path == "/pro_setup", let peer { ProMirrorSetupWindow.shared.show(peerId: peer.id, name: peer.name) }
+            // airbridge://debug/phone_route?dev=speaker — the Audio menu's pick of one of the phone's routes.
+            if url.path == "/phone_route", let dev = q.first(where: { $0.name == "dev" })?.value {
+                CallAudio.shared.selectPhoneRoute(dev)
+            }
+            if url.path == "/drop_send", let peer, let f = q.first(where: { $0.name == "file" })?.value {
+                TransferHUD.shared.queueSend([URL(fileURLWithPath: f)], to: peer)
+            }
         #endif
         default:
             break
@@ -105,6 +184,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
 
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
                                 withCompletionHandler completionHandler: @escaping () -> Void) {
+        // Phone notifications (§13): reply, open on phone, clear (synced to the phone), click = the list.
+        if let id = response.notification.request.content.userInfo[PhoneNotifCenter.userInfoKey] as? String {
+            let action = response.actionIdentifier
+            let text = (response as? UNTextInputNotificationResponse)?.userText
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated { PhoneNotifCenter.shared.handleResponse(id: id, action: action, text: text) }
+            }
+            completionHandler()
+            return
+        }
         let paths = response.notification.request.content.userInfo["filePaths"] as? [String] ?? []
         let urls = paths.map { URL(fileURLWithPath: $0) }
         if response.actionIdentifier == "SHOW_IN_FINDER" {
@@ -117,6 +206,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
 
     func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification,
                                 withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        // Phone notifications stay in Notification Center after the banner, so clearing them there syncs back.
+        if notification.request.content.userInfo[PhoneNotifCenter.userInfoKey] != nil {
+            completionHandler([.banner, .list, .sound])
+            return
+        }
         completionHandler([.banner, .sound])
     }
 }
@@ -202,6 +296,24 @@ struct MenuRowButtonStyle: ButtonStyle {
     }
 }
 
+/// A square, quiet action button for the menu's action bar.
+struct ActionTile: View {
+    let title: String
+    let icon: String
+    @State private var hovering = false
+    var body: some View {
+        VStack(spacing: 5) {
+            Image(systemName: icon).font(.system(size: 17, weight: .regular)).frame(height: 20)
+            Text(title).font(.caption).lineLimit(1).minimumScaleFactor(0.8)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 9)
+        .background(RoundedRectangle(cornerRadius: 9).fill(Color.primary.opacity(hovering ? 0.10 : 0.06)))
+        .contentShape(RoundedRectangle(cornerRadius: 9))
+        .onHover { hovering = $0 }
+    }
+}
+
 struct SectionHeader: View {
     let title: String
     var body: some View {
@@ -215,16 +327,27 @@ struct SectionHeader: View {
 
 struct MenuView: View {
     @ObservedObject var model: AppModel
+    /// Test rigs only (airbridge://debug/render_menu?settings=1): start with Settings open.
+    var startWithSettingsOpen = false
     @Environment(\.openWindow) private var openWindow
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showPairing = false
+    @State private var showMirrorPick = false
     @State private var showHosts = false
     @State private var showSettings = false
     @State private var newName = ""
+    @AppStorage(DropSettings.dockEnabledKey) private var dockEnabled = true
+    @AppStorage(DropSettings.autoHideKey) private var autoHideCards = false
+    @ObservedObject private var phoneNotifs = PhoneNotifCenter.shared
+    @AppStorage(PhoneNotifSettings.showNotifsKey) private var showPhoneNotifs = true
+    @AppStorage(PhoneNotifSettings.showCallsKey) private var showPhoneCalls = true
+    @AppStorage(PhoneNotifSettings.soundsKey) private var phoneSounds = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             header
+
+            ActiveCallsMenuSection()
 
             if let status = model.controlStatus { controlBanner(status) }
 
@@ -246,34 +369,51 @@ struct MenuView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            Divider()
+            // Pairing opens in place (from "Add device" or when nothing is paired yet).
+            if showPairing {
+                VStack(alignment: .leading, spacing: Theme.sm) {
+                    HStack {
+                        SectionHeader(title: "Add a device")
+                        Spacer()
+                        Button { showPairing = false } label: { Image(systemName: "xmark").font(.caption) }
+                            .buttonStyle(.borderless).accessibilityLabel("Close")
+                    }
+                    pairingSection
+                    DisclosureGroup(isExpanded: $showHosts) { hostsSection } label: {
+                        Text("Connect by address").font(.callout)
+                    }
+                }
+            }
 
-            VStack(alignment: .leading, spacing: 2) {
-                DisclosureGroup(isExpanded: $showPairing) { pairingSection } label: {
-                    Label("Pair a new device", systemImage: "qrcode")
+            actionBar
+
+            HStack(spacing: Theme.sm) {
+                Button { openAndFront("arrangement", title: "AirBridge Display Arrangement") } label: {
+                    ToolPill(title: "Displays", icon: "rectangle.3.group")
                 }
-                DisclosureGroup(isExpanded: $showHosts) { hostsSection } label: {
-                    Label("Connect to host…", systemImage: "antenna.radiowaves.left.and.right")
+                .help("Arrange where your devices sit around this screen")
+                Button { openAndFront("filters", title: "Clipboard Filters") } label: {
+                    ToolPill(title: "Clipboard filters", icon: "line.3.horizontal.decrease.circle")
                 }
+                .help("Choose what clipboard content is shared")
+            }
+            .buttonStyle(.plain)
+
+            if showMirrorPick && connectedPhones.count > 1 {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(connectedPhones) { p in
+                        Button { showMirrorPick = false; mirror(p) } label: { Label(p.name, systemImage: "iphone.gen3") }
+                    }
+                }
+                .buttonStyle(MenuRowButtonStyle())
+                .padding(.horizontal, -Theme.sm)
             }
 
             Divider()
 
             VStack(alignment: .leading, spacing: 0) {
-                Button { openAndFront("arrangement", title: "AirBridge Display Arrangement") } label: {
-                    Label("Display Arrangement…", systemImage: "rectangle.3.group")
-                }
-                Button { openAndFront("filters", title: "Clipboard Filters") } label: {
-                    Label("Clipboard Filters…", systemImage: "line.3.horizontal.decrease.circle")
-                }
-                if !model.screenCaptureAllowed {
-                    Button { model.requestScreenCapture() } label: {
-                        Label("Allow screen mirroring…", systemImage: "rectangle.on.rectangle")
-                    }
-                    .help("Lets a phone show and control this Mac's screen. Needs the Screen Recording permission.")
-                }
-                DisclosureGroup(isExpanded: $showSettings) { settingsSection } label: {
-                    Label("Device name", systemImage: "pencil")
+                DisclosureGroup(isExpanded: $showSettings) { settingsList } label: {
+                    Label("Settings", systemImage: "gearshape")
                 }
                 .padding(.horizontal, Theme.sm)
                 .padding(.vertical, 5)
@@ -291,9 +431,82 @@ struct MenuView: View {
         .animation(reduceMotion ? nil : Theme.motion, value: model.pairPrompts)
         .onAppear {
             if model.devices.isEmpty { showPairing = true }
+            if startWithSettingsOpen { showSettings = true }
             model.refreshScreenCapture()
         }
     }
+
+    /// Connected Android phones (whether or not their AirBridge can show its screen yet).
+    private var connectedPhones: [PeerInfo] { model.readyPeers.filter { $0.platform == "android" } }
+
+    /// Mirror [p], or explain why it can't be mirrored yet (an older AirBridge on the phone).
+    private func mirror(_ p: PeerInfo) {
+        if PhoneMirrorHub.canMirror(p) || ProMirrorHub.isSetUp(p.id) { PhoneMirrorWindows.shared.show(p) }
+        else { model.notice("Update AirBridge on \(p.name) to mirror its screen") }
+    }
+
+    /// The three things people do most, one tap each.
+    private var actionBar: some View {
+        HStack(spacing: Theme.sm) {
+            let phones = connectedPhones
+            Button {
+                if phones.count == 1, let p = phones.first { mirror(p) } else { showMirrorPick.toggle() }
+            } label: { ActionTile(title: "Mirror phone", icon: "iphone.gen3") }
+                .buttonStyle(.plain)
+                .disabled(phones.isEmpty)
+                .opacity(phones.isEmpty ? 0.45 : 1)
+                .help(phones.isEmpty ? "Connect a phone to mirror it" : "Show your phone's screen in a window")
+            Button { AirWebWindow.shared.show() } label: { ActionTile(title: "AirWeb", icon: "qrcode.viewfinder") }
+                .buttonStyle(.plain)
+                .help("Send files to a phone or computer without the app")
+            // Phone notifications (§13): only once a phone that can send them is connected or some are listed.
+            if !phoneNotifs.sourcePhones.isEmpty || phoneNotifs.store.count > 0 {
+                Button { PhoneNotifsWindow.shared.show() } label: {
+                    ActionTile(title: "Notifications", icon: phoneNotifs.unseen > 0 ? "bell.badge" : "bell")
+                        .overlay(alignment: .topTrailing) {
+                            if phoneNotifs.unseen > 0 {
+                                Text(phoneNotifs.unseen > 99 ? "99+" : "\(phoneNotifs.unseen)")
+                                    .font(.system(size: 9, weight: .semibold).monospacedDigit())
+                                    .padding(.horizontal, 5).padding(.vertical, 1)
+                                    .background(Capsule().fill(Color.primary.opacity(0.75)))
+                                    .foregroundStyle(Color(nsColor: .windowBackgroundColor))
+                                    .padding(5)
+                                    .transition(.scale.combined(with: .opacity))
+                                    .accessibilityLabel("\(phoneNotifs.unseen) new")
+                            }
+                        }
+                }
+                .buttonStyle(.plain)
+                .help("Your phone's notifications")
+                .transition(.opacity)
+            }
+            Button { showPairing.toggle() } label: { ActionTile(title: "Add device", icon: "plus") }
+                .buttonStyle(.plain)
+        }
+        .animation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.8), value: phoneNotifs.unseen)
+    }
+
+    /// Everything that's set once and rarely touched again.
+    private var settingsList: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            settingsSection
+            dropSettingsSection
+            phoneSettingsSection
+            Button { CallAudio.shared.openSetup() } label: {
+                Label("Talk from your Mac…", systemImage: "phone.connection")
+            }
+            if !model.screenCaptureAllowed {
+                Button { model.requestScreenCapture() } label: {
+                    Label("Let phones show this Mac's screen…", systemImage: "rectangle.on.rectangle")
+                }
+            }
+        }
+        .buttonStyle(MenuRowButtonStyle())
+        .padding(.top, Theme.xs)
+    }
+
+    /// Connected phones that can show their screen here (§8.7, phone as source).
+    private var mirrorablePhones: [PeerInfo] { model.readyPeers.filter(PhoneMirrorHub.canMirror) }
 
     // MARK: Header & status
 
@@ -342,10 +555,10 @@ struct MenuView: View {
         VStack(alignment: .leading, spacing: Theme.sm) {
             SectionHeader(title: "Devices")
             if model.devices.isEmpty {
-                Text("No paired devices yet — pair one below.")
+                Text("No devices yet. Use Add device below.")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            ForEach(model.devices) { d in deviceRow(d) }
+            ForEach(model.devices.sorted { $0.connected && !$1.connected }) { d in deviceRow(d) }
         }
     }
 
@@ -379,6 +592,13 @@ struct MenuView: View {
             }
             Spacer()
             Menu {
+                if let phone = connectedPhones.first(where: { $0.id == d.id }) {
+                    Button("Mirror Screen") { mirror(phone) }
+                    Button(ProMirrorHub.isSetUp(phone.id) ? "Pro Mirroring…" : "Set Up Pro Mirroring…") {
+                        ProMirrorSetupWindow.shared.show(peerId: phone.id, name: phone.name)
+                    }
+                    Divider()
+                }
                 if d.connected {
                     Button("Disconnect") { PeerManager.shared.disconnect(peerId: d.id) }
                 } else if d.outbound {
@@ -461,15 +681,56 @@ struct MenuView: View {
     }
 
     private var settingsSection: some View {
-        HStack {
-            TextField("Device name", text: $newName)
-                .textFieldStyle(.roundedBorder)
-                .onAppear { newName = model.deviceName }
-                .onSubmit { PeerManager.shared.rename(to: newName) }
-            Button("Rename") { PeerManager.shared.rename(to: newName) }
-                .disabled(newName.trimmingCharacters(in: .whitespaces).isEmpty || newName == model.deviceName)
+        let changed = !newName.trimmingCharacters(in: .whitespaces).isEmpty && newName != model.deviceName
+        return HStack(spacing: 10) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Color.primary.opacity(0.07))
+                Image(systemName: "laptopcomputer").font(.system(size: 12.5, weight: .medium)).foregroundStyle(.secondary)
+            }
+            .frame(width: 26, height: 26)
+            VStack(alignment: .leading, spacing: 1) {
+                TextField("Name", text: $newName)
+                    .textFieldStyle(.plain)
+                    .font(.callout)
+                    .onAppear { newName = model.deviceName }
+                    .onSubmit { if changed { PeerManager.shared.rename(to: newName) } }
+                Text("How your other devices see this Mac").font(.caption2).foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 8)
+            if changed {
+                Button("Save") { PeerManager.shared.rename(to: newName) }
+                    .controlSize(.small)
+                    .transition(.scale.combined(with: .opacity))
+            }
         }
-        .controlSize(.small)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .animation(.spring(response: 0.3, dampingFraction: 0.75), value: changed)
+        .padding(.top, Theme.xs)
+    }
+
+    private var dropSettingsSection: some View {
+        VStack(alignment: .leading, spacing: Theme.xs) {
+            SettingToggleRow(icon: "tray.and.arrow.down", title: "Drop dock",
+                             hint: "Drag files to the menu bar icon to send them", isOn: $dockEnabled)
+            SettingToggleRow(icon: "clock.arrow.circlepath", title: "Tidy up finished transfers",
+                             hint: "Hide their cards after 5 seconds", isOn: $autoHideCards)
+                .onChange(of: autoHideCards) { TransferHUD.shared.settingsChanged() }
+        }
+        .fixedSize(horizontal: false, vertical: true)
+        .padding(.top, Theme.xs)
+    }
+
+    /// Phone notifications and calls (§13). The phone has its own switches; these decide what this Mac shows.
+    private var phoneSettingsSection: some View {
+        VStack(alignment: .leading, spacing: Theme.xs) {
+            SettingToggleRow(icon: "bell.badge", title: "Phone notifications", hint: "Show them on this Mac", isOn: $showPhoneNotifs)
+            SettingToggleRow(icon: "phone", title: "Phone calls", hint: "See and answer calls here", isOn: $showPhoneCalls)
+            RingModeSetting().disabled(!showPhoneCalls).opacity(showPhoneCalls ? 1 : 0.45)
+            SettingToggleRow(icon: "speaker.wave.2", title: "Sounds", hint: "Play a sound for phone notifications",
+                             isOn: $phoneSounds, enabled: showPhoneNotifs || showPhoneCalls)
+        }
+        .fixedSize(horizontal: false, vertical: true)
         .padding(.top, Theme.xs)
     }
 
@@ -562,12 +823,11 @@ struct PairPromptCard: View {
 
     func show(_ p: PairPrompt) {
         if let panel = panels[p.id] {
-            (panel.contentViewController as? NSHostingController<PairPromptPanelView>)?.rootView =
-                PairPromptPanelView(prompt: p, model: AppModel.shared)
+            (panel.contentViewController as? NSHostingController<AnyView>)?.rootView =
+                FitWindow.wrap(PairPromptPanelView(prompt: p, model: AppModel.shared), width: 340) { [weak self] in self?.panels[p.id] }
             return
         }
-        let host = NSHostingController(rootView: PairPromptPanelView(prompt: p, model: AppModel.shared))
-        host.sizingOptions = [.preferredContentSize]
+        let host = FitWindow.host(PairPromptPanelView(prompt: p, model: AppModel.shared), width: 340) { [weak self] in self?.panels[p.id] }
         let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 340, height: 220),
                             styleMask: [.nonactivatingPanel, .titled, .fullSizeContentView, .utilityWindow],
                             backing: .buffered, defer: false)
@@ -621,7 +881,7 @@ struct TransferRowView: View {
                 Image(systemName: status.direction == .incoming ? "arrow.down.circle" : "arrow.up.circle")
                 Text(title).font(.caption).lineLimit(1)
                 Spacer()
-                if status.direction == .outgoing, status.phase == .active || status.phase == .waiting {
+                if status.phase == .active || status.phase == .waiting {
                     Button { PeerManager.shared.cancelTransfer(key: status.id) } label: {
                         Image(systemName: "xmark.circle.fill")
                     }
@@ -673,9 +933,10 @@ struct TargetSelectionView: View {
                 .font(.subheadline).foregroundStyle(.secondary)
 
             if targets.isEmpty {
-                Text("No devices connected.").foregroundStyle(.secondary).padding()
-            } else {
-                List(targets) { peer in
+                Text("No devices connected.").foregroundStyle(.secondary)
+            }
+            List {
+                ForEach(targets) { peer in
                     let on = chosen.contains(peer.id)
                     HStack {
                         Image(systemName: platformIcon(peer.platform))
@@ -698,9 +959,10 @@ struct TargetSelectionView: View {
                     .accessibilityAction { if picking { toggle(peer.id) } else { send([peer.id]) } }
                     .accessibilityAction(named: "Choose several") { toggle(peer.id) }
                 }
-                .frame(height: 150)
-                .cornerRadius(8)
+                airWebRow
             }
+            .frame(height: targets.isEmpty ? 68 : 200)
+            .cornerRadius(8)
 
             HStack {
                 if !picking, targets.count > 1 {
@@ -721,6 +983,33 @@ struct TargetSelectionView: View {
         .padding()
         .frame(width: 350)
         .onChange(of: targets.map(\.id)) { chosen.formIntersection(targets.map(\.id)) }
+    }
+
+    /// Offers the files on a web page for a device without the app (QR code + link).
+    private var airWebRow: some View {
+        HStack {
+            Image(systemName: "qrcode.viewfinder")
+            VStack(alignment: .leading, spacing: 1) {
+                Text("AirWeb")
+                Text("Send to a phone or computer without the app")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Image(systemName: "chevron.right").foregroundStyle(.secondary)
+        }
+        .padding(8)
+        .contentShape(Rectangle())
+        .onTapGesture { openAirWeb() }
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction { openAirWeb() }
+    }
+
+    private func openAirWeb() {
+        chosen = []
+        let (files, batches) = model.takePendingShare()
+        AppDelegate.shared?.closeTargetSelection()
+        AirWebWindow.shared.show(offering: files, batches: batches)
     }
 
     private func toggle(_ id: String) {

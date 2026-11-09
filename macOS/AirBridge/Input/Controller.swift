@@ -64,6 +64,15 @@ nonisolated final class Controller: @unchecked Sendable {
     private var lastEnded: (peer: String, at: CFAbsoluteTime)?
     private var refusedUntil: [String: CFAbsoluteTime] = [:]   // peers that did not answer/refused a capture
 
+    // Carrying a file drag onto a target (§8.8).
+    private var carry = DragCarryController(firstId: Int.random(in: 1..<0x1000_0000))
+    private var carryURLs: [URL] = []
+    private var dragPbAtDown = -1                 // drag pasteboard changeCount when the left button went down
+    private var dragFiles: [URL]?                 // files of the current local drag, once known
+    private var dragFilesCheckedAt: CFAbsoluteTime = 0
+    private var catcherShown = false
+    private var buttonUpSince: CFAbsoluteTime?    // carrying, but the left button is physically up
+
     private static let moveInterval = 1.0 / 120.0
     /// §8.1: the target must answer a ctl_enter with ctl_ack within this long, or we give the cursor back.
     private static let ackTimeout = 0.6
@@ -190,6 +199,7 @@ nonisolated final class Controller: @unchecked Sendable {
 
     /// No ack in time: the target can't or won't take control. Never leave the user's cursor hostage.
     private func watchSession() {
+        watchCarriedButton()
         guard let s = session, !s.acked else { return }
         let now = CFAbsoluteTimeGetCurrent()
         guard now - s.startedAt > Self.ackTimeout else { return }
@@ -197,6 +207,22 @@ nonisolated final class Controller: @unchecked Sendable {
         let name = peerName(s.peer)
         end(resumeAt: returnPoint(s), sendLeave: true)
         ControlStatus.shared.showNotice("\(name) isn't ready to be controlled. Turn on the AirBridge accessibility service on it.", seconds: 8)
+    }
+
+    /// §8.8 safety net: carrying, but the left button is physically up and we never saw the release (the tap was
+    /// disabled for a moment, secure input...). Cancel the carry; a release we missed went to the catcher anyway.
+    private func watchCarriedButton() {
+        guard carry.isCarrying, session != nil else { buttonUpSince = nil; return }
+        let now = CFAbsoluteTimeGetCurrent()
+        if CGEventSource.buttonState(.hidSystemState, button: .left) { buttonUpSince = nil; return }
+        guard let since = buttonUpSince else { buttonUpSince = now; return }
+        guard now - since > 0.3, case let .cancel(peer, id) = carry.end() else { return }
+        PeerBus.shared.send(to: peer, ["t": "drag_cancel", "id": id])
+        InputLog.shared.log("drag: button found up without a release; carry cancelled")
+        carryURLs = []
+        buttonUpSince = nil
+        localButtons.remove(0)
+        hideCatcher(after: 1.0)
     }
 
     /// Where the cursor reappears: on the entry edge, at the sideways position the user had reached.
@@ -220,6 +246,8 @@ nonisolated final class Controller: @unchecked Sendable {
             // We missed events while disabled; don't trust button/drag tracking.
             localButtons.removeAll()
             dragging = false
+            dragPbAtDown = -1
+            dragFiles = nil
             resetCharge()
             return pass
         }
@@ -252,6 +280,12 @@ nonisolated final class Controller: @unchecked Sendable {
             let b = Self.buttonNumber(type, e)
             swallowButtonUps.remove(b)
             localButtons.insert(b)
+            if b == 0 {
+                // §8.8: a file drag writes the drag pasteboard after this point; remember where it stood.
+                dragPbAtDown = NSPasteboard(name: .drag).changeCount
+                dragFiles = nil
+                dragFilesCheckedAt = 0
+            }
             resetCharge()
         case .leftMouseUp, .rightMouseUp, .otherMouseUp:
             let b = Self.buttonNumber(type, e)
@@ -263,8 +297,16 @@ nonisolated final class Controller: @unchecked Sendable {
             lastLocal = e.location
             if swallowButtonUps.remove(b) != nil { return false }
         case .leftMouseDragged, .rightMouseDragged, .otherMouseDragged:
-            // Drags never cross (§8.2: a held button resets the accumulator).
             dragging = true
+            // Drags never cross (§8.2: a held button resets the accumulator), except a file drag pushed into a
+            // peer that can take it (§8.8).
+            if type == .leftMouseDragged, localButtons == [0] {
+                if let hit = pushThroughDrag(e) {
+                    begin(hit.peer, hit.edge, hit.span, hit.rel, e, carrying: dragFiles ?? [])
+                    return false
+                }
+                return true
+            }
             lastLocal = e.location
             resetCharge()
         case .mouseMoved:
@@ -305,13 +347,14 @@ nonisolated final class Controller: @unchecked Sendable {
 
     /// The edge the cursor is pinned against that leads to an online, assigned, enabled peer.
     /// Only the peer assigned to that edge is ever considered (§8.6); offline peers leave the edge inert.
-    private func candidate(at p: CGPoint, dx: Double, dy: Double, _ cfg: CaptureSettings) -> Candidate? {
+    private func candidate(at p: CGPoint, dx: Double, dy: Double, _ cfg: CaptureSettings, drag: Bool = false) -> Candidate? {
         let g = geometry()
         guard let r = g.display(at: p) else { return nil }
         var best: (Candidate, Double)?
         for edge in ScreenEdge.allCases where cfg.enabled(edge) && g.isOuter(p, of: r, edge) {
             guard let (id, pl) = Layout.shared.assignment(for: edge),
-                  peers.contains(where: { $0.id == id && $0.caps.contains("ctl_target") }) else { continue }
+                  peers.contains(where: { $0.id == id && $0.caps.contains("ctl_target")
+                                          && (!drag || DragCarryController.eligible($0.caps)) }) else { continue }
             if let until = refusedUntil[id], CFAbsoluteTimeGetCurrent() < until { continue }
             let span = g.span(edge, pl.start, pl.end)
             let along = edge.isVertical ? p.y : p.x
@@ -348,7 +391,67 @@ nonisolated final class Controller: @unchecked Sendable {
             resetCharge()
             return nil
         }
+        return accumulate(c, e, prev: prev, now: now, cfg)
+    }
+
+    /// §8.8: the same push-through, during a left-button drag that carries files, into a `drag_files` peer.
+    /// While it charges, the drop catcher sits under the cursor so the release can never land on the Mac.
+    private func pushThroughDrag(_ e: CGEvent) -> Candidate? {
+        let now = CFAbsoluteTimeGetCurrent()
+        let p = e.location
+        let prev = lastLocal
+        lastLocal = p
+        let dx = e.getDoubleValueField(.mouseEventDeltaX), dy = e.getDoubleValueField(.mouseEventDeltaY)
+        let cfg = currentSettings()
+        guard ControlGate.shared.controlledBy == nil, !peers.isEmpty,
+              let c = candidate(at: p, dx: dx, dy: dy, cfg, drag: true),
+              currentDragFiles(now)?.isEmpty == false else {
+            resetCharge()
+            return nil
+        }
+        if !catcherShown {
+            catcherShown = true
+            DropCatcher.carrying = false
+            let r = Self.catcherRect(c.bar, c.edge)
+            DispatchQueue.main.async { DropCatcher.shared.show(rect: r) }
+        }
+        return accumulate(c, e, prev: prev, now: now, cfg)
+    }
+
+    /// The files in the drag going on now, read from the drag pasteboard (only if it changed since the button
+    /// went down). A miss is re-checked at most every 250 ms: the pasteboard is written a moment after the drag
+    /// starts.
+    private func currentDragFiles(_ now: CFAbsoluteTime) -> [URL]? {
+        if let dragFiles { return dragFiles }
+        guard dragPbAtDown >= 0, now - dragFilesCheckedAt >= 0.25 else { return nil }
+        dragFilesCheckedAt = now
+        let pb = NSPasteboard(name: .drag)
+        let changed = pb.changeCount
+        guard changed != dragPbAtDown else { return nil }
+        let urls = (pb.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL]) ?? []
+        guard DragCarryController.dragHasFiles(changeCountAtDown: dragPbAtDown, changeCountNow: changed,
+                                               fileCount: urls.count) else { return nil }
+        dragFiles = urls
+        return urls
+    }
+
+    /// The strip under a cursor pinned at `edge`: the indicator bar, a little thicker, flush with the outer edge.
+    private static func catcherRect(_ bar: CGRect, _ edge: ScreenEdge) -> CGRect {
+        let t = DropCatcher.thickness
+        switch edge {
+        case .left: return CGRect(x: bar.minX, y: bar.minY, width: t, height: bar.height)
+        case .right: return CGRect(x: bar.maxX - t, y: bar.minY, width: t, height: bar.height)
+        case .top: return CGRect(x: bar.minX, y: bar.minY, width: bar.width, height: t)
+        case .bottom: return CGRect(x: bar.minX, y: bar.maxY - t, width: bar.width, height: t)
+        }
+    }
+
+    /// Shared accumulator of both push-through paths.
+    private func accumulate(_ c: Candidate, _ e: CGEvent, prev: CGPoint?, now: CFAbsoluteTime, _ cfg: CaptureSettings) -> Candidate? {
+        let p = e.location
+        let dx = e.getDoubleValueField(.mouseEventDeltaX), dy = e.getDoubleValueField(.mouseEventDeltaY)
         if let until = cooldownUntil[c.edge], now < until { resetCharge(); return nil }
+        if ControlGate.shared.mirrorFocus == c.peer { resetCharge(); return nil } // its mirror window drives it
         if cfg.requireOption && !e.flags.contains(.maskAlternate) { resetCharge(); return nil }
 
         var push = Self.outward(c.edge, dx, dy)
@@ -390,6 +493,12 @@ nonisolated final class Controller: @unchecked Sendable {
         charge = nil
         if shownLevel > 0 { DispatchQueue.main.async { EdgeIndicator.shared.hide() } }
         shownLevel = -1
+        if catcherShown && !carry.isCarrying { hideCatcher() }
+    }
+
+    private func hideCatcher(after delay: Double = 0) {
+        catcherShown = false
+        DispatchQueue.main.async { DropCatcher.shared.hide(after: delay) }
     }
 
     /// Timer: samples age out of the window even when no events arrive (pause > 500 ms empties it).
@@ -403,7 +512,8 @@ nonisolated final class Controller: @unchecked Sendable {
         showLevel(sum / currentSettings().threshold, c.bar)
     }
 
-    private func begin(_ peer: String, _ edge: ScreenEdge, _ span: (CGFloat, CGFloat), _ rel: Double, _ e: CGEvent) {
+    private func begin(_ peer: String, _ edge: ScreenEdge, _ span: (CGFloat, CGFloat), _ rel: Double, _ e: CGEvent,
+                       carrying files: [URL] = []) {
         // Release everything the Mac thinks is held so nothing sticks while we're away.
         for kc in localKeys where KeyMap.modifierFlags(forMac: kc) == nil {
             Injector.post(CGEvent(keyboardEventSource: nil, virtualKey: kc, keyDown: false))
@@ -425,6 +535,7 @@ nonisolated final class Controller: @unchecked Sendable {
         }
 
         let anchor = e.location
+        if !files.isEmpty { _ = carry.begin(peer: peer) } // before resetCharge so the drop catcher stays up
         resetCharge()
         let info = peers.first { $0.id == peer }
         let gain = info?.platform == "android" ? 1.6 : 1.0       // target pixels per Mac point (see Android TargetController)
@@ -442,12 +553,34 @@ nonisolated final class Controller: @unchecked Sendable {
         // never a moment with no cursor anywhere. It is hidden in remoteAck.
         PeerBus.shared.send(to: peer, ["t": "ctl_enter", "edge": edge.opposite.rawValue, "rel": Msg.round(rel, 10000)])
         PeerBus.shared.send(to: peer, ["t": "key_state", "caps": capsOn])
+        if case let .carrying(id, _) = carry.phase {
+            // §8.8: the held button stays local (never forwarded); the target shows a ghost instead.
+            carryURLs = files
+            buttonUpSince = nil
+            DropCatcher.carrying = true
+            PeerBus.shared.send(to: peer, DragPayload.describe(files).message(id: id))
+            // Let the drag session see the cursor resting on the catcher (it may have arrived there in one jump).
+            // Queued on main behind the catcher's show, so the panel is up when the event arrives.
+            DispatchQueue.main.async {
+                Injector.post(CGEvent(mouseEventSource: nil, mouseType: .leftMouseDragged, mouseCursorPosition: anchor, mouseButton: .left))
+            }
+            InputLog.shared.log("drag: carrying \(files.count) item(s) to \(peerName(peer))")
+        }
         ControlStatus.shared.setControlling(peerName(peer))
     }
 
     private func end(resumeAt p: CGPoint, sendLeave: Bool) {
         guard let s = session else { return }
         flushMoves()
+        let gone = !peers.contains { $0.id == s.peer }
+        if case let .cancel(peer, id) = carry.end(peerGone: gone) {
+            // §8.8: the button is still held here; the local drag simply continues on the Mac.
+            PeerBus.shared.send(to: peer, ["t": "drag_cancel", "id": id])
+            InputLog.shared.log("drag: carry cancelled")
+        }
+        if catcherShown { DropCatcher.carrying = false; hideCatcher() }
+        carryURLs = []
+        buttonUpSince = nil
         if sendLeave { PeerBus.shared.send(to: s.peer, ["t": "ctl_leave"]) }
         swallowKeyUps.formUnion(remoteKeys.filter { KeyMap.modifierFlags(forMac: $0) == nil })
         swallowButtonUps.formUnion(remoteButtons)
@@ -502,6 +635,7 @@ nonisolated final class Controller: @unchecked Sendable {
             send(["t": "ptr_btn", "b": b, "down": true])
         case .leftMouseUp, .rightMouseUp, .otherMouseUp:
             let b = Self.buttonNumber(type, e)
+            if b == 0, carry.isCarrying, !remoteButtons.contains(0) { return dropCarried(e, s) }
             guard remoteButtons.remove(b) != nil else { return false }
             flushMoves()
             send(["t": "ptr_btn", "b": b, "down": false])
@@ -518,6 +652,33 @@ nonisolated final class Controller: @unchecked Sendable {
 
     private func send(_ msg: [String: Any]) {
         if let s = session { PeerBus.shared.send(to: s.peer, msg) }
+    }
+
+    /// §8.8: the carried drag was let go over the target. Tell it, send the files, and end the Mac's own drag
+    /// session on the drop catcher under the frozen cursor (the release is let through there). Returns true = pass.
+    private func dropCarried(_ e: CGEvent, _ s: Session) -> Bool {
+        flushMoves()
+        guard case let .drop(peer, id) = carry.release() else { return false }
+        PeerBus.shared.send(to: peer, ["t": "drag_drop", "id": id])
+        DragSend.send(carryURLs, to: peer)
+        InputLog.shared.log("drag: dropped \(carryURLs.count) item(s) on \(peerName(peer))")
+        carryURLs = []
+        buttonUpSince = nil
+        localButtons.remove(0)
+        dragging = false
+        dragFiles = nil
+        dragPbAtDown = -1
+        e.location = s.anchor
+        if !DropCatcher.hasDrag {
+            // The catcher never became the destination (should not happen): cancel the drag with Esc instead, so
+            // the release can't drop the files on whatever is under the edge.
+            InputLog.shared.log("drag: drop catcher not engaged; cancelling the local drag with Esc")
+            for down in [true, false] {
+                Injector.post(CGEvent(keyboardEventSource: nil, virtualKey: 0x35, keyDown: down))
+            }
+        }
+        hideCatcher(after: 1.5) // keeps `carrying` until the drop has been performed on it
+        return true
     }
 
     private func queueMove(_ dx: Double, _ dy: Double) {
