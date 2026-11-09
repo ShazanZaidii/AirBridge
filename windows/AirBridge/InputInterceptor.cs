@@ -47,6 +47,8 @@ namespace AirBridge
             CursorHider.Restore(force: true); // undo a blank cursor left by a previous crash
             EdgeIndicator.Init(System.Windows.Threading.Dispatcher.CurrentDispatcher);
             CaptureHud.Init(System.Windows.Threading.Dispatcher.CurrentDispatcher);
+            DropCatcher.Init(System.Windows.Threading.Dispatcher.CurrentDispatcher); // §8.8 edge catcher (controller)
+            DragGhost.Init(System.Windows.Threading.Dispatcher.CurrentDispatcher);   // §8.8 carried-drag ghost (target)
             try { Microsoft.Win32.SystemEvents.SessionSwitch += OnSessionSwitch; }
             catch (Exception ex) { Debug.WriteLine($"SessionSwitch unavailable: {ex.Message}"); }
 
@@ -57,6 +59,8 @@ namespace AirBridge
             PeerBus.ControlHandler = _controlHandler;
             PeerBus.PeersHandler = _peersHandler;
             PeerBus.SessionEndedHandler = _sessionEndedHandler;
+            // Video from a phone shown in a mirror window (§8.7, PC as sink).
+            PeerBus.BinaryHandler = (peer, frame) => PhoneMirrorHub.Frame(peer, frame);
 
             _target.Start();
             _controller.Start();
@@ -100,6 +104,13 @@ namespace AirBridge
             try
             {
                 string? t = Msg.Str(msg, "t");
+                // Phone-as-source mirroring (§8.7): the phone's side of the stream belongs to its mirror window.
+                if (t is "mirror_info" or "mirror_wait" or "mirror_state" or "error"
+                    || (t == "mirror_stop" && PhoneMirrorHub.IsMirroring(peerId)))
+                {
+                    PhoneMirrorHub.Handle(peerId, msg);
+                    return;
+                }
                 if (t == "ctl_leave") _controller.OnCtlLeave(peerId, msg);
                 else if (t == "ctl_busy") { _controller.OnCtlBusy(peerId, msg); return; }
                 else if (t == "ctl_ack") { _controller.OnCtlAck(peerId); return; }
@@ -125,6 +136,7 @@ namespace AirBridge
             try
             {
                 PeerDirectory.Update(peers);
+                PhoneMirrorHub.PeersChanged(peers);
                 _controller.OnPeersChanged(peers);
                 _target.OnPeersChanged(peers);
             }

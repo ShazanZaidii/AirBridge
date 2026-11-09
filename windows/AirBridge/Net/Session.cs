@@ -776,6 +776,8 @@ namespace AirBridge.Net
             WipeHandshakeSecrets();
             _encryptOut = true; // everything queued from here on is enveloped (auth_ok/pair_ok above went in the clear)
             _state = State.Ready;
+            // Liveness starts now: during a confirm pairing nothing may arrive while a person reads the code.
+            Interlocked.Exchange(ref _lastRecv, Environment.TickCount64);
             try { _pairCts.Cancel(); } catch { }
             Log.Info($"Session ready (encrypted): {this}");
             _svc.OnSessionReady(this);
@@ -804,6 +806,13 @@ namespace AirBridge.Net
             if (t.StartsWith("xfer_", StringComparison.Ordinal)) { Files.OnText(t, o); return; }
             // Link upgrades (§10.1) belong to the network half's LinkManager, never to the input half.
             if (Link.LinkWire.IsLinkType(t)) { _svc.Links.OnMessage(this, t, o); return; }
+            // Phone notifications and calls (§13): shown by the Phone hub, never the input half.
+            if (t.StartsWith("notif_", StringComparison.Ordinal) || t.StartsWith("call_", StringComparison.Ordinal))
+            {
+                try { Phone.PhoneNotifHub.OnMessage(PeerId!, o); }
+                catch (Exception ex) { Log.Error($"Phone hub threw on '{t}'", ex); }
+                return;
+            }
 
             switch (t)
             {
@@ -832,6 +841,12 @@ namespace AirBridge.Net
                     break;
                 case "error":
                     Log.Warn($"{this} error {Protocol.Str(o, "code")}: {Protocol.Str(o, "msg")}");
+                    // A phone that did not allow its screen to be shown (§8.7): the mirror window explains it.
+                    if (Protocol.Str(o, "code")?.StartsWith("mirror_", StringComparison.Ordinal) == true)
+                    {
+                        try { PeerBus.DispatchControl(PeerId!, o); }
+                        catch (Exception ex) { Log.Error("Control handler threw on mirror error", ex); }
+                    }
                     break;
                 // hello/auth/pair after ready and unknown types: ignore
             }

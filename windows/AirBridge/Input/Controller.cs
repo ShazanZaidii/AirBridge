@@ -42,7 +42,8 @@ namespace AirBridge.Input
         private const double MoveIntervalMs = 1000.0 / 120.0;
 
         // ---------- shared (volatile snapshots) ----------
-        private sealed record Portal(string PeerId, Edge PcEdge, double SpanStart, double SpanEnd, EdgeSegment[] Segments);
+        /// <param name="Drag">The peer takes carried file drags (§8.8, caps drag_files + xfer).</param>
+        private sealed record Portal(string PeerId, Edge PcEdge, double SpanStart, double SpanEnd, EdgeSegment[] Segments, bool Drag);
         private sealed record PortalMap(Portal[] Portals, IReadOnlyList<MonitorInfo> Monitors, double Threshold, bool RequireAlt);
 
         private volatile PortalMap _map = new(Array.Empty<Portal>(), Array.Empty<MonitorInfo>(), 100, false);
@@ -101,8 +102,16 @@ namespace AirBridge.Input
         private IntPtr _rawHwnd, _rawBuf;
         private volatile bool _inhibit;             // a remote peer holds this PC's lease
 
+        // ---------- carried file drag, §8.8 (hook thread) ----------
+        private const int CatcherThickness = 6;     // px of the OLE drop strip at the edge
+        private readonly DragCarryController _carry = new(Random.Shared.Next(1, 0x1000_0000));
+        private bool _pinDrag;                      // the current pin is a left-button drag at a drag_files portal
+        private bool _catcherShown;
+        private string[]? _armedFiles;              // files an OLE DragEnter on the catcher reported for this drag
+        private string[]? _carryFiles;
+
         // ---------- sender thread ----------
-        private enum K { Enter, Acked, Leave, Move, Btn, Scroll, Key, Action, CapsCheck, Peers }
+        private enum K { Enter, Acked, Leave, Move, Btn, Scroll, Key, Action, CapsCheck, Peers, Carry, Drop, CarryCancel }
 
         private readonly record struct Ev(K Kind, string? Peer = null, double A = 0, double B = 0, int I = 0, int J = 0,
             int Flags = 0, int Mods = 0, bool F = false, Edge Edge = Edge.Left, int[]? Vks = null, string? S = null, string[]? Ids = null,
@@ -134,6 +143,8 @@ namespace AirBridge.Input
         private double _nextCapsPollMs, _capsCheckAtMs = -1, _nextMonitorPollMs;
         private bool? _lastCapsSent;
         private HashSet<string> _knownTrackpads = new();
+        private bool _senderCarrying;               // sender's view: a carry is in progress (button watchdog)
+        private double _carryButtonUpSinceMs = -1;
         private readonly byte[] _ks = new byte[256];
         private readonly char[] _buf = new char[16];
         private (uint vk, uint scan, byte[] state)? _pendingDead;
@@ -142,6 +153,8 @@ namespace AirBridge.Input
         {
             _mouseProc = MouseHook;
             _kbProc = KeyboardHook;
+            // UI thread → hook thread: an OLE file drag entered the edge catcher.
+            DropCatcher.Armed = files => Post(() => OnArmed(files));
         }
 
         public string? ActivePeer => _activePeer;
@@ -181,6 +194,8 @@ namespace AirBridge.Input
             _out.CompleteAdding();
             _sender?.Join(2000);
             CursorHider.Restore();
+            DropCatcher.Carrying = false;
+            DropCatcher.Hide();
         }
 
         // =====================================================================
@@ -273,7 +288,8 @@ namespace AirBridge.Input
                     if (!settings.EdgeCaptureEnabled(e)) continue;
                     double len = e.IsVertical() ? union.Height : union.Width;
                     double start = (e.IsVertical() ? union.Top : union.Left) + pl.Offset * len;
-                    portals.Add(new Portal(peer.Id, e, start, start + pl.Size * len, Monitors.OuterSegments(mons, e).ToArray()));
+                    portals.Add(new Portal(peer.Id, e, start, start + pl.Size * len, Monitors.OuterSegments(mons, e).ToArray(),
+                        DragCarryController.Eligible(peer.Caps)));
                 }
                 _map = new PortalMap(portals.ToArray(), mons, LayoutData.ThresholdFor(settings.CaptureStrength), settings.CaptureRequireAlt);
             }
@@ -310,7 +326,7 @@ namespace AirBridge.Input
                 if (msg.message == NativeMethods.WM_INPUT)
                 {
                     // Only parsed while pinned at an edge; DispatchMessage lets DefWindowProc free the input.
-                    if (_pinPortal != null && !_remote)
+                    if ((_pinPortal != null && !_remote) || (_remote && _carry.IsCarrying))
                     {
                         try { OnRawInput(msg.lParam); } catch (Exception ex) { Debug.WriteLine($"raw input: {ex.Message}"); }
                     }
@@ -411,7 +427,7 @@ namespace AirBridge.Input
                 int msg = (int)wParam;
                 int x = Marshal.ReadInt32(lParam, 0), y = Marshal.ReadInt32(lParam, 4);
                 uint data = (uint)Marshal.ReadInt32(lParam, 8);
-                return _remote ? RemoteMouse(msg, x, y, data) : LocalMouse(msg, x, y, data, nCode, wParam, lParam);
+                return _remote ? RemoteMouse(msg, x, y, data, nCode, wParam, lParam) : LocalMouse(msg, x, y, data, nCode, wParam, lParam);
             }
             catch (Exception ex)
             {
@@ -444,16 +460,27 @@ namespace AirBridge.Input
             {
                 if (!down && _suppressBtnUp[b]) { _suppressBtnUp[b] = false; _localBtn[b] = false; return (IntPtr)1; }
                 _localBtn[b] = down;
+                if (b == 0) _armedFiles = null; // a new drag (or the end of one): arm again from scratch
                 if (down) { _movedWhileDown = false; Unpin(); }
-                else if (_movedWhileDown && !AnyLocalButtonState())
+                else
                 {
-                    _movedWhileDown = false;
-                    _dragQuietUntil = Environment.TickCount64 + DragQuietMs; // no capture right after a drag
+                    if (b == 0) Unpin(); // released at the edge without crossing: the catcher goes
+                    if (_movedWhileDown && !AnyLocalButtonState())
+                    {
+                        _movedWhileDown = false;
+                        _dragQuietUntil = Environment.TickCount64 + DragQuietMs; // no capture right after a drag
+                    }
                 }
             }
             else if (msg == NativeMethods.WM_MOUSEMOVE)
             {
-                if (AnyLocalButton()) { _movedWhileDown = true; Unpin(); }
+                if (AnyLocalButton())
+                {
+                    _movedWhileDown = true;
+                    // §8.8: a left-button drag may still cross into a drag_files peer, once the edge catcher saw files.
+                    if (OnlyLeftHeld()) { if (EvaluatePin(x, y, drag: true)) return (IntPtr)1; }
+                    else Unpin();
+                }
                 else if (EvaluatePin(x, y)) return (IntPtr)1;
             }
             return NativeMethods.CallNextHookEx(IntPtr.Zero, nCode, wParam, lParam);
@@ -465,6 +492,13 @@ namespace AirBridge.Input
         {
             foreach (bool b in _localBtn) if (b) return true;
             return false;
+        }
+
+        private bool OnlyLeftHeld()
+        {
+            if (!_localBtn[0]) return false;
+            for (int i = 1; i < _localBtn.Length; i++) if (_localBtn[i]) return false;
+            return true;
         }
 
         private bool AnyLocalButton()
@@ -483,11 +517,12 @@ namespace AirBridge.Input
         /// Hook thread, local mode, real mouse move with no button held. Updates the pinned edge and feeds the
         /// hook overshoot into the accumulator when raw input isn't flowing. Returns true if the cursor was captured.
         /// </summary>
-        private bool EvaluatePin(int x, int y)
+        private bool EvaluatePin(int x, int y, bool drag = false)
         {
             var map = _map;
             long now = Environment.TickCount64;
-            if (_inhibit || !ControlGate.Shared.MayCapture || map.Portals.Length == 0 || map.Monitors.Count == 0 || now < _dragQuietUntil)
+            if (_inhibit || !ControlGate.Shared.MayCapture || map.Portals.Length == 0 || map.Monitors.Count == 0
+                || (!drag && now < _dragQuietUntil))
             {
                 Unpin();
                 return false;
@@ -496,6 +531,7 @@ namespace AirBridge.Input
             var c = Monitors.ClampToNearest(map.Monitors, x, y);
             foreach (var p in map.Portals)
             {
+                if (drag && !p.Drag) continue;
                 if (now < _noCaptureUntil[(int)p.PcEdge] || _refused.IsRefused(p.PeerId, now) || _ended.Contains(p.PeerId)) continue;
                 foreach (var s in p.Segments)
                 {
@@ -514,14 +550,25 @@ namespace AirBridge.Input
                     if (along < s.From + dead || along >= s.To - dead) continue;
                     if (along < p.SpanStart || along > p.SpanEnd) continue;
 
-                    if (!ReferenceEquals(_pinPortal, p) || _pinSeg != s)
+                    if (!ReferenceEquals(_pinPortal, p) || _pinSeg != s || _pinDrag != drag)
                     {
                         ResetPush();
                         _pinPortal = p;
                         _pinSeg = s;
+                        _pinDrag = drag;
                         _pinScale = c.mon.Scale > 0 ? c.mon.Scale : 1;
                     }
                     _pinAlong = along;
+                    if (drag)
+                    {
+                        if (!_catcherShown)
+                        {
+                            _catcherShown = true;
+                            DropCatcher.Carrying = false;
+                            DropCatcher.Show(CatcherRect());
+                        }
+                        if (_armedFiles == null) return false; // no OLE file drag seen on the catcher (yet): never cross
+                    }
                     if (map.RequireAlt && !(_physLAlt || _physRAlt)) { ResetPush(); return false; }
                     if (overshoot > 0 && now - _lastRawMs > RawFreshMs) return Push(overshoot, now);
                     return false;
@@ -534,7 +581,9 @@ namespace AirBridge.Input
         /// <summary>Hook thread (message loop): relative raw mouse counts while pinned.</summary>
         private void OnRawInput(IntPtr hRawInput)
         {
-            if (_rawBuf == IntPtr.Zero || _pinPortal is not { } p) return;
+            if (_rawBuf == IntPtr.Zero) return;
+            if (_remote && _carry.IsCarrying) { OnCarryRawInput(hRawInput); return; }
+            if (_pinPortal is not { } p) return;
             uint hdr = (uint)(8 + 2 * IntPtr.Size); // RAWINPUTHEADER
             uint size = RawBufSize;
             uint got = NativeMethods.GetRawInputData(hRawInput, NativeMethods.RID_INPUT, _rawBuf, ref size, hdr);
@@ -559,10 +608,53 @@ namespace AirBridge.Input
             Push(outward, now);
         }
 
+        /// <summary>
+        /// §8.8, while carrying: the cursor stays frozen on the edge catcher (never re-anchored to the monitor centre, which
+        /// would move the shell drag there), so outward motion is clamped in the hook's coordinates. Relative raw input is
+        /// the motion source instead.
+        /// </summary>
+        private void OnCarryRawInput(IntPtr hRawInput)
+        {
+            uint hdr = (uint)(8 + 2 * IntPtr.Size);
+            uint size = RawBufSize;
+            uint got = NativeMethods.GetRawInputData(hRawInput, NativeMethods.RID_INPUT, _rawBuf, ref size, hdr);
+            if (got == uint.MaxValue || got < hdr + 24) return;
+            if (Marshal.ReadInt32(_rawBuf, 0) != NativeMethods.RIM_TYPEMOUSE) return;
+            int off = (int)hdr;
+            ushort flags = (ushort)Marshal.ReadInt16(_rawBuf, off);
+            if ((flags & NativeMethods.MOUSE_MOVE_ABSOLUTE) != 0) return; // hook deltas are used for absolute devices
+            int dx = Marshal.ReadInt32(_rawBuf, off + 12), dy = Marshal.ReadInt32(_rawBuf, off + 16);
+            if (dx == 0 && dy == 0) return;
+            _lastRawMs = Environment.TickCount64;
+            RemoteDelta(dx, dy);
+        }
+
+        /// <summary>The CF_HDROP list from the catcher's OLE DragEnter. Kept for this drag only.</summary>
+        private void OnArmed(string[] files)
+        {
+            if (_remote || !_localBtn[0] || files.Length == 0) return;
+            _armedFiles = files;
+        }
+
+        /// <summary>The catcher: the portal's bar on the pinned segment, a little thicker, flush with the outer edge.</summary>
+        private IRect CatcherRect()
+        {
+            var b = BarRect();
+            int t = Math.Max(CatcherThickness, (int)Math.Round(CatcherThickness * _pinScale));
+            return _pinPortal!.PcEdge switch
+            {
+                Edge.Left => new IRect(b.Left, b.Top, b.Left + t, b.Bottom),
+                Edge.Right => new IRect(b.Right - t, b.Top, b.Right, b.Bottom),
+                Edge.Top => new IRect(b.Left, b.Top, b.Right, b.Top + t),
+                _ => new IRect(b.Left, b.Bottom - t, b.Right, b.Bottom),
+            };
+        }
+
         /// <summary>Adds an outward sample; captures when the 500 ms window reaches the threshold.</summary>
         private bool Push(double outward, long now)
         {
             if (_pinPortal == null) return false;
+            if (_pinDrag && _armedFiles == null) return false; // §8.8: no file drag confirmed, no crossing
             if (outward < 0) { ResetPush(); return false; } // any inward motion resets
             if (outward == 0) return false;
 
@@ -608,8 +700,14 @@ namespace AirBridge.Input
 
         private void Unpin()
         {
+            if (_catcherShown && !_carry.IsCarrying)
+            {
+                _catcherShown = false;
+                DropCatcher.Hide();
+            }
             if (_pinPortal == null) return;
             _pinPortal = null;
+            _pinDrag = false;
             ResetPush();
         }
 
@@ -636,16 +734,18 @@ namespace AirBridge.Input
             var p = _pinPortal!;
             var s = _pinSeg;
             var bar = BarRect();
+            var files = _pinDrag ? _armedFiles : null;
             _pinPortal = null;
+            _pinDrag = false;
             _pushCount = 0;
             _pushSum = 0;
             _lastChargeStep = -1;
-            if (!ControlGate.Shared.MayCapture) { EdgeIndicator.Hide(); return; } // no chaining (§8.6)
+            if (!ControlGate.Shared.MayCapture) { EdgeIndicator.Hide(); Unpin(); return; } // no chaining (§8.6)
             EdgeIndicator.Flash(bar);
-            Enter(p, s, _pinAlong);
+            Enter(p, s, _pinAlong, files);
         }
 
-        private void Enter(Portal p, EdgeSegment s, int along)
+        private void Enter(Portal p, EdgeSegment s, int along, string[]? carryFiles = null)
         {
             double rel = Math.Clamp((along - p.SpanStart) / Math.Max(1.0, p.SpanEnd - p.SpanStart), 0.0, 1.0);
             _entry = p.PcEdge switch
@@ -684,6 +784,15 @@ namespace AirBridge.Input
             }
             Enqueue(new Ev(K.Enter, p.PeerId, A: rel, I: _anchor.x, J: _anchor.y, F: _capsOn,
                 Edge: p.PcEdge.Opposite(), Vks: synth.Distinct().ToArray(), Mon: mon));
+            if (carryFiles is { Length: > 0 })
+            {
+                // §8.8: the held left button stays local (it never becomes ptr_btn); the target shows a ghost.
+                var a = _carry.Begin(p.PeerId);
+                _carryFiles = carryFiles;
+                DropCatcher.Carrying = true;
+                Enqueue(new Ev(K.Carry, p.PeerId, A: a.Id, Ids: carryFiles));
+            }
+            else if (_catcherShown) { _catcherShown = false; DropCatcher.Hide(); }
         }
 
         private MonitorInfo? MonitorOf(IRect bounds)
@@ -697,13 +806,16 @@ namespace AirBridge.Input
         {
             if (!_remote || _portal?.PeerId != peerId || _esc == null || !_esc.Ack()) return;
             var m = _entrySeg.Monitor;
-            Enqueue(new Ev(K.Acked, peerId, I: m.Left + m.Width / 2, J: m.Top + m.Height / 2));
+            // Carrying (§8.8): the cursor must stay on the edge catcher, so it is not moved to the monitor centre.
+            if (_carry.IsCarrying) Enqueue(new Ev(K.Acked, peerId, I: _anchor.x, J: _anchor.y));
+            else Enqueue(new Ev(K.Acked, peerId, I: m.Left + m.Width / 2, J: m.Top + m.Height / 2));
         }
 
         /// <summary>Hook thread, after the sender hid the cursor: move the frozen cursor to the monitor centre.</summary>
         private void Reanchor(string peerId, int x, int y)
         {
             if (!_remote || _portal?.PeerId != peerId || _esc?.Acked != true) return;
+            if (_carry.IsCarrying) return; // stays on the catcher
             _anchor = new NativeMethods.POINT { x = x, y = y };
             NativeMethods.SetCursorPos(x, y);
         }
@@ -717,18 +829,58 @@ namespace AirBridge.Input
 
         private bool AnyRemoteButton() => _remoteBtn[0] || _remoteBtn[1] || _remoteBtn[2];
 
-        private IntPtr RemoteMouse(int msg, int x, int y, uint data)
+        /// <summary>Hook thread: the sender found the button up during a carry without a release in the hook.</summary>
+        private void CarryButtonLost()
+        {
+            if (!_carry.IsCarrying) return;
+            if ((NativeMethods.GetAsyncKeyState(0x01) & 0x8000) != 0 || (NativeMethods.GetAsyncKeyState(0x02) & 0x8000) != 0) return;
+            var a = _carry.End();
+            _localBtn[0] = false;
+            _armedFiles = null;
+            _carryFiles = null;
+            _catcherShown = false;
+            DropCatcher.Carrying = false;
+            DropCatcher.Hide(1000);
+            if (a.Kind == DragCarryController.Kind.Cancel) Enqueue(new Ev(K.CarryCancel, a.Peer, A: a.Id));
+        }
+
+        /// <summary>Hook thread: one relative motion sample while captured.</summary>
+        private void RemoteDelta(double dx, double dy)
+        {
+            Enqueue(new Ev(K.Move, A: dx, B: dy));
+            // Our own estimate of the remote cursor: moving back through the entry edge returns control even
+            // if the target never answers (§8.1 "Escape is the controller's job").
+            if (_esc != null && _esc.Move(dx, dy, AnyRemoteButton()))
+                DoReturn(null, sendLeave: true, why: CaptureEnd.MovedBack);
+        }
+
+        /// <summary>
+        /// §8.8: the carried drag was let go over the target. Send drag_drop and the files, and let this release through:
+        /// the frozen cursor sits on the edge catcher, so the shell drop lands there (accepted as a no-op copy).
+        /// </summary>
+        private IntPtr DropCarried(int nCode, IntPtr wParam, IntPtr lParam)
+        {
+            var a = _carry.Release();
+            _localBtn[0] = false;
+            _armedFiles = null;
+            if (a.Kind == DragCarryController.Kind.Drop && a.Peer != null)
+                Enqueue(new Ev(K.Drop, a.Peer, A: a.Id, Ids: _carryFiles));
+            _carryFiles = null;
+            _catcherShown = false;
+            DropCatcher.Hide(1500); // keeps Carrying until the drop has been performed on it
+            return NativeMethods.CallNextHookEx(IntPtr.Zero, nCode, wParam, lParam);
+        }
+
+        private IntPtr RemoteMouse(int msg, int x, int y, uint data, int nCode, IntPtr wParam, IntPtr lParam)
         {
             switch (msg)
             {
                 case NativeMethods.WM_MOUSEMOVE:
                     int dx = x - _anchor.x, dy = y - _anchor.y;
                     if (dx == 0 && dy == 0) break;
-                    Enqueue(new Ev(K.Move, A: dx, B: dy));
-                    // Our own estimate of the remote cursor: moving back through the entry edge returns control even
-                    // if the target never answers (§8.1 "Escape is the controller's job").
-                    if (_esc != null && _esc.Move(dx, dy, AnyRemoteButton()))
-                        DoReturn(null, sendLeave: true, why: CaptureEnd.MovedBack);
+                    // Carrying: raw input drives the motion (see OnCarryRawInput); hook deltas only without it.
+                    if (_carry.IsCarrying && Environment.TickCount64 - _lastRawMs <= RawFreshMs) break;
+                    RemoteDelta(dx, dy);
                     break;
                 case NativeMethods.WM_MOUSEWHEEL:
                     // Windows: positive = wheel away from user = content moves down. Protocol: positive dy = content up.
@@ -741,6 +893,7 @@ namespace AirBridge.Input
                     int b = ButtonIndex(msg, data, out bool down);
                     if (b < 0) break;
                     if (!down && _suppressBtnUp[b]) { _suppressBtnUp[b] = false; _localBtn[b] = false; break; }
+                    if (b == 0 && !down && !_remoteBtn[0] && _carry.IsCarrying) return DropCarried(nCode, wParam, lParam);
                     if (b > 2) break; // X buttons are not part of the protocol
                     if (down == _remoteBtn[b]) break; // keep down/up strictly paired
                     _remoteBtn[b] = down;
@@ -868,6 +1021,12 @@ namespace AirBridge.Input
             if (!_remote) return;
             var p = _portal!;
             var esc = _esc;
+            bool gone = _ended.Contains(p.PeerId) || PeerDirectory.Find(p.PeerId) == null;
+            var carry = _carry.End(peerGone: gone);
+            if (carry.Kind == DragCarryController.Kind.Cancel)
+                Enqueue(new Ev(K.CarryCancel, carry.Peer, A: carry.Id)); // the local drag simply continues here
+            _carryFiles = null;
+            DropCatcher.Carrying = false;
             _remote = false;
             _portal = null;
             _esc = null;
@@ -1023,7 +1182,33 @@ namespace AirBridge.Input
                     CaptureHud.ShowControlling(ControlState.NameOf(ackPeer), _hudMon);
                     break;
 
+                case K.Carry:
+                    if (_peer == null || _peer != ev.Peer || ev.Ids == null) return;
+                    _senderCarrying = true;
+                    _carryButtonUpSinceMs = -1;
+                    try { Send(_peer, DragPayload.Describe(ev.Ids).Message((long)ev.A)); }
+                    catch (Exception ex) { Debug.WriteLine($"drag_carry: {ex.Message}"); }
+                    break;
+
+                case K.Drop:
+                    _senderCarrying = false;
+                    if (ev.Peer == null) return;
+                    var drop = Msg.Of("drag_drop");
+                    drop["id"] = (long)ev.A;
+                    Send(ev.Peer, drop);
+                    if (ev.Ids is { Length: > 0 } files) DragSend.Start(ev.Peer, files);
+                    break;
+
+                case K.CarryCancel:
+                    _senderCarrying = false;
+                    if (ev.Peer == null) return;
+                    var cancel = Msg.Of("drag_cancel");
+                    cancel["id"] = (long)ev.A;
+                    Send(ev.Peer, cancel);
+                    break;
+
                 case K.Leave:
+                    _senderCarrying = false;
                     if (ev.F && ev.Peer != null) Send(ev.Peer, Msg.Of("ctl_leave"));
                     if (_peer == ev.Peer) { _peer = null; _acked = false; ControlState.SetControlling(null); }
                     _pdx = _pdy = _sdx = _sdy = 0;
@@ -1121,6 +1306,20 @@ namespace AirBridge.Input
         private void Periodic()
         {
             double now = Now;
+            if (_senderCarrying)
+            {
+                // §8.8 safety net: carrying, but the primary button is physically up and the hook never saw the release
+                // (hook timeout, secure desktop). Cancel the carry on the hook thread; a release we missed already went
+                // to the edge catcher, which is harmless.
+                bool held = (NativeMethods.GetAsyncKeyState(0x01) & 0x8000) != 0 || (NativeMethods.GetAsyncKeyState(0x02) & 0x8000) != 0;
+                if (held) _carryButtonUpSinceMs = -1;
+                else if (_carryButtonUpSinceMs < 0) _carryButtonUpSinceMs = now;
+                else if (now - _carryButtonUpSinceMs > 300)
+                {
+                    _carryButtonUpSinceMs = -1; // re-checked every 300 ms until the hook thread decides
+                    Post(CarryButtonLost);
+                }
+            }
             if (_peer != null && !_acked && now >= _nextAckCheckMs)
             {
                 // The hook thread owns the capture state and decides; this only wakes it (every 50 ms while overdue).

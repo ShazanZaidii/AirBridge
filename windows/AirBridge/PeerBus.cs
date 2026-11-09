@@ -56,6 +56,8 @@ namespace AirBridge
             "ptr_move", "ptr_scroll", "ptr_btn", "ptr_click", "ptr_abs",
             "key", "key_state", "action",
             "mirror_start", "mirror_info", "mirror_key", "mirror_ack", "mirror_stop",
+            "drag_carry", "drag_drop", "drag_cancel",
+            "mirror_wait", "mirror_state",
         };
 
         /// <summary>Inner binary frame kinds routed to the input half (first byte of the inner frame).</summary>

@@ -24,7 +24,13 @@ namespace AirBridge.Net
         /// No "mirror_source" yet: the input half adds it here once the Windows screen-mirror source exists
         /// (and only when capture is actually available, §8.7).
         /// </summary>
-        public static readonly string[] Caps = { "clip", "xfer", "ctl_source", "ctl_target" };
+        /// "drag_files": as a target we show a drag carried onto us and take the files (§8.8).
+        /// "mirror_sink" (showing a phone's screen, §8.7) only once a video decoder exists (Input/PhoneMirrorSession.cs).
+        /// "notif_sink" / "call_sink": shows a phone's notifications and calls and sends replies/controls back (§13).
+        /// "call_ring": decides where calls ring from the phone's presence and beacon (§13.5).
+        public static readonly string[] Caps = Input.PhoneMirrorHub.Available
+            ? new[] { "clip", "xfer", "ctl_source", "ctl_target", "drag_files", "mirror_sink", "notif_sink", "call_sink", "call_ring" }
+            : new[] { "clip", "xfer", "ctl_source", "ctl_target", "drag_files", "notif_sink", "call_sink", "call_ring" };
 
         public static readonly TimeSpan HandshakeTimeout = TimeSpan.FromSeconds(10);
         public static readonly TimeSpan PingAfterIdle = TimeSpan.FromSeconds(5);

@@ -81,7 +81,7 @@ namespace AirBridge.Net
                 case "xfer_cancel":
                     // `dir` is from the peer's point of view: its "out" is our incoming transfer.
                     string? dir = Protocol.Str(o, "dir");
-                    if (dir != "in" && _incoming.TryRemove(id, out var c)) CancelIncoming(c, sendCancel: null);
+                    if (dir != "in" && _incoming.TryRemove(id, out var c)) CancelIncoming(c, sendCancel: null, message: "Cancelled by the sender");
                     if (dir != "out" && _outgoing.TryGetValue(id, out var og)) og.Fail($"cancelled by peer ({Protocol.Str(o, "reason")})");
                     break;
                 case "xfer_accept":
@@ -168,7 +168,12 @@ namespace AirBridge.Net
             accept["id"] = id;
             accept["window"] = Protocol.DefaultWindow;
             _session.EnqueueJson(accept);
-            _svc.Transfers.Start(InKey(id), _session.PeerName, incoming: true, Label(files.Select(f => SanitizeFileName(f.Name)).ToList()), total);
+            _svc.Transfers.Start(InKey(id), _session.PeerName, incoming: true, Label(files.Select(f => SanitizeFileName(f.Name)).ToList()), total,
+                                 peerId: _session.PeerId ?? "", fileCount: files.Count);
+            _svc.Transfers.RegisterCancel(InKey(id), () =>
+            {
+                if (_incoming.TryRemove(id, out var x)) CancelIncoming(x, sendCancel: "user", message: TransferView.CancelledMessage);
+            });
             Log.Info($"Receiving {files.Count} file(s), {total} bytes from {_session.PeerName} (id {id})");
         }
 
@@ -265,17 +270,17 @@ namespace AirBridge.Net
             complete["saved"] = saved;
             _session.EnqueueJson(complete);
             inc.Queue.Writer.TryComplete();
-            _svc.Transfers.Finish(InKey(inc.Id), ok, ok ? null : "Incomplete");
-
             var paths = inc.Files.Where(f => f.Complete).Select(f => f.Path).ToList();
+            _svc.Transfers.Finish(InKey(inc.Id), ok, ok ? null : "Incomplete", saved: paths);
+
             if (paths.Count > 0) _svc.OnFilesReceived(_session.PeerName, paths);
         }
 
-        private void CancelIncoming(Incoming inc, string? sendCancel)
+        private void CancelIncoming(Incoming inc, string? sendCancel, string? message = null)
         {
             inc.Queue.Writer.TryComplete();
             try { inc.Cts.Cancel(); } catch { }
-            _svc.Transfers.Finish(InKey(inc.Id), false, sendCancel == null ? "Cancelled" : "Failed");
+            _svc.Transfers.Finish(InKey(inc.Id), false, message ?? (sendCancel == null ? "Cancelled" : "Failed"));
             // Drain queued chunks back to the pool.
             while (inc.Queue.Reader.TryRead(out var w)) if (w.Buffer != null) ArrayPool<byte>.Shared.Return(w.Buffer);
             // The writer may still hold a stream briefly; delete after it observes cancellation.
@@ -336,8 +341,11 @@ namespace AirBridge.Net
             }
         }
 
-        public async Task<TransferResult> SendAsync(IReadOnlyList<string> paths, IProgress<double>? progress, CancellationToken userCt)
+        public async Task<TransferResult> SendAsync(IReadOnlyList<string> paths, IProgress<double>? progress, CancellationToken callerCt)
         {
+            // The caller's token, plus Cancel on a transfer card.
+            using var userCts = CancellationTokenSource.CreateLinkedTokenSource(callerCt);
+            var userCt = userCts.Token;
             var files = new List<(string Path, string Name, long Size)>();
             foreach (var p in paths)
             {
@@ -365,7 +373,9 @@ namespace AirBridge.Net
                 offer["files"] = arr;
                 offer["total"] = og.Total;
                 if (!_session.EnqueueJson(offer)) return new TransferResult(false, "Disconnected", Array.Empty<string>());
-                _svc.Transfers.Start(OutKey(id), _session.PeerName, incoming: false, Label(files.Select(f => f.Name).ToList()), og.Total);
+                _svc.Transfers.Start(OutKey(id), _session.PeerName, incoming: false, Label(files.Select(f => f.Name).ToList()), og.Total,
+                                     peerId: _session.PeerId ?? "", sources: files.Select(f => f.Path).ToList(), fileCount: files.Count, waiting: true);
+                _svc.Transfers.RegisterCancel(OutKey(id), () => { try { userCts.Cancel(); } catch (ObjectDisposedException) { } });
 
                 var acceptTask = og.Accepted.Task;
                 if (await Task.WhenAny(acceptTask, Task.Delay(TimeSpan.FromSeconds(30), ct)).ConfigureAwait(false) != acceptTask)
@@ -376,6 +386,7 @@ namespace AirBridge.Net
                     _svc.Transfers.Finish(OutKey(id), false, "Rejected");
                     return new TransferResult(false, og.FailReason ?? $"Rejected ({rejected})", Array.Empty<string>());
                 }
+                _svc.Transfers.MarkAccepted(OutKey(id));
 
                 long sent = 0;
                 for (int i = 0; i < files.Count; i++)
@@ -461,7 +472,7 @@ namespace AirBridge.Net
         public void OnSessionLost()
         {
             foreach (var id in _incoming.Keys.ToList())
-                if (_incoming.TryRemove(id, out var inc)) CancelIncoming(inc, sendCancel: null);
+                if (_incoming.TryRemove(id, out var inc)) CancelIncoming(inc, sendCancel: null, message: "Disconnected");
             foreach (var og in _outgoing.Values) og.Fail("Disconnected");
         }
 

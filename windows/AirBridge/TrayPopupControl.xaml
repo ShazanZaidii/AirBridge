@@ -84,6 +84,12 @@
 
             <!-- actions -->
             <Rectangle Height="1" Fill="{StaticResource AB.Secondary}" Margin="-16,0,-16,8"/>
+            <Button Style="{StaticResource AB.Button.Ghost}" Click="OpenPhoneNotifs_Click" x:Name="PhoneNotifsButton" AutomationProperties.Name="Phone notifications">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Style="{StaticResource AB.Glyph}" Text="&#xEA8F;" FontSize="14" Width="20" Margin="0,0,10,0"/>
+                    <TextBlock Style="{StaticResource AB.Text}" x:Name="PhoneNotifsText" Text="Phone notifications…" VerticalAlignment="Center"/>
+                </StackPanel>
+            </Button>
             <Button Style="{StaticResource AB.Button.Ghost}" Click="OpenHostDiscovery_Click" AutomationProperties.Name="Connect to a Mac or PC">
                 <StackPanel Orientation="Horizontal">
                     <TextBlock Style="{StaticResource AB.Glyph}" Text="{StaticResource AB.G.Link}" FontSize="14" Width="20" Margin="0,0,10,0"/>
@@ -100,6 +106,38 @@
                 <StackPanel Orientation="Horizontal">
                     <TextBlock Style="{StaticResource AB.Glyph}" Text="{StaticResource AB.G.Clipboard}" FontSize="14" Width="20" Margin="0,0,10,0"/>
                     <TextBlock Style="{StaticResource AB.Text}" Text="Clipboard filters…" VerticalAlignment="Center"/>
+                </StackPanel>
+            </Button>
+            <Button Style="{StaticResource AB.Button.Ghost}" Click="ToggleDropShelf_Click" x:Name="DropShelfButton" AutomationProperties.Name="Drop shelf">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Style="{StaticResource AB.Glyph}" Text="&#xE896;" FontSize="14" Width="20" Margin="0,0,10,0"/>
+                    <TextBlock Style="{StaticResource AB.Text}" x:Name="DropShelfText" Text="Hide drop shelf" VerticalAlignment="Center"/>
+                </StackPanel>
+            </Button>
+            <Button Style="{StaticResource AB.Button.Ghost}" Click="ToggleCardAutoHide_Click" x:Name="CardAutoHideButton" AutomationProperties.Name="Finished transfer cards">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Style="{StaticResource AB.Glyph}" Text="&#xE8BD;" FontSize="14" Width="20" Margin="0,0,10,0"/>
+                    <TextBlock Style="{StaticResource AB.Text}" x:Name="CardAutoHideText" Text="Hide finished transfer cards after 5 s" VerticalAlignment="Center"/>
+                </StackPanel>
+            </Button>
+            <Button Style="{StaticResource AB.Button.Ghost}" Click="TogglePhoneNotifs_Click" AutomationProperties.Name="Phone notifications on this PC">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Style="{StaticResource AB.Glyph}" Text="&#xE7E7;" FontSize="14" Width="20" Margin="0,0,10,0"/>
+                    <TextBlock Style="{StaticResource AB.Text}" x:Name="PhoneNotifsToggleText" Text="Hide phone notifications" VerticalAlignment="Center"/>
+                </StackPanel>
+            </Button>
+            <Button Style="{StaticResource AB.Button.Ghost}" Click="TogglePhoneCalls_Click" AutomationProperties.Name="Phone calls on this PC">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Style="{StaticResource AB.Glyph}" Text="&#xE717;" FontSize="14" Width="20" Margin="0,0,10,0"/>
+                    <TextBlock Style="{StaticResource AB.Text}" x:Name="PhoneCallsToggleText" Text="Hide phone calls" VerticalAlignment="Center"/>
+                </StackPanel>
+            </Button>
+            <Button Style="{StaticResource AB.Button.Ghost}" x:Name="RingModeButton" Click="RingMode_Click"
+                    AutomationProperties.Name="Ring on this PC"
+                    ToolTip="Smart: rings when you're using this PC (then your phone stays quiet) or your phone is next to it.">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Style="{StaticResource AB.Glyph}" Text="&#xEA8F;" FontSize="14" Width="20" Margin="0,0,10,0"/>
+                    <TextBlock Style="{StaticResource AB.Text}" x:Name="RingModeText" Text="Ring on this PC: Smart" VerticalAlignment="Center"/>
                 </StackPanel>
             </Button>
             <Button Style="{StaticResource AB.Button.Ghost}" Click="Quit_Click" AutomationProperties.Name="Quit AirBridge">
