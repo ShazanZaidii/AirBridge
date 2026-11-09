@@ -482,6 +482,9 @@ class Session(
             synchronized(sendLock) { channel = env }
             state = State.READY
             everReady = true
+            // Liveness starts now. During a confirm pairing nothing may arrive while a person reads the code
+            // (often more than DEAD_MS), and the next tick would otherwise drop the brand-new session.
+            lastRx = System.currentTimeMillis()
         }
         Log.i(tag, "ready (encrypted): $peerName ($peerId) via ${link.label}")
         peerId?.let { try { link.onReady(it) } catch (_: Exception) {} }

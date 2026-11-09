@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="ch_live">நடந்துகொண்டிருக்கும் பரிமாற்றங்கள்</string>
+    <string name="xn_file_of">கோப்பு %1$d / %2$d</string>
+    <string name="xn_sec_left">%1$d வி. மீதம்</string>
+    <string name="xn_min_left">%1$d நிமி. மீதம்</string>
+</resources>

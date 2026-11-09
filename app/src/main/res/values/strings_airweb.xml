@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- English source text. Translations live in values-<lang>/strings_airweb.xml. -->
+<resources>
+    <string name="aw_this_phone">This phone</string>
+    <string name="aw_cant_read_one">Couldn\'t read the file</string>
+    <string name="aw_cant_read_some">Couldn\'t read some of the files</string>
+    <string name="aw_stop">Stop</string>
+    <string name="aw_join_wifi">Join a Wi-Fi network</string>
+    <string name="aw_join_wifi_sub">Connect this phone to Wi-Fi, or turn on its hotspot and connect the other phone to it.</string>
+    <string name="aw_wifi_settings">Open Wi-Fi settings</string>
+    <string name="aw_start_failed">Couldn\'t start AirWeb</string>
+    <string name="aw_start_failed_sub">Another app may be using the network ports. Try again.</string>
+    <string name="aw_try_again">Try again</string>
+    <string name="aw_files_to_send">Files to send</string>
+    <string name="aw_nothing_added">Nothing added</string>
+    <string name="aw_nothing_added_sub">The other person can still send files to this phone. Add files to send them some.</string>
+    <string name="aw_downloaded_ago">Downloaded: %1$s</string>
+    <string name="aw_remove">Remove %1$s</string>
+    <string name="aw_received">Received</string>
+    <string name="aw_nothing_yet">Nothing yet</string>
+    <string name="aw_nothing_yet_sub">Files sent from the other device appear here and in %1$s.</string>
+    <string name="aw_tap_to_open">Tap to open</string>
+    <string name="aw_didnt_finish">Didn\'t finish</string>
+    <string name="aw_receiving_pct">Receiving · %1$d%%</string>
+    <string name="aw_link_copied">Link copied</string>
+    <string name="aw_copy_link">Copy link</string>
+    <string name="aw_instructions">On the other phone, scan this with the camera and open the link. Both phones must be on the same Wi-Fi, or connect it to this phone\'s hotspot.</string>
+    <string name="aw_another_address">Use another address</string>
+    <string name="aw_qr_desc">QR code for the AirWeb link</string>
+    <string name="aw_no_app">No app can open this file</string>
+    <string name="aw_add_files">Add files</string>
+</resources>

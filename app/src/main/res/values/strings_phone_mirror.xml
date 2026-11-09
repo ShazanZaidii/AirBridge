@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- English source text for showing this phone's screen on a computer (PROTOCOL §8.7, phone as source). -->
+<resources>
+    <string name="pm_channel_request">Screen sharing requests</string>
+    <string name="pm_channel_ongoing">Screen sharing</string>
+    <string name="pm_request_title">%1$s wants to show this phone\'s screen</string>
+    <string name="pm_request_text">Tap to allow</string>
+    <string name="pm_request_decline">Not now</string>
+    <string name="pm_ongoing_title">Showing your screen on %1$s</string>
+    <string name="pm_ongoing_text">Everything on your screen is visible there</string>
+    <string name="pm_stop">Stop</string>
+    <!-- Screen mode on this phone when the other device is a phone that shows its screen. -->
+    <string name="pm_sink_allow">Tap Allow on %1$s</string>
+    <string name="pm_sink_denied">%1$s didn\'t allow screen sharing</string>
+    <string name="pm_sink_stopped">%1$s stopped sharing its screen</string>
+</resources>

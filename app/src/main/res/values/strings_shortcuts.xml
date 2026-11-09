@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- English source text. Translations live in values-<lang>/strings_shortcuts.xml. -->
+<resources>
+    <string name="ss_keyboard">Keyboard</string>
+    <string name="ss_show_or_hide_the_keyboard_d">Show or hide the keyboard</string>
+    <string name="ss_back">Back</string>
+    <string name="ss_home">Home</string>
+    <string name="ss_recents">Recents</string>
+    <string name="ss_recent_apps_d">Recent apps</string>
+    <string name="ss_apps">Apps</string>
+    <string name="ss_all_apps_d">All apps</string>
+    <string name="ss_task_view">Task View</string>
+    <string name="ss_switch">Switch</string>
+    <string name="ss_switch_windows_d">Switch windows</string>
+    <string name="ss_desktop">Desktop</string>
+    <string name="ss_previous_desktop_d">Previous desktop</string>
+    <string name="ss_next_desktop_d">Next desktop</string>
+    <string name="ss_start">Start</string>
+    <string name="ss_start_menu_d">Start menu</string>
+    <string name="ss_mission">Mission</string>
+    <string name="ss_mission_control_d">Mission Control</string>
+    <string name="ss_windows">Windows</string>
+    <string name="ss_app_expos_d">App Exposé</string>
+    <string name="ss_space">Space</string>
+    <string name="ss_space_on_the_left_d">Space on the left</string>
+    <string name="ss_space_on_the_right_d">Space on the right</string>
+    <string name="ss_launchpad_d">Launchpad</string>
+    <string name="ss_alerts">Alerts</string>
+    <string name="ss_notifications_d">Notifications</string>
+    <string name="ss_settings">Settings</string>
+    <string name="ss_quick_settings_d">Quick settings</string>
+    <string name="ss_vol_up">Vol +</string>
+    <string name="ss_vol_down">Vol −</string>
+    <string name="ss_volume_up_d">Volume up</string>
+    <string name="ss_volume_down_d">Volume down</string>
+    <string name="ss_lock">Lock</string>
+    <string name="ss_lock_screen_d">Lock screen</string>
+    <string name="ss_search">Search</string>
+    <string name="ss_capture">Capture</string>
+    <string name="ss_screenshot_d">Screenshot</string>
+    <string name="ss_spotlight">Spotlight</string>
+    <string name="ss_dock">Dock</string>
+    <string name="ss_show_or_hide_the_dock_d">Show or hide the Dock</string>
+    <string name="ss_menu_bar">Menu bar</string>
+    <string name="ss_show_or_hide_the_menu_bar_d">Show or hide the menu bar</string>
+    <string name="ss_notification_center_d">Notification Center</string>
+</resources>

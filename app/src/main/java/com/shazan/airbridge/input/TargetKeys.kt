@@ -133,7 +133,7 @@ class TargetKeys(private val host: TargetController) {
         if (AirBridgeTextService.isRunning) { hintedNoText = false; return true }
         if (!hintedNoText) {
             hintedNoText = true
-            Toast.makeText(svc, "Turn on 'AirBridge Typing & Clipboard' to type from your computer", Toast.LENGTH_LONG).show()
+            Toast.makeText(svc, svc.getString(com.shazan.airbridge.R.string.tk_turn_on_typing, svc.getString(com.shazan.airbridge.R.string.svc_text_name)), Toast.LENGTH_LONG).show()
         }
         return false
     }
@@ -322,7 +322,7 @@ class TargetKeys(private val host: TargetController) {
     private fun warnNoField() {
         if (warnedNoField) return
         warnedNoField = true
-        Toast.makeText(svc, "Tap a text field on the phone to type into it", Toast.LENGTH_SHORT).show()
+        Toast.makeText(svc, svc.getString(com.shazan.airbridge.R.string.tk_tap_field), Toast.LENGTH_SHORT).show()
     }
 
     // ---------------------------------------------------------------- helpers
