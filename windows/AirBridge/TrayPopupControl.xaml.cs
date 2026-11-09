@@ -8,6 +8,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Shapes;
+using AirBridge.Input;
 using System.Windows.Automation;
 using System.Threading;
 using AirBridge.Net;
@@ -58,6 +59,21 @@ namespace AirBridge
             if (!IsVisible && IsLoaded) return; // re-rendered when shown
 
             DeviceNameText.Text = $"This PC · {peers.Identity.Name}";
+            DropShelfText.Text = AirBridge.Drop.DropSettings.ShelfEnabled ? "Hide drop shelf" : "Show drop shelf";
+            CardAutoHideText.Text = AirBridge.Drop.DropSettings.AutoHideFinished ? "Keep finished transfer cards" : "Hide finished transfer cards after 5 s";
+            int unseen = Phone.PhoneNotifHub.Unseen;
+            PhoneNotifsText.Text = unseen > 0 ? $"Phone notifications ({unseen} new)…" : "Phone notifications…";
+            PhoneNotifsButton.Visibility = Phone.PhoneNotifHub.SourcePhones().Count > 0 || Phone.PhoneNotifHub.Store.Count > 0
+                ? Visibility.Visible : Visibility.Collapsed;
+            PhoneNotifsToggleText.Text = Phone.PhoneSettings.ShowNotifs ? "Hide phone notifications" : "Show phone notifications";
+            PhoneCallsToggleText.Text = Phone.PhoneSettings.ShowCalls ? "Hide phone calls" : "Show phone calls";
+            RingModeText.Text = Phone.PhoneSettings.RingMode switch
+            {
+                Phone.RingMode.Always => "Ring on this PC: Always",
+                Phone.RingMode.Never => "Ring on this PC: Never",
+                _ => "Ring on this PC: Smart",
+            };
+            RingModeButton.Visibility = Phone.PhoneSettings.ShowCalls ? Visibility.Visible : Visibility.Collapsed;
             bool online = peers.Port != 0 && peers.BestAddress != null;
             StatusDot.Fill = online ? Res("AB.Accent") : Res("AB.Warning");
             StatusText.Text = online ? "Online" : peers.Port == 0 ? "Starting" : "No network";
@@ -144,6 +160,13 @@ namespace AirBridge
             grid.Children.Add(text);
 
             var actions = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+            var mirrorPeer = p.Connected ? PeerDirectory.Find(p.Id) : null;
+            if (mirrorPeer != null && PhoneMirrorHub.CanMirror(mirrorPeer))
+            {
+                var mirror = IconButton((string)FindResource("AB.G.Phone"), $"Mirror {p.Name}");
+                mirror.Click += (_, _) => PhoneMirrorWindows.Show(mirrorPeer);
+                actions.Children.Add(mirror);
+            }
             if (p.Connected)
             {
                 var disconnect = IconButton("\uE711", $"Disconnect from {p.Name} (keeps the pairing)");
@@ -316,6 +339,44 @@ namespace AirBridge
                 ClosePopup();
                 App.ShowSendWindow(files);
             }
+        }
+
+        private void ToggleDropShelf_Click(object sender, RoutedEventArgs e)
+        {
+            AirBridge.Drop.DropSettings.ShelfEnabled = !AirBridge.Drop.DropSettings.ShelfEnabled;
+            Refresh();
+        }
+
+        private void ToggleCardAutoHide_Click(object sender, RoutedEventArgs e)
+        {
+            AirBridge.Drop.DropSettings.AutoHideFinished = !AirBridge.Drop.DropSettings.AutoHideFinished;
+            Refresh();
+        }
+
+        private void OpenPhoneNotifs_Click(object sender, RoutedEventArgs e) => Phone.PhoneNotifsWindow.ShowWindow();
+
+        private void TogglePhoneNotifs_Click(object sender, RoutedEventArgs e)
+        {
+            Phone.PhoneSettings.ShowNotifs = !Phone.PhoneSettings.ShowNotifs;
+            Refresh();
+        }
+
+        private void TogglePhoneCalls_Click(object sender, RoutedEventArgs e)
+        {
+            Phone.PhoneSettings.ShowCalls = !Phone.PhoneSettings.ShowCalls;
+            Refresh();
+        }
+
+        /// <summary>Smart (rings where you are) → Always → Never.</summary>
+        private void RingMode_Click(object sender, RoutedEventArgs e)
+        {
+            Phone.PhoneSettings.RingMode = Phone.PhoneSettings.RingMode switch
+            {
+                Phone.RingMode.Smart => Phone.RingMode.Always,
+                Phone.RingMode.Always => Phone.RingMode.Never,
+                _ => Phone.RingMode.Smart,
+            };
+            Refresh();
         }
 
         private void Quit_Click(object sender, RoutedEventArgs e) => Application.Current.Shutdown();

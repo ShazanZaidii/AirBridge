@@ -57,6 +57,7 @@ namespace AirBridge
             // 1. Local services first: IPC, clipboard hook, tray. Nothing here touches the network.
             IpcManager.StartServer(_ipcCts.Token);
             Peers = new PeerService();
+            try { Phone.PhoneNotifHub.Start(Peers); } catch (Exception ex) { Log.Error("Phone notifications failed to start", ex); }
             ApplyControlStatus(); // in case the input half reported a status before the network half existed
 
             _hiddenClipboardWindow = new Window
@@ -102,6 +103,14 @@ namespace AirBridge
                     Notify("AirBridge", "Networking failed to start. See %LOCALAPPDATA%\\AirBridge\\airbridge.log");
                 }
             });
+
+            // 4. Drop shelf and transfer cards (UI only; they read the network half's transfer board).
+            try
+            {
+                AirBridge.Drop.TransferHud.Start();
+                AirBridge.Drop.DropShelf.Start();
+            }
+            catch (Exception ex) { Log.Error("Drop shelf / transfer cards failed to start", ex); }
 
             if (pendingFiles.Length > 0) ShowSendWindow(pendingFiles);
         }

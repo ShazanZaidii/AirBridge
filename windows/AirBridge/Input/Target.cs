@@ -64,6 +64,7 @@ namespace AirBridge.Input
             public readonly bool[] Buttons = new bool[3];
         }
         private readonly Dictionary<string, Held> _held = new();
+        private readonly DragGhostState _ghost = new(); // §8.8 carried drag shown next to our cursor
 
         /// <param name="onEnter">Called (on the target thread) when a remote peer takes this PC's lease.</param>
         /// <param name="onLease">Called (on the target thread) with (holderId, explicit) whenever the lease changes.</param>
@@ -103,6 +104,7 @@ namespace AirBridge.Input
             var alive = new HashSet<string>(peers.Select(p => p.Id));
             Post(() =>
             {
+                if (_ghost.Shown is { } g && !alive.Contains(g.From)) ApplyGhost(_ghost.PeerGone(g.From));
                 if (_controller != null && !alive.Contains(_controller)) EndLease();
                 foreach (var id in _held.Keys.Where(k => !alive.Contains(k)).ToList()) Release(id);
                 _busy.Retain(alive);
@@ -112,6 +114,7 @@ namespace AirBridge.Input
         /// <summary>The peer's ready session started closing (bye, Disconnect, forget, liveness, socket error, quit). Thread-safe.</summary>
         public void OnSessionEnded(string peerId) => Post(() =>
         {
+            ApplyGhost(_ghost.PeerGone(peerId));
             if (_controller == peerId) EndLease();
             Release(peerId);
             _busy.Forget(peerId);
@@ -165,6 +168,7 @@ namespace AirBridge.Input
         {
             var old = _controller;
             if (old == null) return;
+            ApplyGhost(_ghost.Leave(old));
             _controller = null;
             _explicit = false;
             ControlGate.Shared.ControlledBy = null;
@@ -239,6 +243,7 @@ namespace AirBridge.Input
                 busy["holder"] = ControlState.NameOf(newHolder);
                 Send(old, busy);
             }
+            ApplyGhost(_ghost.Leave(old));
             _controller = null;
             ControlGate.Shared.ControlledBy = null;
             Release(old);
@@ -263,6 +268,11 @@ namespace AirBridge.Input
                 case "ctl_leave":
                     if (_controller == peer) EndLease();
                     else Release(peer);
+                    return;
+                case "drag_carry":
+                case "drag_drop":
+                case "drag_cancel":
+                    DragMessage(peer, t, m); // §8.8: explicit holder only; never lease input
                     return;
                 case "key_state": return; // never subject to the lease; nothing to show on Windows
                 case "ctl_busy": return;  // controller-side message, handled by the Controller
@@ -303,6 +313,46 @@ namespace AirBridge.Input
                     break;
                 case "key": Key(peer, m); break;
                 case "action": DoAction(Msg.Str(m, "name")); break;
+            }
+        }
+
+        // ---------------------------------------------------------------- carried drag (§8.8)
+
+        /// <summary>The ghost follows our cursor; the files come as a normal transfer (§6), saved to Downloads\AirBridge
+        /// Transfers like any other. Dropping straight into the Explorer window under the cursor is not attempted: there
+        /// is no reliable way to learn its folder from here.</summary>
+        private void DragMessage(string peer, string t, JsonObject m)
+        {
+            double? rawId = Msg.Num(m, "id");
+            long id = rawId is double d && double.IsFinite(d) && d >= 0 && d < 9e15 ? (long)d : -1;
+            switch (t)
+            {
+                case "drag_carry":
+                    if (DragGhostState.Parse(peer, m) is { } info) ApplyGhost(_ghost.Carry(peer, _explicit ? _controller : null, info));
+                    break;
+                case "drag_drop": ApplyGhost(_ghost.Drop(peer, id)); break;
+                default: ApplyGhost(_ghost.Cancel(peer, id)); break;
+            }
+        }
+
+        private void ApplyGhost(DragGhostState.Effect e)
+        {
+            if (e.Kind == DragGhostState.Kind.None) return;
+            if (!NativeMethods.GetCursorPos(out var p)) p = new NativeMethods.POINT { x = (int)_cx, y = (int)_cy };
+            switch (e.Kind)
+            {
+                case DragGhostState.Kind.Show when e.Info != null:
+                    DragGhost.Show(e.Info, p.x, p.y);
+                    break;
+                case DragGhostState.Kind.Hide:
+                    DragGhost.Hide();
+                    break;
+                case DragGhostState.Kind.Dropped when e.Info != null:
+                    var i = e.Info;
+                    string from = ControlState.NameOf(i.From);
+                    string note = i.Count == 1 && i.FirstName.Length > 0 ? $"Receiving {i.FirstName} from {from}" : $"Receiving {i.Count} items from {from}";
+                    DragGhost.Dropped(note, p.x, p.y);
+                    break;
             }
         }
 
@@ -484,9 +534,15 @@ namespace AirBridge.Input
                     dx = nx, dy = ny,
                     dwFlags = NativeMethods.MOUSEEVENTF_MOVE | NativeMethods.MOUSEEVENTF_ABSOLUTE | NativeMethods.MOUSEEVENTF_VIRTUALDESK,
                 };
-                if (NativeMethods.SendInput(1, inp, NativeMethods.INPUT.Size) == 1) return;
+                if (NativeMethods.SendInput(1, inp, NativeMethods.INPUT.Size) == 1) { FollowGhost(x, y); return; }
             }
             NativeMethods.SetCursorPos(x, y); // UIPI-blocked or degenerate desktop
+            FollowGhost(x, y);
+        }
+
+        private void FollowGhost(int x, int y)
+        {
+            if (_ghost.Shown != null) DragGhost.Move(x, y);
         }
 
         // ---------------------------------------------------------------- pointer buttons / wheel
