@@ -29,8 +29,11 @@ nonisolated final class InputInterceptor: @unchecked Sendable {
         let bus = PeerBus.shared
         bus.controlHandler = { [unowned self] peer, msg in self.route(peer, msg) }
         bus.peersHandler = { [unowned self] peers in self.peersChanged(peers) }
-        bus.binaryHandler = { _, _ in } // the Mac is a mirror source only; it never receives video
+        // Video from a phone that shows its screen in a mirror window (§8.7, Mac as sink).
+        bus.binaryHandler = { peer, frame in PhoneMirrorHub.shared.frame(peer, frame) }
         peersChanged(bus.peers())
+        // Pro mirroring: browse for set-up phones' Wireless debugging early so Mirror picks it at once.
+        if !ProMirrorStore.all().isEmpty { ProMirrorHub.shared.startIfNeeded() }
 
         DispatchQueue.main.async {
             NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification,
@@ -61,8 +64,16 @@ nonisolated final class InputInterceptor: @unchecked Sendable {
         case "ctl_busy":
             let holder = msg["holder"] as? String ?? ""
             Controller.shared.perform { Controller.shared.busy(peer: peer, holder: holder) }
-        case "mirror_start", "mirror_stop", "mirror_key", "mirror_ack", "mirror_info":
+        case "mirror_start", "mirror_key", "mirror_ack":
             MirrorSource.shared.handle(peer, msg)
+        case "mirror_stop":
+            // Either side may stop: the phone stopping its stream (mirror window) or a phone sink leaving ours.
+            if PhoneMirrorHub.shared.isMirroring(peer) { PhoneMirrorHub.shared.handle(peer, msg) }
+            MirrorSource.shared.handle(peer, msg)
+        case "mirror_info", "mirror_wait", "mirror_state", "error":
+            PhoneMirrorHub.shared.handle(peer, msg)
+        case "adb_wifi_state":
+            ProMirrorHub.shared.handle(peer, msg)   // Pro mirroring setup helper (§8.9)
         case "key_state":
             break // no caps-lock indicator on the Mac
         default:
@@ -80,6 +91,7 @@ nonisolated final class InputInterceptor: @unchecked Sendable {
         Controller.shared.perform { Controller.shared.peersChanged(peers) }
         Injector.shared.peersChanged(peers)
         MirrorSource.shared.peersChanged(Set(peers.map(\.id)))
+        PhoneMirrorHub.shared.peersChanged(Set(peers.map(\.id)))
         DispatchQueue.main.async { PeerDirectory.shared.peers = peers }
 
         // §8.3: tell new trackpad sessions the current caps-lock state.

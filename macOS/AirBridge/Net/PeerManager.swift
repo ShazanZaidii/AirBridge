@@ -141,8 +141,10 @@ nonisolated final class PeerManager: PeerTransport, @unchecked Sendable {
     }
 
     func cancelTransfer(key: String) {
-        guard let (peerId, id) = TransferRegistry.lookup(key) else { return }
-        queue.async { [self] in ready[peerId]?.transfers?.cancelOutgoing(id) }
+        guard let (peerId, id, incoming) = TransferRegistry.lookup(key) else { return }
+        queue.async { [self] in
+            if incoming { ready[peerId]?.transfers?.cancelIncoming(id) } else { ready[peerId]?.transfers?.cancelOutgoing(id) }
+        }
     }
 
     // MARK: User actions (any thread)

@@ -1,0 +1,515 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<meta name="referrer" content="no-referrer">
+<title>{{NAME}} · AirWeb</title>
+<style>
+  :root {
+    --bg: #f4f4f3; --card: #ffffff; --line: #dcdcda; --text: #1b1b1b; --muted: #5f5f5c;
+    --btn: #1b1b1b; --btn-text: #ffffff; --track: #e6e6e4; --fill: #3a3a3a; --bad: #9a2c22; --chip: #ececea;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #161616; --card: #1f1f1f; --line: #353533; --text: #ececea; --muted: #a3a3a0;
+      --btn: #ececea; --btn-text: #161616; --track: #333331; --fill: #cfcfcc; --bad: #e08a80; --chip: #2b2b29;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, system-ui, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-size: 17px; line-height: 1.45;
+  }
+  main { max-width: 40rem; margin: 0 auto; padding: 1.25rem 1rem 3rem; }
+  header { margin: 0.5rem 0 1.25rem; }
+  .eyebrow { font-size: 0.8rem; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); margin: 0; }
+  h1 { font-size: 1.5rem; line-height: 1.25; margin: 0.2rem 0 0.4rem; word-wrap: break-word; overflow-wrap: anywhere; }
+  h2 { font-size: 1.05rem; margin: 0 0 0.25rem; }
+  .status { display: flex; align-items: flex-start; gap: 0.5rem; color: var(--muted); font-size: 0.95rem; margin: 0; }
+  .dot { flex: none; width: 0.55rem; height: 0.55rem; border-radius: 50%; background: var(--muted); margin-top: 0.45rem; }
+  .status.bad { color: var(--bad); }
+  .status.bad .dot { background: var(--bad); }
+  .who { display: flex; flex-wrap: wrap; gap: 0.35rem; margin: 0.6rem 0 0; padding: 0; list-style: none; }
+  .who li { display: block; padding: 0.15rem 0.6rem; border-radius: 999px; background: var(--chip); font-size: 0.82rem; color: var(--muted); border: 0; }
+  .who li.me { color: var(--text); font-weight: 600; }
+  section { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 1rem; margin-bottom: 1rem; }
+  .lead { color: var(--muted); font-size: 0.9rem; margin: 0 0 0.75rem; }
+  ul.list { list-style: none; margin: 0; padding: 0; }
+  ul.list li { display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem 0; border-top: 1px solid var(--line); }
+  ul.list li:first-child { border-top: 0; padding-top: 0.25rem; }
+  .info { flex: 1 1 auto; min-width: 0; }
+  .name { margin: 0; word-wrap: break-word; overflow-wrap: anywhere; }
+  .sub { margin: 0.1rem 0 0; color: var(--muted); font-size: 0.875rem; }
+  .sub.bad { color: var(--bad); }
+  .btn {
+    display: inline-block; flex: none; min-height: 2.75rem; padding: 0.6rem 1.1rem; border-radius: 10px;
+    font: inherit; font-size: 0.95rem; font-weight: 600; text-align: center; text-decoration: none; cursor: pointer;
+    border: 1px solid var(--line); background: var(--card); color: var(--text); -webkit-appearance: none; appearance: none;
+  }
+  .btn.primary { background: var(--btn); color: var(--btn-text); border-color: var(--btn); }
+  .btn.wide { display: block; width: 100%; }
+  .btn[disabled] { opacity: 0.5; cursor: default; }
+  .row-actions { margin-top: 0.75rem; }
+  .empty { color: var(--muted); margin: 0; }
+  .picker { position: relative; display: block; overflow: hidden; }
+  .picker input { position: absolute; left: 0; top: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; font-size: 100px; }
+  .hint { color: var(--muted); font-size: 0.875rem; margin: 0.6rem 0 0; }
+  .bar { height: 6px; background: var(--track); border-radius: 3px; overflow: hidden; margin-top: 0.4rem; }
+  .bar span { display: block; height: 100%; width: 0; background: var(--fill); }
+  #uploads { margin-top: 0.75rem; }
+  #uploads li:first-child { border-top: 1px solid var(--line); padding-top: 0.75rem; }
+  .invite { display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; }
+  .invite .qrbox { flex: none; width: 9.5rem; height: 9.5rem; background: #fff; border-radius: 10px; padding: 0.25rem; border: 1px solid var(--line); }
+  .invite .qrbox img { display: block; width: 100%; height: 100%; }
+  .invite .side { flex: 1 1 12rem; min-width: 0; }
+  .link { font-size: 0.85rem; color: var(--muted); word-break: break-all; margin: 0 0 0.6rem; user-select: all; -webkit-user-select: all; }
+  .hidden { display: none; }
+  #drop {
+    position: fixed; inset: 0.6rem; z-index: 10; border: 2px dashed var(--muted); border-radius: 16px;
+    background: color-mix(in srgb, var(--bg) 88%, transparent); display: none; align-items: center; justify-content: center;
+    font-size: 1.2rem; font-weight: 600; color: var(--muted); pointer-events: none;
+  }
+  #drop.on { display: flex; }
+</style>
+</head>
+<body data-name="{{NAME}}">
+<main>
+  <header>
+    <p class="eyebrow">AirWeb</p>
+    <h1 id="title">{{NAME}}</h1>
+    <p id="status" class="status" aria-live="polite"><span class="dot"></span><span id="status-text">Connected</span></p>
+    <ul id="who" class="who" aria-label="Devices connected"></ul>
+  </header>
+
+  <section aria-labelledby="dl-h">
+    <h2 id="dl-h">Shared files</h2>
+    <p class="lead">Everyone connected to <span class="pname">{{NAME}}</span> sees these and can download them.</p>
+    <p id="dl-empty" class="empty">Nothing yet. Files that you, anyone else or <span class="pname">{{NAME}}</span> add show up here for everyone.</p>
+    <ul id="files" class="list"></ul>
+    <div id="dl-all-wrap" class="row-actions hidden">
+      <button id="dl-all" class="btn wide" type="button">Download all</button>
+    </div>
+  </section>
+
+  <section aria-labelledby="ul-h">
+    <h2 id="ul-h">Add files</h2>
+    <p class="lead">What you add is shared with everyone connected.</p>
+    <label class="btn primary wide picker">
+      <span>Choose files</span>
+      <input id="pick" type="file" multiple aria-label="Choose files to share">
+    </label>
+    <p class="hint">A copy is saved on <span class="pname">{{NAME}}</span>. Keep this page open until the files are sent. On a computer you can also drop files anywhere on this page.</p>
+    <ul id="uploads" class="list"></ul>
+  </section>
+
+  <section aria-labelledby="inv-h">
+    <h2 id="inv-h">Invite someone</h2>
+    <p class="lead">Anyone on the same Wi-Fi who opens this link joins the same files, no matter who showed it to them.</p>
+    <div class="invite">
+      <div class="qrbox"><img id="qr" alt="QR code of this page's link" width="152" height="152"></div>
+      <div class="side">
+        <p id="link" class="link"></p>
+        <button id="copy" class="btn" type="button">Copy link</button>
+      </div>
+    </div>
+  </section>
+</main>
+<div id="drop" aria-hidden="true">Drop files to share them</div>
+
+<script>
+(function () {
+  "use strict";
+  var m = /[?&]t=([^&#]+)/.exec(location.search);
+  var token = m ? m[1] : "";
+  var host = document.body.getAttribute("data-name") || "the host";
+  var free = -1;
+  var offline = false;
+  var version = "";
+  var polling = null;
+
+  // ---- who this page is: a random id for this tab and a label such as "Chrome on Windows" ----
+
+  function randomId() {
+    var a = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789", s = "", i;
+    var bytes = null;
+    try { bytes = new Uint8Array(16); (window.crypto || window.msCrypto).getRandomValues(bytes); } catch (e) { bytes = null; }
+    for (i = 0; i < 16; i++) s += a.charAt((bytes ? bytes[i] : Math.floor(Math.random() * 256)) % a.length);
+    return s;
+  }
+  var me = null;
+  try { me = sessionStorage.getItem("airweb-id"); } catch (e) {}
+  if (!me || !/^[A-Za-z0-9_-]{8,40}$/.test(me)) {
+    me = randomId();
+    try { sessionStorage.setItem("airweb-id", me); } catch (e) {}
+  }
+  function deviceLabel() {
+    var ua = navigator.userAgent || "", b = "Browser", os = "";
+    if (/Edg\//.test(ua)) b = "Edge";
+    else if (/OPR\/|Opera/.test(ua)) b = "Opera";
+    else if (/SamsungBrowser/.test(ua)) b = "Samsung Internet";
+    else if (/Firefox\/|FxiOS/.test(ua)) b = "Firefox";
+    else if (/Chrome\/|CriOS/.test(ua)) b = "Chrome";
+    else if (/Safari\//.test(ua)) b = "Safari";
+    if (/iPhone/.test(ua)) os = "iPhone";
+    else if (/iPad/.test(ua)) os = "iPad";
+    else if (/Android/.test(ua)) os = "Android";
+    else if (/Windows/.test(ua)) os = "Windows";
+    else if (/Macintosh|Mac OS X/.test(ua)) os = (navigator.maxTouchPoints > 1 ? "iPad" : "Mac");
+    else if (/CrOS/.test(ua)) os = "ChromeOS";
+    else if (/Linux/.test(ua)) os = "Linux";
+    return os ? b + " on " + os : b;
+  }
+  var label = deviceLabel();
+
+  function api(path) {
+    return path + (path.indexOf("?") < 0 ? "?" : "&") + "t=" + token;
+  }
+  function who() { return "&c=" + encodeURIComponent(me) + "&w=" + encodeURIComponent(label); }
+  function $(id) { return document.getElementById(id); }
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.appendChild(document.createTextNode(text));
+    return e;
+  }
+  function size(n) {
+    if (n == null || n < 0) return "";
+    if (n < 1024) return n + " B";
+    var u = ["KB", "MB", "GB", "TB"], i = -1;
+    do { n = n / 1024; i++; } while (n >= 1024 && i < u.length - 1);
+    return (n < 10 ? n.toFixed(1) : Math.round(n)) + " " + u[i];
+  }
+
+  // "Now", "10 sec ago", "1 min ago", "2 hr ago", then the date. Times are local-clock ms.
+  var skew = 0; // host clock minus this device's clock
+  function ago(t) {
+    var s = Math.max(0, Math.floor((Date.now() - t) / 1000));
+    if (s < 10) return "Now";
+    if (s < 60) return (Math.floor(s / 10) * 10) + " sec ago";
+    if (s < 3600) return Math.floor(s / 60) + " min ago";
+    if (s < 86400) return Math.floor(s / 3600) + " hr ago";
+    return new Date(t).toLocaleDateString();
+  }
+  // An element whose text is "<prefix><time>", refreshed by the timer below.
+  function timed(e, prefix, t) {
+    e.setAttribute("data-t", String(t));
+    e.setAttribute("data-p", prefix);
+    e.textContent = prefix + ago(t);
+    return e;
+  }
+  setInterval(function () {
+    var es = document.querySelectorAll("[data-t]");
+    for (var i = 0; i < es.length; i++) es[i].textContent = es[i].getAttribute("data-p") + ago(+es[i].getAttribute("data-t"));
+  }, 2000);
+
+  var statusBase = "Connected";
+  function setStatus(text, bad) {
+    $("status-text").textContent = text;
+    $("status").className = bad ? "status bad" : "status";
+  }
+
+  function setHost(name) {
+    if (!name || name === host) return;
+    host = name;
+    $("title").textContent = name;
+    document.title = name + " · AirWeb";
+    var ps = document.querySelectorAll(".pname");
+    for (var i = 0; i < ps.length; i++) ps[i].textContent = name;
+  }
+
+  // ---- who is here ----
+
+  var lastPeers = "";
+  function renderPeers(list, count) {
+    var key = JSON.stringify(list) + count;
+    if (key === lastPeers) return;
+    lastPeers = key;
+    var ul = $("who");
+    while (ul.firstChild) ul.removeChild(ul.firstChild);
+    var others = 0;
+    for (var i = 0; i < list.length; i++) {
+      var mine = list[i].id === me;
+      if (!mine) others++;
+      ul.appendChild(el("li", mine ? "me" : "", mine ? list[i].name + " (you)" : list[i].name));
+    }
+    if (count > list.length) ul.appendChild(el("li", "", "+" + (count - list.length) + " more"));
+    var here = Math.max(count, list.length);
+    statusBase = here > 1 ? "Connected · " + here + " devices here" : "Connected";
+    if (!offline && $("status").className === "status") setStatus(statusBase, false);
+  }
+
+  // ---- the shared pool ----
+
+  var files = [];
+  var lastList = "";
+
+  function fileUrl(f) { return api("/d/" + f.id + "/" + encodeURIComponent(f.name)); }
+
+  function renderFiles(list) {
+    var key = JSON.stringify(list);
+    if (key === lastList) return;
+    lastList = key;
+    // Newest first: what was just added is what people are looking for.
+    files = list.slice().sort(function (a, b) { return (b.added || 0) - (a.added || 0) || b.id - a.id; });
+    var ul = $("files");
+    while (ul.firstChild) ul.removeChild(ul.firstChild);
+    for (var i = 0; i < files.length; i++) {
+      var f = files[i];
+      var li = el("li");
+      var info = el("div", "info");
+      info.appendChild(el("p", "name", f.name));
+      var sub = el("p", "sub");
+      var pre = (f.size >= 0 ? size(f.size) + " · " : "") + (f.own ? "From you" : (f.by ? "From " + f.by : "From " + host)) + " · ";
+      if (f.added > 0) timed(sub, pre, f.added - skew); else sub.textContent = pre.replace(/ · $/, "");
+      info.appendChild(sub);
+      var a = el("a", "btn", "Download");
+      a.href = fileUrl(f);
+      a.setAttribute("download", f.name);
+      a.setAttribute("aria-label", "Download " + f.name);
+      li.appendChild(info);
+      li.appendChild(a);
+      ul.appendChild(li);
+    }
+    $("dl-empty").className = files.length ? "empty hidden" : "empty";
+    $("dl-all-wrap").className = files.length > 1 ? "row-actions" : "row-actions hidden";
+  }
+
+  var downloadingAll = false;
+  $("dl-all").onclick = function () {
+    if (downloadingAll || !files.length) return;
+    downloadingAll = true;
+    var btn = $("dl-all"), list = files.slice(), i = 0;
+    btn.disabled = true;
+    (function next() {
+      if (i >= list.length) {
+        btn.textContent = "Download all";
+        btn.disabled = false;
+        downloadingAll = false;
+        return;
+      }
+      btn.textContent = "Downloading " + (i + 1) + " of " + list.length;
+      var a = el("a");
+      a.href = fileUrl(list[i]);
+      a.setAttribute("download", list[i].name);
+      a.style.display = "none";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      i++;
+      setTimeout(next, 1500); // one at a time; browsers drop downloads started too close together
+    })();
+  };
+
+  // ---- polling: the host says how often (slower with more people); hidden tabs ask less ----
+
+  var pollMs = 3000;
+  function schedule(ms) {
+    if (polling) clearTimeout(polling);
+    polling = setTimeout(poll, ms);
+  }
+  function poll() {
+    var x = new XMLHttpRequest();
+    x.open("GET", api("/api/state?v=" + encodeURIComponent(version)) + who(), true);
+    x.timeout = 8000;
+    x.onload = function () {
+      if (x.status === 200) {
+        try {
+          var s = JSON.parse(x.responseText);
+          setHost(s.name);
+          free = typeof s.free === "number" ? s.free : -1;
+          if (typeof s.now === "number") skew = s.now - Date.now();
+          if (typeof s.poll === "number") pollMs = Math.min(Math.max(s.poll, 1500), 15000);
+          if (s.files) { renderFiles(s.files); version = s.v || ""; }
+          renderPeers(s.peers || [], typeof s.count === "number" ? s.count : (s.peers || []).length);
+          if (offline || $("status").className !== "status") setStatus(statusBase, false);
+          offline = false;
+        } catch (e) {}
+        schedule(document.hidden ? pollMs * 3 : pollMs);
+      } else if (x.status === 403) {
+        setStatus("This link has stopped working. Scan the new code on " + host + ".", true);
+        schedule(10000);
+      } else if (x.status === 503) {
+        schedule(5000); // the host is busy; try again in a moment
+      } else {
+        lost();
+      }
+    };
+    x.onerror = x.ontimeout = lost;
+    x.send();
+  }
+  function lost() {
+    offline = true;
+    setStatus("Can't reach " + host + ". Keep AirWeb open on it and stay on the same Wi-Fi.", true);
+    schedule(4000);
+  }
+  document.addEventListener("visibilitychange", function () { if (!document.hidden) schedule(0); });
+
+  // ---- adding files to the pool ----
+
+  var queue = [], busy = false, pending = 0;
+
+  $("pick").onchange = function () {
+    var picked = this.files;
+    for (var i = 0; i < picked.length; i++) add(picked[i]);
+    this.value = ""; // so the same file can be chosen again
+    pump();
+  };
+
+  function add(file) {
+    var li = el("li");
+    var info = el("div", "info");
+    var sub = el("p", "sub", "Waiting · " + size(file.size));
+    var bar = el("div", "bar");
+    var fill = el("span");
+    bar.appendChild(fill);
+    info.appendChild(el("p", "name", file.name));
+    info.appendChild(sub);
+    info.appendChild(bar);
+    li.appendChild(info);
+    $("uploads").appendChild(li);
+    var job = { file: file, li: li, sub: sub, bar: bar, fill: fill, tries: 0 };
+    queue.push(job);
+    pending++;
+  }
+
+  function pump() {
+    if (busy) return;
+    var job = queue.shift();
+    if (!job) return;
+    busy = true;
+    send(job);
+  }
+
+  function finish(job, ok, text) {
+    busy = false;
+    pending--;
+    job.sub.className = ok ? "sub" : "sub bad";
+    timed(job.sub, text + " · ", Date.now());
+    if (ok) {
+      job.fill.style.width = "100%";
+      job.bar.className = "bar hidden";
+      schedule(0); // show it in the list right away
+    } else {
+      var b = el("button", "btn", "Try again");
+      b.type = "button";
+      b.onclick = function () {
+        job.li.removeChild(b);
+        job.sub.className = "sub";
+        job.sub.removeAttribute("data-t");
+        job.sub.textContent = "Waiting · " + size(job.file.size);
+        job.fill.style.width = "0";
+        job.bar.className = "bar";
+        job.tries = 0;
+        queue.push(job);
+        pending++;
+        pump();
+      };
+      job.li.appendChild(b);
+    }
+    pump();
+  }
+
+  // The host takes a few files at a time; when it is busy it asks us to wait. Retry quietly a few times.
+  function retryLater(job, why) {
+    job.tries++;
+    if (job.tries > 5) { finish(job, false, "Couldn't send. Check the Wi-Fi and try again."); return; }
+    job.fill.style.width = "0";
+    job.sub.textContent = why + " · " + size(job.file.size);
+    var wait = Math.min(3000 * job.tries, 12000) + Math.floor(Math.random() * 1500);
+    setTimeout(function () { send(job); }, wait);
+  }
+
+  function send(job) {
+    var f = job.file;
+    if (free >= 0 && f.size > free) { finish(job, false, "Not enough space on " + host); return; }
+    job.sub.textContent = "Sending · 0%";
+    var x = new XMLHttpRequest();
+    var loaded = 0;
+    x.open("POST", api("/u") + "&n=" + encodeURIComponent(f.name) + who(), true);
+    x.setRequestHeader("Content-Type", f.type || "application/octet-stream");
+    if (x.upload) {
+      x.upload.onprogress = function (e) {
+        loaded = e.loaded;
+        if (!e.lengthComputable || !e.total) return;
+        var pct = Math.floor(e.loaded * 100 / e.total);
+        job.fill.style.width = pct + "%";
+        job.sub.textContent = "Sending · " + pct + "% of " + size(e.total);
+      };
+    }
+    x.onload = function () {
+      if (x.status === 200) finish(job, true, "Sent · " + size(f.size));
+      else if (x.status === 503) retryLater(job, "Waiting for a turn");
+      else if (x.status === 507) {
+        var full = /"error":"full"/.test(x.responseText);
+        finish(job, false, full ? "Too many files here already" : "Not enough space on " + host);
+      }
+      else if (x.status === 403) finish(job, false, "This link has stopped working");
+      else finish(job, false, "Couldn't send");
+    };
+    // A busy host may close the connection before it reads the file: that looks like a network error. Retry a few times.
+    x.onerror = function () {
+      if (loaded < f.size && job.tries < 3) retryLater(job, "Waiting for a turn");
+      else finish(job, false, "Couldn't send. Check the Wi-Fi and try again.");
+    };
+    x.send(f);
+  }
+
+  window.addEventListener("beforeunload", function (e) {
+    if (pending > 0) { e.preventDefault(); e.returnValue = ""; return ""; }
+  });
+
+  // ---- drop files anywhere (computers) ----
+
+  var dragDepth = 0;
+  function hasFiles(e) {
+    var t = e.dataTransfer && e.dataTransfer.types;
+    if (!t) return false;
+    for (var i = 0; i < t.length; i++) if (t[i] === "Files") return true;
+    return false;
+  }
+  document.addEventListener("dragenter", function (e) { if (hasFiles(e)) { dragDepth++; $("drop").className = "on"; e.preventDefault(); } });
+  document.addEventListener("dragover", function (e) { if (hasFiles(e)) e.preventDefault(); });
+  document.addEventListener("dragleave", function () { dragDepth = Math.max(0, dragDepth - 1); if (!dragDepth) $("drop").className = ""; });
+  document.addEventListener("drop", function (e) {
+    dragDepth = 0;
+    $("drop").className = "";
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    var dropped = e.dataTransfer.files;
+    for (var i = 0; i < dropped.length; i++) if (dropped[i].size > 0 || dropped[i].type) add(dropped[i]); // skips folders
+    pump();
+  });
+
+  // ---- invite: this page's link as a QR code (drawn by the host) and a copy button ----
+
+  var link = location.protocol + "//" + location.host + "/?t=" + token;
+  $("link").textContent = link;
+  $("qr").src = api("/qr.svg");
+  $("copy").onclick = function () {
+    var b = $("copy");
+    function done(ok) {
+      b.textContent = ok ? "Copied" : "Select the link and copy it";
+      setTimeout(function () { b.textContent = "Copy link"; }, 1800);
+    }
+    try {
+      if (navigator.clipboard && window.isSecureContext) { navigator.clipboard.writeText(link).then(function () { done(true); }, function () { done(false); }); return; }
+    } catch (e) {}
+    var t = document.createElement("textarea");
+    t.value = link; t.setAttribute("readonly", ""); t.style.position = "fixed"; t.style.opacity = "0";
+    document.body.appendChild(t);
+    t.select();
+    var ok = false;
+    try { ok = document.execCommand("copy"); } catch (e) {}
+    document.body.removeChild(t);
+    done(ok);
+  };
+
+  poll();
+})();
+</script>
+</body>
+</html>

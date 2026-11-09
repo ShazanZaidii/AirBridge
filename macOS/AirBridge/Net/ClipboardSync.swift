@@ -8,6 +8,8 @@ import CryptoKit
     private var timer: Timer?
     private var lastChangeCount = NSPasteboard.general.changeCount
     private var lastReceivedHash: Data?
+    /// What this Mac last sent: the same text is never sent twice in a row (no clipboard ping-pong).
+    private var lastSentHash: Data?
 
     private static let skipTypes: [NSPasteboard.PasteboardType] = [
         .fileURL,
@@ -33,12 +35,14 @@ import CryptoKit
         let types = pb.types ?? []
         guard !types.contains(where: ClipboardSync.skipTypes.contains),
               let text = pb.string(forType: .string), !text.isEmpty else { return }
-        if ClipboardSync.hash(text) == lastReceivedHash { return }
+        let h = ClipboardSync.hash(text)
+        if h == lastReceivedHash || h == lastSentHash { return }
         guard ClipboardSync.passesFilters(text) else { return }
         guard text.utf8.count <= Proto.clipMaxBytes else {
             AppModel.shared.notice("Clipboard too large to sync (over 512 KB)")
             return
         }
+        lastSentHash = h
         PeerManager.shared.broadcastClip(["t": "clip", "kind": "text", "text": text, "ts": Proto.nowMs()])
     }
 
@@ -51,7 +55,10 @@ import CryptoKit
 
     private func apply(_ text: String) {
         lastReceivedHash = ClipboardSync.hash(text)
+        lastSentHash = nil // something newer arrived: copying the old text again here is a real change
         let pb = NSPasteboard.general
+        // Already there (the same copy again): don't rewrite the pasteboard.
+        if pb.string(forType: .string) == text { return }
         pb.clearContents()
         pb.setString(text, forType: .string)
         lastChangeCount = pb.changeCount

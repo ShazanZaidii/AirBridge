@@ -15,11 +15,15 @@
 	</array>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>AirBridge finds and connects to your phone and other computers on this network to sync the clipboard, send files and share the keyboard and mouse.</string>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>AirBridge uses Bluetooth to tell whether your phone is next to this Mac, so calls ring where you are.</string>
 	<key>NSAppleEventsUsageDescription</key>
 	<string>AirBridge asks System Events to show or hide the menu bar when you tap the menu bar shortcut on your phone.</string>
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_airbridge._tcp</string>
+		<string>_adb-tls-pairing._tcp</string>
+		<string>_adb-tls-connect._tcp</string>
 	</array>
 </dict>
 </plist>

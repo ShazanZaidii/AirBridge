@@ -255,6 +255,8 @@ nonisolated final class Session: @unchecked Sendable {
         channel = ch
         endPrompt()
         state = .ready
+        // Liveness starts now: during a confirm pairing nothing may arrive while a person reads the code.
+        lastReceived = ProcessInfo.processInfo.systemUptime
         transfers = TransferService(session: self, queue: queue)
         if role == .client { clientOutcome = .ready }
         manager?.sessionReady(self)
@@ -309,7 +311,10 @@ nonisolated final class Session: @unchecked Sendable {
         switch t {
         case "ping":
             send(["t": "pong", "ts": msg["ts"] ?? Proto.nowMs()])
-        case "pong", "error", "hello", "auth", "pair", "pair_start":
+        case "error":
+            // Mirror errors (a phone that did not allow its screen to be shown) belong to the mirror window.
+            if msg.str("code")?.hasPrefix("mirror_") == true { PeerBus.shared.dispatchControl(from: peerId, msg) }
+        case "pong", "hello", "auth", "pair", "pair_start":
             break
         case "bye":
             // Reply with a close frame (WebSocket.close waits for the peer's echo, max 2 s).
@@ -330,6 +335,9 @@ nonisolated final class Session: @unchecked Sendable {
             ClipboardSync.receive(msg, from: peerId)
         case _ where t.hasPrefix("xfer_"):
             transfers?.handle(t, msg)
+        case _ where t.hasPrefix("notif_") || t.hasPrefix("call_"):
+            // §13 phone notifications and calls: shown by PhoneNotifCenter, never the input half.
+            PhoneNotifCenter.receive(from: peerId, msg)
         case _ where PeerBus.controlTypes.contains(t):
             PeerBus.shared.dispatchControl(from: peerId, msg)
         default:
