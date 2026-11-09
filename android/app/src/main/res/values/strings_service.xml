@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- English source text. Translations live in values-<lang>/strings_service.xml. -->
+<resources>
+    <string name="svc_waiting">Waiting for devices</string>
+    <string name="svc_open_to_pair">Open AirBridge to pair</string>
+    <plurals name="svc_not_connected">
+        <item quantity="one">%1$s is not connected</item>
+        <item quantity="other">%1$s are not connected</item>
+    </plurals>
+    <plurals name="svc_paired_none">
+        <item quantity="one">%1$d paired, none reachable right now</item>
+        <item quantity="other">%1$d paired, none reachable right now</item>
+    </plurals>
+</resources>

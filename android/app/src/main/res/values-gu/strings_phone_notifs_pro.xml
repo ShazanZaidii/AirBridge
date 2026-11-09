@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="pn_listener_name">એરબ્રિજ નોટિફિકેશન</string>
+    <string name="pn_section">નોટિફિકેશન અને કૉલ</string>
+
+    <string name="pn_notifs_title">ફોનના નોટિફિકેશન કમ્પ્યુટર પર બતાવો</string>
+    <string name="pn_notifs_sub">જોડી બનાવેલા Mac કે PC પરથી જ તેને જુઓ, જવાબ આપો કે હટાવો. તે એન્ક્રિપ્ટ થઈને ફક્ત તમારા પોતાના ડિવાઇસ પર જ જાય છે.</string>
+    <string name="pn_access_off_title">નોટિફિકેશન ઍક્સેસ બંધ છે</string>
+    <string name="pn_access_off_sub">સિસ્ટમ સેટિંગમાં “%1$s” ચાલુ કરો. જો તેની સ્વિચ ઝાંખી હોય, તો પહેલાં ઍપ માહિતી › ⋮ › પ્રતિબંધિત સેટિંગને મંજૂરી આપો ખોલો, પછી ફરી પ્રયાસ કરો.</string>
+    <string name="pn_app_info">ઍપ માહિતી</string>
+
+    <string name="pn_access_dialog_title">કમ્પ્યુટર પર ફોનના નોટિફિકેશન</string>
+    <string name="pn_access_dialog_body">એરબ્રિજ આ ફોન પર આવતા નોટિફિકેશન વાંચીને તમે જોડી બનાવેલા કમ્પ્યુટર પર બતાવશે, જેથી તમે ત્યાંથી જ જવાબ આપી શકો કે તેને હટાવી શકો.\n\nતે એન્ક્રિપ્ટ થઈને ફક્ત તમારા પોતાના જોડી બનાવેલા ડિવાઇસ પર જ જાય છે અને ક્યાંય અપલોડ થતા નથી. આ સ્વિચ બંધ હોય ત્યારે કંઈ મોકલાતું નથી.\n\nઆગળની સ્ક્રીન પર “%1$s” ચાલુ કરો. જો સ્વિચ ઝાંખી હોય, તો પાછા આવો, ઍપ માહિતી › ⋮ › પ્રતિબંધિત સેટિંગને મંજૂરી આપો ખોલો અને ફરી પ્રયાસ કરો.</string>
+    <string name="pn_continue">આગળ વધો</string>
+
+    <string name="pn_apps_title">ઍપ</string>
+    <string name="pn_apps_all">બધી ઍપ</string>
+    <plurals name="pn_apps_muted">
+        <item quantity="one">%1$d ઍપ છુપાવી છે</item>
+        <item quantity="other">%1$d ઍપ છુપાવી છે</item>
+    </plurals>
+    <string name="pn_apps_header">જે ઍપની સ્વિચ ચાલુ છે, તેના નોટિફિકેશન તમારા કમ્પ્યુટર પર પહોંચે છે. તાજેતરમાં નોટિફિકેશન મોકલનારી ઍપ સૌથી ઉપર દેખાય છે.</string>
+    <string name="pn_apps_loading">ઍપ લોડ થઈ રહી છે…</string>
+    <string name="pn_private_hint">લૉક સ્ક્રીન પર ખાનગી માહિતી છુપાવેલી હોય, તો તમે ફોન અનલૉક કરો ત્યાં સુધી નોટિફિકેશન રાહ જુએ છે.</string>
+
+    <string name="pn_calls_title">કમ્પ્યુટર પર કૉલ</string>
+    <string name="pn_calls_sub">કોણ કૉલ કરે છે તે જુઓ, પછી કમ્પ્યુટર પરથી જ કૉલ ઉપાડો, નકારો કે પૂરો કરો. કૉલનો અવાજ ફોન પર જ રહે છે.</string>
+    <string name="pn_calls_dialog_body">કૉલ બતાવવા અને તેને ઉપાડવા કે પૂરા કરવા માટે એરબ્રિજને ફોનની પરવાનગી જોઈએ. સંપર્કોની પરવાનગી વૈકલ્પિક છે; તેનો ઉપયોગ ફક્ત નંબરની જગ્યાએ નામ બતાવવા માટે થાય છે.\n\nકૉલ ફોન પર જ ચાલે છે: ફોનના સ્પીકર, ઇયરપીસ કે Bluetooth હેડસેટથી વાત કરો. Android કોઈ પણ ઍપને કૉલનો અવાજ કમ્પ્યુટર પર લઈ જવા દેતું નથી.\n\nકૉલની વિગતો એન્ક્રિપ્ટ થઈને ફક્ત તમારા પોતાના જોડી બનાવેલા ડિવાઇસ પર જ જાય છે.</string>
+    <string name="pn_calls_limited_title">ફોનની પરવાનગી બંધ છે</string>
+    <string name="pn_calls_limited_sub">તમારી ફોન ઍપ જે કૉલનું નોટિફિકેશન બતાવે, ફક્ત તે જ કૉલ કમ્પ્યુટર પર પહોંચે છે, અને કૉલ ઉપાડવાનું કદાચ કામ ન કરે. ઍપ પરવાનગીઓમાં ફોનની મંજૂરી આપો.</string>
+
+    <string name="promirror_notif_title">વાયરલેસ ડિબગીંગ ચાલુ કરો</string>
+    <string name="promirror_notif_text">Pro મિરરિંગ માટે ડેવલપરના વિકલ્પો ખોલવા ટૅપ કરો</string>
+</resources>

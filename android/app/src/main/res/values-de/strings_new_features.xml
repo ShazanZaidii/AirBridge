@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="drag_items">
+        <item quantity="one">%d Element</item>
+        <item quantity="other">%d Elemente</item>
+    </plurals>
+    <string name="drag_and_more">%1$s und mehr</string>
+    <string name="drag_receiving_one">Empfange %1$s von %2$s</string>
+    <plurals name="drag_receiving_many">
+        <item quantity="one">Empfange %1$d Element von %2$s</item>
+        <item quantity="other">Empfange %1$d Elemente von %2$s</item>
+    </plurals>
+    <string name="pm_channel_request">Anfragen zur Bildschirmfreigabe</string>
+    <string name="pm_channel_ongoing">Bildschirmfreigabe</string>
+    <string name="pm_request_title">%1$s möchte den Bildschirm dieses Smartphones anzeigen</string>
+    <string name="pm_request_text">Zum Zulassen tippen</string>
+    <string name="pm_request_decline">Nicht jetzt</string>
+    <string name="pm_ongoing_title">Dein Bildschirm wird auf %1$s angezeigt</string>
+    <string name="pm_ongoing_text">Alles auf deinem Bildschirm ist dort sichtbar</string>
+    <string name="pm_stop">Beenden</string>
+    <string name="pm_sink_allow">Tippe auf %1$s auf „Zulassen“</string>
+    <string name="pm_sink_denied">%1$s hat die Bildschirmfreigabe nicht zugelassen</string>
+    <string name="pm_sink_stopped">%1$s hat die Bildschirmfreigabe beendet</string>
+    <string name="lk_fallback">%1$s. Wird über die aktuelle Verbindung gesendet.</string>
+</resources>

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- English source text. Translations live in values-<lang>/strings_nearby.xml. -->
+<resources>
+    <string name="nb_request">Pairing request</string>
+    <string name="nb_request_body">%1$s wants to connect via Nearby. Tap to confirm the code.</string>
+</resources>

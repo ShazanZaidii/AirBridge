@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="ce_calls_dialog_body">Pour afficher les appels et y répondre ou raccrocher, AirBridge a besoin de l\'autorisation Téléphone.\n\nContacts : votre ordinateur affiche le nom et la photo de la personne qui appelle, comme votre téléphone. Facultatif.\n\nAppareils à proximité : votre ordinateur ne sonne que si vous l\'utilisez ou si votre téléphone est tout près ; sinon, il reste silencieux. Facultatif.\n\nJournaux d\'appels : AirBridge voit le numéro de l\'appel qui sonne, pour que votre ordinateur affiche tout de suite qui appelle. Votre historique d\'appels n\'est jamais lu. Facultatif.\n\nLes détails des appels ne sont envoyés qu\'à vos propres appareils associés, chiffrés.</string>
+    <string name="ce_number_title">Voir qui appelle dès la première sonnerie</string>
+    <string name="ce_number_sub">Votre téléphone ne donne le numéro de l\'appelant à AirBridge qu\'avec l\'autorisation Journaux d\'appels. Il ne sert qu\'à l\'appel qui sonne ; votre historique d\'appels n\'est jamais lu.</string>
+</resources>

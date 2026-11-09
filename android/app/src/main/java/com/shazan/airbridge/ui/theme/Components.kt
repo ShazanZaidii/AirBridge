@@ -62,6 +62,16 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.text.TextAutoSize
+import androidx.compose.ui.text.TextStyle
+
+/**
+ * One line that shrinks (down to [min]) instead of wrapping or breaking a word: button labels, titles,
+ * short status labels. Long translations and large font settings stay on one tidy line.
+ */
+fun fitOneLine(style: TextStyle, min: Float = 11f): TextAutoSize =
+    TextAutoSize.StepBased(minFontSize = min.sp, maxFontSize = style.fontSize, stepSize = 0.5.sp)
 
 /** Shared building blocks for AirBridge screens. Colours come only from the theme. */
 
@@ -74,15 +84,19 @@ fun platformIcon(plat: String): ImageVector = when (plat) {
     else -> Icons.Outlined.Devices
 }
 
-fun platformLabel(plat: String): String = when (plat) {
-    "macos" -> "Mac"; "windows" -> "Windows PC"; "linux" -> "Linux"; "android" -> "Android"; "ios" -> "iPhone or iPad"
-    else -> "Device"
-}
+fun platformLabel(plat: String): String = com.shazan.airbridge.net.Hub.app.getString(when (plat) {
+    "macos" -> com.shazan.airbridge.R.string.plat_mac; "windows" -> com.shazan.airbridge.R.string.plat_windows
+    "linux" -> com.shazan.airbridge.R.string.plat_linux; "android" -> com.shazan.airbridge.R.string.plat_android
+    "ios" -> com.shazan.airbridge.R.string.plat_ios
+    else -> com.shazan.airbridge.R.string.plat_device
+})
 
 /** "your Mac" / "your PC" for instructions. */
-fun platformNoun(plat: String): String = when (plat) {
-    "macos" -> "Mac"; "windows" -> "PC"; "android" -> "phone"; "ios" -> "iPhone"; else -> "computer"
-}
+fun platformNoun(plat: String): String = com.shazan.airbridge.net.Hub.app.getString(when (plat) {
+    "macos" -> com.shazan.airbridge.R.string.noun_mac; "windows" -> com.shazan.airbridge.R.string.noun_pc
+    "android" -> com.shazan.airbridge.R.string.noun_phone; "ios" -> com.shazan.airbridge.R.string.noun_iphone
+    else -> com.shazan.airbridge.R.string.noun_computer
+})
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -104,11 +118,12 @@ fun AbScaffold(
                         if (onTitleLongPress == null) base
                         else base.pointerInput(onTitleLongPress) { detectTapGestures(onLongPress = { onTitleLongPress() }) }
                     }
-                    Text(title, style = MaterialTheme.typography.titleLarge, modifier = m)
+                    val st = MaterialTheme.typography.titleLarge
+                    Text(title, style = st, modifier = m, maxLines = 1, overflow = TextOverflow.Ellipsis, autoSize = fitOneLine(st, 15f))
                 },
                 navigationIcon = {
                     if (onBack != null) IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = androidx.compose.ui.res.stringResource(com.shazan.airbridge.R.string.back))
                     }
                 },
                 actions = actions,
@@ -186,16 +201,17 @@ fun toneColor(tone: ChipTone): Color {
 fun StatusChip(label: String, tone: ChipTone, modifier: Modifier = Modifier) {
     val target = toneColor(tone)
     val c by animateColorAsState(target, tween(200), label = "chip")
+    val statusDesc = androidx.compose.ui.res.stringResource(com.shazan.airbridge.R.string.status_desc, label)
     Row(
         modifier
             .padding(vertical = 2.dp)
-            .clearAndSetSemantics { contentDescription = "Status: $label" },
+            .clearAndSetSemantics { contentDescription = statusDesc },
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(Modifier.size(7.dp).background(c, CircleShape))
         Spacer(Modifier.width(6.dp))
         Text(
-            label, style = MaterialTheme.typography.labelMedium, maxLines = 1,
+            label, style = MaterialTheme.typography.labelMedium, maxLines = 1, autoSize = fitOneLine(MaterialTheme.typography.labelMedium, 10f),
             color = if (tone == ChipTone.DANGER) c else MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
@@ -207,11 +223,11 @@ fun PrimaryButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifi
         onClick = onClick,
         enabled = enabled,
         shape = MaterialTheme.shapes.medium,
-        contentPadding = PaddingValues(horizontal = Dimens.lg),
+        contentPadding = PaddingValues(horizontal = Dimens.md),
         modifier = modifier.fillMaxWidth().heightIn(min = Dimens.buttonHeight),
     ) {
         if (icon != null) { Icon(icon, contentDescription = null, modifier = Modifier.size(Dimens.iconSm)); Spacer(Modifier.width(Dimens.sm)) }
-        Text(text, style = MaterialTheme.typography.labelLarge)
+        ButtonLabel(text)
     }
 }
 
@@ -222,12 +238,19 @@ fun SecondaryButton(text: String, onClick: () -> Unit, modifier: Modifier = Modi
         shape = MaterialTheme.shapes.medium,
         colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.onSurface),
         border = ButtonDefaults.outlinedButtonBorder(true).copy(brush = androidx.compose.ui.graphics.SolidColor(MaterialTheme.colorScheme.outline)),
-        contentPadding = PaddingValues(horizontal = Dimens.lg),
+        contentPadding = PaddingValues(horizontal = Dimens.md),
         modifier = modifier.fillMaxWidth().heightIn(min = Dimens.buttonHeight),
     ) {
         if (icon != null) { Icon(icon, contentDescription = null, modifier = Modifier.size(Dimens.iconSm)); Spacer(Modifier.width(Dimens.sm)) }
-        Text(text, style = MaterialTheme.typography.labelLarge)
+        ButtonLabel(text)
     }
+}
+
+@Composable
+private fun ButtonLabel(text: String) {
+    val st = MaterialTheme.typography.labelLarge
+    // Up to two lines (long translations such as Tamil), shrinking a little before giving up with "…".
+    Text(text, style = st, maxLines = 2, overflow = TextOverflow.Ellipsis, autoSize = fitOneLine(st), textAlign = TextAlign.Center)
 }
 
 /** A whole-row switch (row is the touch target, ≥ 48 dp tall). */

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- English source text. Translations live in values-<lang>/strings_mirror.xml. -->
+<resources>
+    <string name="mi_no_picture">No picture from the computer</string>
+    <string name="mi_no_decoder">This phone has no H.264/HEVC video decoder</string>
+    <string name="mi_unsupported">Unsupported stream (%1$s)</string>
+    <string name="mi_stopped">The %1$s stopped sharing its screen. If this keeps happening, allow Screen Recording for AirBridge on the %1$s.</string>
+    <string name="mi_permission">Allow Screen Recording for AirBridge on the %1$s, then try again.</string>
+    <string name="mi_codec">The %1$s can\'t encode a video format this phone decodes.</string>
+    <string name="mi_decoder_failed">Video decoder failed to start</string>
+</resources>

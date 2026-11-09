@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- English source text. Translations live in values-<lang>/strings_clipsync.xml. -->
+<resources>
+    <string name="cs_cant_read">Couldn\'t read the clipboard. Open AirBridge and try again.</string>
+    <string name="cs_no_text">Clipboard has no text</string>
+    <string name="cs_too_large">Clipboard too large to sync (max 512 KB)</string>
+    <string name="cs_copied_to">Copied to %1$s</string>
+    <string name="cs_text_too_large">Text too large to send (max 512 KB)</string>
+    <plurals name="cs_copied_n">
+        <item quantity="one">Copied to %1$d device</item>
+        <item quantity="other">Copied to %1$d devices</item>
+    </plurals>
+</resources>

@@ -50,6 +50,7 @@ class MirrorSink {
         private const val KEY_THROTTLE_MS = 500L
         private const val MAX_BACKLOG = 6
         private const val INFO_TIMEOUT_MS = 5000L
+        private const val CONSENT_WAIT_MS = 65_000L
 
         private fun mime(codec: String) = when (codec) {
             "hevc" -> MediaFormat.MIMETYPE_VIDEO_HEVC
@@ -107,6 +108,8 @@ class MirrorSink {
     private var rendered = 0L
     private var received = 0L
     private var computer = "computer"
+    /** The source is another phone (§8.7 phone as source): its own consent and wording. */
+    private var phoneSource = false
     private var stoppedBy: String? = null
     private var lastKeyReq = 0L
     private var lastAckAt = 0L
@@ -118,23 +121,24 @@ class MirrorSink {
     private class Frame(val pts: Long, val key: Boolean, val params: Boolean, val data: ByteArray, val off: Int)
 
     private val infoTimeout = Runnable {
-        if (_status.value.phase == Phase.Waiting) _status.value = Status(Phase.Failed, "No picture from the computer")
+        if (_status.value.phase == Phase.Waiting) _status.value = Status(Phase.Failed, com.shazan.airbridge.net.Hub.app.getString(com.shazan.airbridge.R.string.mi_no_picture))
     }
 
     // ------------------------------------------------------------------------------ public API
 
     /** Ask [peer] to start streaming. Safe to call again (restarts). */
-    fun start(peer: String, maxW: Int, maxH: Int, computerLabel: String = "computer") {
+    fun start(peer: String, maxW: Int, maxH: Int, computerLabel: String = "computer", sourceIsPhone: Boolean = false) {
         val codecs = decodableCodecs()
         h.post {
             computer = computerLabel
+            phoneSource = sourceIsPhone
             stoppedBy = null
             if (peerId != null && peerId != peer) PeerBus.send(peerId!!, JSONObject().put("t", "mirror_stop"))
             peerId = peer
             resetDecoder()
             _info.value = null
             if (codecs.isEmpty()) {
-                _status.value = Status(Phase.Failed, "This phone has no H.264/HEVC video decoder")
+                _status.value = Status(Phase.Failed, com.shazan.airbridge.net.Hub.app.getString(com.shazan.airbridge.R.string.mi_no_decoder))
                 return@post
             }
             _status.value = Status(Phase.Waiting)
@@ -196,15 +200,22 @@ class MirrorSink {
                         displayW = d?.optInt("w") ?: msg.optInt("w"), displayH = d?.optInt("h") ?: msg.optInt("h"),
                     )
                     if (mime(info.codec) == null || info.w <= 0 || info.h <= 0) {
-                        _status.value = Status(Phase.Failed, "Unsupported stream (${info.codec})")
+                        _status.value = Status(Phase.Failed, com.shazan.airbridge.net.Hub.app.getString(com.shazan.airbridge.R.string.mi_unsupported, info.codec))
                         return@post
                     }
                     val changed = _info.value?.let { it.codec != info.codec || it.w != info.w || it.h != info.h } ?: true
                     _info.value = info
+                    if (_status.value.phase == Phase.Waiting && _status.value.message != null) _status.value = Status(Phase.Waiting)
                     if (changed) resetDecoder()
                     h.removeCallbacks(infoTimeout)
                     h.postDelayed(infoTimeout, INFO_TIMEOUT_MS)
                     requestKey(force = true)
+                }
+                "mirror_wait" -> {
+                    // A phone source asks its user first (§8.7): wait for that, not the usual 5 s.
+                    h.removeCallbacks(infoTimeout)
+                    h.postDelayed(infoTimeout, CONSENT_WAIT_MS)
+                    _status.value = Status(Phase.Waiting, com.shazan.airbridge.net.Hub.app.getString(com.shazan.airbridge.R.string.pm_sink_allow, computer))
                 }
                 "mirror_stop" -> {
                     stoppedBy = from
@@ -215,15 +226,16 @@ class MirrorSink {
                     if (_status.value.phase != Phase.Failed) {
                         _status.value = Status(
                             Phase.Stopped,
-                            "The $computer stopped sharing its screen. If this keeps happening, allow " +
-                                "Screen Recording for AirBridge on the $computer.",
+                            com.shazan.airbridge.net.Hub.app.getString(
+                                if (phoneSource) com.shazan.airbridge.R.string.pm_sink_stopped else com.shazan.airbridge.R.string.mi_stopped, computer),
                         )
                     }
                 }
                 "error" -> {
                     val text = when (msg.optString("code")) {
-                        "mirror_permission" -> "Allow Screen Recording for AirBridge on the $computer, then try again."
-                        "mirror_codec" -> "The $computer can't encode a video format this phone decodes."
+                        "mirror_permission" -> com.shazan.airbridge.net.Hub.app.getString(
+                            if (phoneSource) com.shazan.airbridge.R.string.pm_sink_denied else com.shazan.airbridge.R.string.mi_permission, computer)
+                        "mirror_codec" -> com.shazan.airbridge.net.Hub.app.getString(com.shazan.airbridge.R.string.mi_codec, computer)
                         else -> return@post
                     }
                     h.removeCallbacks(infoTimeout)
@@ -324,7 +336,7 @@ class MirrorSink {
         } catch (t: Throwable) {
             Log.w(TAG, "Decoder configure failed", t)
             releaseCodec()
-            _status.value = Status(Phase.Failed, "Video decoder failed to start")
+            _status.value = Status(Phase.Failed, com.shazan.airbridge.net.Hub.app.getString(com.shazan.airbridge.R.string.mi_decoder_failed))
             false
         }
     }

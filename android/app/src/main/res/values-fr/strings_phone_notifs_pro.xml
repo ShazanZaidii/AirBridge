@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="pn_listener_name">Notifications AirBridge</string>
+    <string name="pn_section">Notifications et appels</string>
+
+    <string name="pn_notifs_title">Afficher les notifications du téléphone sur vos ordinateurs</string>
+    <string name="pn_notifs_sub">Consultez-les, répondez-y ou effacez-les depuis votre Mac ou PC associé. Elles sont chiffrées et ne vont que vers vos propres appareils.</string>
+    <string name="pn_access_off_title">L\'accès aux notifications est désactivé</string>
+    <string name="pn_access_off_sub">Activez « %1$s » dans les paramètres du système. Si le bouton est grisé, ouvrez d\'abord Infos sur l\'appli › ⋮ › Autoriser les paramètres restreints, puis réessayez.</string>
+    <string name="pn_app_info">Infos sur l\'appli</string>
+
+    <string name="pn_access_dialog_title">Les notifications sur vos ordinateurs</string>
+    <string name="pn_access_dialog_body">AirBridge lira les notifications de ce téléphone et les affichera sur les ordinateurs que vous avez associés, pour que vous puissiez y répondre ou les effacer directement depuis l\'ordinateur.\n\nElles sont chiffrées, envoyées uniquement à vos propres appareils associés et jamais mises en ligne. Rien n\'est envoyé tant que ce bouton est désactivé.\n\nSur l\'écran suivant, activez « %1$s ». Si le bouton est grisé, revenez en arrière, ouvrez Infos sur l\'appli › ⋮ › Autoriser les paramètres restreints, puis réessayez.</string>
+    <string name="pn_continue">Continuer</string>
+
+    <string name="pn_apps_title">Applis</string>
+    <string name="pn_apps_all">Toutes les applis</string>
+    <plurals name="pn_apps_muted">
+        <item quantity="one">%1$d appli masquée</item>
+        <item quantity="many">%1$d applis masquées</item>
+        <item quantity="other">%1$d applis masquées</item>
+    </plurals>
+    <string name="pn_apps_header">Les notifications des applis activées arrivent sur vos ordinateurs. Les applis qui en ont envoyé récemment apparaissent en premier.</string>
+    <string name="pn_apps_loading">Chargement des applis…</string>
+    <string name="pn_private_hint">Si l\'écran de verrouillage masque le contenu sensible, les notifications attendent que vous ayez déverrouillé le téléphone.</string>
+
+    <string name="pn_calls_title">Les appels sur votre ordinateur</string>
+    <string name="pn_calls_sub">Voyez qui vous appelle, puis répondez, refusez ou raccrochez depuis votre ordinateur. Le son de l\'appel reste sur votre téléphone.</string>
+    <string name="pn_calls_dialog_body">Pour afficher les appels et vous permettre d\'y répondre ou de raccrocher, AirBridge a besoin de l\'autorisation Téléphone. L\'autorisation Contacts est facultative et sert seulement à afficher les noms à la place des numéros.\n\nL\'appel lui-même reste sur votre téléphone : parlez via son haut-parleur, son écouteur ou un casque Bluetooth. Android ne permet pas aux applis de transférer le son d\'un appel vers un ordinateur.\n\nLes détails des appels sont chiffrés et envoyés uniquement à vos propres appareils associés.</string>
+    <string name="pn_calls_limited_title">L\'autorisation Téléphone est désactivée</string>
+    <string name="pn_calls_limited_sub">Seuls les appels que votre appli Téléphone affiche dans une notification arrivent sur votre ordinateur, et il est possible que vous ne puissiez pas répondre. Autorisez Téléphone dans les autorisations de l\'appli.</string>
+
+    <string name="promirror_notif_title">Activez le débogage sans fil</string>
+    <string name="promirror_notif_text">Touchez pour ouvrir les Options pour les développeurs et utiliser la duplication d\'écran Pro</string>
+</resources>

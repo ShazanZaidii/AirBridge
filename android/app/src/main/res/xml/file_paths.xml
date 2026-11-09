@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Where received files live before Android 10 (see Saver.create): the public Downloads folder, or the app's own
+     external or internal files when that permission is missing. -->
+<paths>
+    <external-path name="downloads" path="Download/AirBridge Transfers/" />
+    <external-files-path name="app_downloads" path="Download/AirBridge Transfers/" />
+    <files-path name="internal" path="AirBridge Transfers/" />
+</paths>
