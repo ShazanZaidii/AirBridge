@@ -11,14 +11,14 @@
     <string name="aw_start_failed">Couldn\'t start AirWeb</string>
     <string name="aw_start_failed_sub">Another app may be using the network ports. Try again.</string>
     <string name="aw_try_again">Try again</string>
-    <string name="aw_files_to_send">Files to send</string>
+    <string name="aw_files_to_send">Shared by this phone</string>
     <string name="aw_nothing_added">Nothing added</string>
-    <string name="aw_nothing_added_sub">The other person can still send files to this phone. Add files to send them some.</string>
+    <string name="aw_nothing_added_sub">Everyone connected can add files too. Add some here to share them.</string>
     <string name="aw_downloaded_ago">Downloaded: %1$s</string>
     <string name="aw_remove">Remove %1$s</string>
-    <string name="aw_received">Received</string>
+    <string name="aw_received">Added by others</string>
     <string name="aw_nothing_yet">Nothing yet</string>
-    <string name="aw_nothing_yet_sub">Files sent from the other device appear here and in %1$s.</string>
+    <string name="aw_nothing_yet_sub">Files that others add appear here and in %1$s.</string>
     <string name="aw_tap_to_open">Tap to open</string>
     <string name="aw_didnt_finish">Didn\'t finish</string>
     <string name="aw_receiving_pct">Receiving · %1$d%%</string>
@@ -29,4 +29,13 @@
     <string name="aw_qr_desc">QR code for the AirWeb link</string>
     <string name="aw_no_app">No app can open this file</string>
     <string name="aw_add_files">Add files</string>
+    <string name="aw_connected_none">No one connected yet</string>
+    <string name="aw_connected_none_sub">Everyone who joins sees the same files and can add or download.</string>
+    <string name="aw_from">From %1$s</string>
+    <string name="aw_stop_sharing">Stop sharing %1$s</string>
+    <string name="aw_not_shared">Not shared</string>
+    <plurals name="aw_connected">
+        <item quantity="one">%d device connected</item>
+        <item quantity="other">%d devices connected</item>
+    </plurals>
 </resources>

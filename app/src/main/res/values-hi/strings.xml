@@ -27,14 +27,14 @@
     <string name="aw_start_failed">एयरवेब शुरू नहीं हो सका</string>
     <string name="aw_start_failed_sub">हो सकता है कोई दूसरा ऐप्लिकेशन नेटवर्क पोर्ट इस्तेमाल कर रहा हो। फिर से कोशिश करें।</string>
     <string name="aw_try_again">फिर से कोशिश करें</string>
-    <string name="aw_files_to_send">भेजने के लिए फ़ाइलें</string>
+    <string name="aw_files_to_send">इस फ़ोन से साझा की गई फ़ाइलें</string>
     <string name="aw_nothing_added">कुछ नहीं जोड़ा गया</string>
-    <string name="aw_nothing_added_sub">दूसरा व्यक्ति फिर भी इस फ़ोन पर फ़ाइलें भेज सकता है। उन्हें कुछ भेजना हो तो फ़ाइलें जोड़ें।</string>
+    <string name="aw_nothing_added_sub">जुड़े हुए सभी लोग भी फ़ाइलें जोड़ सकते हैं। साझा करने के लिए यहां कुछ फ़ाइलें जोड़ें।</string>
     <string name="aw_downloaded_ago">डाउनलोड किया गया: %1$s</string>
     <string name="aw_remove">%1$s हटाएं</string>
-    <string name="aw_received">मिली फ़ाइलें</string>
+    <string name="aw_received">दूसरों की जोड़ी फ़ाइलें</string>
     <string name="aw_nothing_yet">अभी कुछ नहीं</string>
-    <string name="aw_nothing_yet_sub">दूसरे डिवाइस से भेजी गई फ़ाइलें यहां और %1$s में दिखेंगी।</string>
+    <string name="aw_nothing_yet_sub">दूसरों की जोड़ी गई फ़ाइलें यहां और %1$s में दिखेंगी।</string>
     <string name="aw_tap_to_open">खोलने के लिए टैप करें</string>
     <string name="aw_didnt_finish">पूरा नहीं हुआ</string>
     <string name="aw_receiving_pct">आ रही है · %1$d%%</string>
@@ -425,4 +425,14 @@
     <string name="xf_cancelled_by">%1$s ने रद्द किया</string>
     <string name="xf_in_failed">%1$s से ट्रांसफ़र नहीं हो सका</string>
     <string name="xf_received_from">%1$s से फ़ाइल मिल गई</string>
+    <string name="xfer_tap_open">खोलने के लिए टैप करें</string>
+    <string name="aw_connected_none">अभी कोई जुड़ा नहीं है</string>
+    <string name="aw_connected_none_sub">जो भी जुड़ेगा, उसे वही फ़ाइलें दिखेंगी और वह फ़ाइलें जोड़ या डाउनलोड कर सकेगा।</string>
+    <string name="aw_from">%1$s से</string>
+    <string name="aw_stop_sharing">%1$s को साझा करना बंद करें</string>
+    <string name="aw_not_shared">साझा नहीं है</string>
+    <plurals name="aw_connected">
+        <item quantity="one">%d डिवाइस जुड़ा है</item>
+        <item quantity="other">%d डिवाइस जुड़े हैं</item>
+    </plurals>
 </resources>

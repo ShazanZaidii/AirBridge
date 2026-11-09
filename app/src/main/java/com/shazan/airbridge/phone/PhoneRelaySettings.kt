@@ -19,7 +19,6 @@ object PhoneRelaySettings {
     private const val PREFS = "AirBridgePrefs"
     const val PREF_NOTIFS = "PHONE_NOTIFS_ON"
     const val PREF_CALLS = "PHONE_CALLS_ON"
-    const val PREF_SPEAKER = "PHONE_CALLS_SPEAKER"
     const val PREF_MUTED = "PHONE_NOTIFS_MUTED_APPS"
     const val PREF_SEEN = "PHONE_NOTIFS_SEEN_APPS"
 
@@ -60,11 +59,6 @@ object PhoneRelaySettings {
         get() = _calls.value
         set(v) { _calls.value = v; prefs?.edit()?.putBoolean(PREF_CALLS, v)?.apply() }
 
-    var speakerOnAnswer: Boolean
-        // Off by default: the voice can go through the computer now, and forcing the speaker from outside the
-        // dialer can stop the phone's own Speaker button from working on some phones.
-        get() = prefs?.getBoolean(PREF_SPEAKER, false) ?: false
-        set(v) { prefs?.edit()?.putBoolean(PREF_SPEAKER, v)?.apply() }
 
     fun isMuted(pkg: String): Boolean = pkg in _muted.value
 

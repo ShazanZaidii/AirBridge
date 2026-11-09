@@ -76,7 +76,8 @@ class AirWebServerTest {
 
     @Before fun setUp() {
         dir = Files.createTempDirectory("airweb").toFile()
-        server = AirWebServer(token, host)
+        // One test machine is every "browser" here, so the per-address cap is lifted (AirWebPoolTest covers it).
+        server = AirWebServer(token, host, AirWebServer.Limits(perIp = 10_000))
         port = server.start(0, 0..0) // any free port
     }
 
@@ -171,7 +172,9 @@ class AirWebServerTest {
         val json = String(body)
         val now = Regex("\"now\":(\\d+),").find(json)!!.groupValues[1].toLong()
         assertTrue(now >= before - 5_000 && now <= System.currentTimeMillis())
-        assertEquals("{\"name\":\"Dad's \\u003cPhone>\",\"free\":12345,\"now\":$now,\"files\":[{\"id\":1,\"name\":\"a \\\"quoted\\\" name.txt\",\"size\":5,\"added\":0}]}", json)
+        val v = Regex("\"v\":\"([0-9a-f]+)\"").find(json)!!.groupValues[1]
+        assertEquals("{\"name\":\"Dad's \\u003cPhone>\",\"free\":12345,\"now\":$now,\"poll\":2000,\"v\":\"$v\",\"count\":0,\"peers\":[]," +
+            "\"files\":[{\"id\":1,\"name\":\"a \\\"quoted\\\" name.txt\",\"size\":5,\"added\":0}]}", json)
     }
 
     @Test fun downloadStreamsTheExactBytesWithHeaders() {

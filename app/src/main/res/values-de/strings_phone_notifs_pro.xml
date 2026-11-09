@@ -24,12 +24,10 @@
     <string name="pn_private_hint">Wenn der Sperrbildschirm vertrauliche Inhalte ausblendet, warten Benachrichtigungen, bis du das Smartphone entsperrst.</string>
 
     <string name="pn_calls_title">Anrufe auf deinem Computer</string>
-    <string name="pn_calls_sub">Sieh, wer anruft, und nimm den Anruf am Computer an, lehne ihn ab oder beende ihn. Auf einem Mac kannst du auch darüber telefonieren.</string>
+    <string name="pn_calls_sub">Sieh, wer anruft, und nimm den Anruf am Computer an, lehne ihn ab oder beende ihn. Der Ton bleibt auf deinem Smartphone.</string>
     <string name="pn_calls_dialog_body">Damit AirBridge Anrufe anzeigen, annehmen und beenden kann, braucht es die Berechtigung „Telefon“. „Kontakte“ ist optional und dient nur dazu, Namen statt Nummern anzuzeigen.\n\nDas Gespräch selbst bleibt auf deinem Smartphone: Sprich über den Lautsprecher, die Hörmuschel oder ein Bluetooth-Headset. Android erlaubt Apps nicht, den Ton eines Anrufs an einen Computer weiterzugeben.\n\nAnrufdetails werden verschlüsselt nur an deine eigenen gekoppelten Geräte gesendet.</string>
     <string name="pn_calls_limited_title">Telefon-Berechtigung ist aus</string>
     <string name="pn_calls_limited_sub">Nur Anrufe, die deine Telefon-App als Benachrichtigung zeigt, erreichen deinen Computer, und das Annehmen klappt eventuell nicht. Erlaube „Telefon“ in den App-Berechtigungen.</string>
-    <string name="pn_speaker_title">Lautsprecher an, wenn am Computer angenommen</string>
-    <string name="pn_speaker_sub">So kannst du direkt vom Schreibtisch aus sprechen. Manche Smartphones lassen das nicht zu.</string>
 
     <string name="promirror_notif_title">Debugging über WLAN aktivieren</string>
     <string name="promirror_notif_text">Tippe, um die Entwickleroptionen für die Pro-Spiegelung zu öffnen</string>
