@@ -74,6 +74,7 @@ object InputRouter {
     /** Message types handled by the target role. */
     private val TARGET_TYPES = setOf(
         "ctl_enter", "ctl_leave", "ptr_move", "ptr_scroll", "ptr_btn", "ptr_click", "ptr_abs", "key", "action",
+        "drag_carry", "drag_drop", "drag_cancel", // §8.8 carried drag (ghost only; files come as §6 transfers)
     )
 
     /** Idempotent; call from the accessibility service and from TrackpadActivity. */
@@ -97,7 +98,7 @@ object InputRouter {
         try {
             val type = msg.optString("t")
             if (type == "ctl_busy") {
-                val holder = msg.optString("holder", "").ifBlank { "another device" }
+                val holder = msg.optString("holder", "").ifBlank { com.shazan.airbridge.net.Hub.app.getString(com.shazan.airbridge.R.string.another_device) }
                 _busy.update { it + (peerId to BusyInfo(holder, System.currentTimeMillis())) }
                 return
             }
@@ -108,10 +109,11 @@ object InputRouter {
                     val r = CapsReport(on, capsSeq.incrementAndGet())
                     _caps.update { it + (peerId to r) }
                 }
-                "mirror_info", "mirror_stop" -> mirrorControl?.invoke(peerId, msg)
+                "mirror_info", "mirror_stop", "mirror_wait", "mirror_state" -> mirrorControl?.invoke(peerId, msg)
                 // Only reaches us if the network half routes it (not in CONTROL_TYPES today).
                 "error" -> if (msg.optString("code").startsWith("mirror_")) mirrorControl?.invoke(peerId, msg)
-                // We never advertise mirror_source: mirror_start/key/ack addressed to us are ignored.
+                // mirror_start/key/ack addressed to us (phone as source) are handled by mirror.PhoneMirror in the
+                // network half and never get here.
                 in TARGET_TYPES -> {
                     val t = target
                     if (t != null && AirBridgeInputService.isRunning) t.onControl(peerId, msg)

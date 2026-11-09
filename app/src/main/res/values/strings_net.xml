@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- English source text. Translations live in values-<lang>/strings_net.xml. -->
+<resources>
+    <string name="kind_android">Android phone</string>
+    <string name="kind_linux">Linux computer</string>
+    <string name="kind_unknown">Unknown device</string>
+</resources>

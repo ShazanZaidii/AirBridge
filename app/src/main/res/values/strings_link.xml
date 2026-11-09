@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- English source text. Translations live in values-<lang>/strings_link.xml. -->
+<resources>
+    <string name="lk_no_go">This PC can\'t host a Wi-Fi Direct link</string>
+    <string name="lk_hotspot">Turn off Mobile Hotspot on the PC to use a direct link</string>
+    <string name="lk_radio_off">Turn on Wi-Fi to use a direct link</string>
+    <string name="lk_join_failed">Couldn\'t join the PC\'s direct Wi-Fi</string>
+    <string name="lk_no_ip">The direct Wi-Fi link got no address</string>
+    <string name="lk_denied">The Wi-Fi connection request was declined</string>
+    <string name="lk_vpn">A VPN is blocking the direct link</string>
+    <string name="lk_api">This phone can\'t join Wi-Fi Direct links (Android 10 or later needed)</string>
+    <string name="lk_timeout">The direct link took too long to set up</string>
+    <string name="lk_busy">Another direct link is already being set up</string>
+    <string name="lk_user">Direct link cancelled</string>
+    <string name="lk_unavailable">Direct link unavailable</string>
+    <string name="lk_fallback">%1$s. Sending over the current connection.</string>
+</resources>

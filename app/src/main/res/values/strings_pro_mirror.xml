@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- English source text for the computer's Pro mirroring helper (PROTOCOL §8.9, Wireless debugging). -->
+<resources>
+    <string name="promirror_notif_title">Turn on Wireless debugging</string>
+    <string name="promirror_notif_text">Tap to open Developer options for Pro mirroring</string>
+</resources>

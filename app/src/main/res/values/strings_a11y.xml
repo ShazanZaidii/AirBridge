@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- English source text. Translations live in values-<lang>/strings_a11y.xml. -->
+<resources>
+    <string name="a11y_core_title">Control from your computer</string>
+    <string name="a11y_core_sub">Required. \"%1$s\" shows the cursor, taps, scrolls and does back, home and volume. It can\'t read your screen.</string>
+    <string name="tp_on_cap">On</string>
+    <string name="a11y_text_title">Typing &amp; clipboard (optional) · %1$s</string>
+    <string name="tp_off_cap">Off</string>
+    <string name="a11y_text_body">\"%1$s\" can read the text field you\'re typing in, so your computer can type, copy and paste there, and it notices when you copy so the text is sent automatically. Banking and UPI apps may warn about accessibility services that read the screen: switch it off while paying. Without it, remote control still works and the bubble sends your clipboard.</string>
+    <string name="a11y_keepalive_vivo">Service keeps turning off? On vivo / iQOO phones the system closes background apps and Android then switches their accessibility services off. In Settings › Battery › Background power consumption management, allow high background power consumption for AirBridge, and lock AirBridge in Recents (swipe its card down or tap the lock). Menu names differ between OriginOS / Funtouch versions.</string>
+    <string name="a11y_keepalive">Service keeps turning off? Some phones close background apps, and Android then switches their accessibility services off. Set AirBridge\'s battery use to unrestricted and lock it in Recents if your phone offers that.</string>
+    <string name="app_settings">App settings</string>
+</resources>

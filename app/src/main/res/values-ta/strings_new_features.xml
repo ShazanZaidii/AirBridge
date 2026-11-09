@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="drag_items">
+        <item quantity="one">%d உருப்படி</item>
+        <item quantity="other">%d உருப்படிகள்</item>
+    </plurals>
+    <string name="drag_and_more">%1$s மற்றும் பிற</string>
+    <string name="drag_receiving_one">%2$s-இலிருந்து %1$s வருகிறது</string>
+    <plurals name="drag_receiving_many">
+        <item quantity="one">%2$s-இலிருந்து %1$d உருப்படி வருகிறது</item>
+        <item quantity="other">%2$s-இலிருந்து %1$d உருப்படிகள் வருகின்றன</item>
+    </plurals>
+    <string name="pm_channel_request">திரைப் பகிர்வுக் கோரிக்கைகள்</string>
+    <string name="pm_channel_ongoing">திரைப் பகிர்வு</string>
+    <string name="pm_request_title">%1$s இந்த ஃபோனின் திரையைக் காட்ட விரும்புகிறது</string>
+    <string name="pm_request_text">அனுமதிக்கத் தட்டவும்</string>
+    <string name="pm_request_decline">இப்போது வேண்டாம்</string>
+    <string name="pm_ongoing_title">உங்கள் திரை %1$s-இல் தெரிகிறது</string>
+    <string name="pm_ongoing_text">திரையில் உள்ள அனைத்தும் அங்கே தெரியும்</string>
+    <string name="pm_stop">நிறுத்து</string>
+    <string name="pm_sink_allow">%1$s-இல் அனுமதி என்பதைத் தட்டவும்</string>
+    <string name="pm_sink_denied">%1$s திரைப் பகிர்வை அனுமதிக்கவில்லை</string>
+    <string name="pm_sink_stopped">%1$s திரைப் பகிர்வை நிறுத்தியது</string>
+    <string name="lk_fallback">%1$s. தற்போதைய இணைப்பில் அனுப்புகிறது.</string>
+</resources>

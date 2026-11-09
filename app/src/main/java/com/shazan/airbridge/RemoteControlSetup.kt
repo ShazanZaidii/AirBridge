@@ -49,13 +49,13 @@ object RemoteControlSetup {
     /** "Your Mac" / "Your PC" / "Your computer" for the paired devices (or the one that asked). */
     fun controllerNoun(plat: String? = null): String {
         val plats = plat?.let { setOf(it) } ?: try { PairStore.all().map { it.plat }.toSet() } catch (_: Throwable) { emptySet() }
-        return when {
-            "macos" in plats -> "Your Mac"
-            "windows" in plats -> "Your PC"
-            "linux" in plats -> "Your computer"
-            plats.isNotEmpty() && plats.all { it == "android" } -> "Your other phone"
-            else -> "Your computer"
-        }
+        return com.shazan.airbridge.net.Hub.app.getString(when {
+            "macos" in plats -> R.string.your_mac
+            "windows" in plats -> R.string.your_pc
+            "linux" in plats -> R.string.your_computer
+            plats.isNotEmpty() && plats.all { it == "android" } -> R.string.your_other_phone
+            else -> R.string.your_computer
+        })
     }
 
     /** A `ctl_enter` from [plat] was answered `unavailable` because the service is off. */
@@ -63,8 +63,8 @@ object RemoteControlSetup {
         try {
             setDismissed(false)
             if (!notifyLimit.tryAcquire(System.currentTimeMillis())) return
-            val title = "${controllerNoun(plat)} can't control this phone yet"
-            val text = "Turn on \"AirBridge Universal Control\" in Accessibility settings"
+            val title = ctx.getString(R.string.cant_control_yet, controllerNoun(plat))
+            val text = ctx.getString(R.string.setup_turn_on_short, ctx.getString(R.string.svc_core_name))
             val open = PendingIntent.getActivity(
                 ctx, 7, settingsIntent(), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
@@ -72,9 +72,9 @@ object RemoteControlSetup {
                 .setSmallIcon(R.drawable.ic_stat_name)
                 .setContentTitle(title)
                 .setContentText(text)
-                .setStyle(NotificationCompat.BigTextStyle().bigText("$text so the cursor can appear and your clicks reach this phone."))
+                .setStyle(NotificationCompat.BigTextStyle().bigText(ctx.getString(R.string.setup_turn_on_long, ctx.getString(R.string.svc_core_name))))
                 .setContentIntent(open)
-                .addAction(0, "Turn on", open)
+                .addAction(0, ctx.getString(R.string.turn_on), open)
                 .setAutoCancel(true)
                 .setCategory(NotificationCompat.CATEGORY_STATUS)
                 .build()

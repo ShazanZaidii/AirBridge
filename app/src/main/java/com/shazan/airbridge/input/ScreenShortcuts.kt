@@ -81,53 +81,54 @@ const val KEYBOARD_TOGGLE = "@keyboard"
  * the left, system on the right. Only actions the target understands are listed.
  */
 object ScreenShortcuts {
+    private fun t(id: Int) = com.shazan.airbridge.net.Hub.app.getString(id)
     fun left(platform: String): List<Shortcut> = when (platform) {
         "android" -> listOf(
-            Shortcut(KEYBOARD_TOGGLE, "Keyboard", Icons.Outlined.Keyboard, "Show or hide the keyboard"),
-            Shortcut("back", "Back", Icons.AutoMirrored.Outlined.ArrowBack),
-            Shortcut("home", "Home", Icons.Outlined.Home),
-            Shortcut("recents", "Recents", Icons.Outlined.FilterNone, "Recent apps"),
-            Shortcut("app_drawer", "Apps", Icons.Outlined.Apps, "All apps"),
+            Shortcut(KEYBOARD_TOGGLE, t(com.shazan.airbridge.R.string.ss_keyboard), Icons.Outlined.Keyboard, t(com.shazan.airbridge.R.string.ss_show_or_hide_the_keyboard_d)),
+            Shortcut("back", t(com.shazan.airbridge.R.string.ss_back), Icons.AutoMirrored.Outlined.ArrowBack),
+            Shortcut("home", t(com.shazan.airbridge.R.string.ss_home), Icons.Outlined.Home),
+            Shortcut("recents", t(com.shazan.airbridge.R.string.ss_recents), Icons.Outlined.FilterNone, t(com.shazan.airbridge.R.string.ss_recent_apps_d)),
+            Shortcut("app_drawer", t(com.shazan.airbridge.R.string.ss_apps), Icons.Outlined.Apps, t(com.shazan.airbridge.R.string.ss_all_apps_d)),
         )
         "windows" -> listOf(
-            Shortcut(KEYBOARD_TOGGLE, "Keyboard", Icons.Outlined.Keyboard, "Show or hide the keyboard"),
-            Shortcut("mission_control", "Task View", Icons.Outlined.SpaceDashboard),
-            Shortcut("app_expose", "Switch", Icons.Outlined.FilterNone, "Switch windows"),
-            Shortcut("desktop_left", "Desktop", Icons.Outlined.KeyboardDoubleArrowLeft, "Previous desktop"),
-            Shortcut("desktop_right", "Desktop", Icons.Outlined.KeyboardDoubleArrowRight, "Next desktop"),
-            Shortcut("app_drawer", "Start", Icons.Outlined.Apps, "Start menu"),
+            Shortcut(KEYBOARD_TOGGLE, t(com.shazan.airbridge.R.string.ss_keyboard), Icons.Outlined.Keyboard, t(com.shazan.airbridge.R.string.ss_show_or_hide_the_keyboard_d)),
+            Shortcut("mission_control", t(com.shazan.airbridge.R.string.ss_task_view), Icons.Outlined.SpaceDashboard),
+            Shortcut("app_expose", t(com.shazan.airbridge.R.string.ss_switch), Icons.Outlined.FilterNone, t(com.shazan.airbridge.R.string.ss_switch_windows_d)),
+            Shortcut("desktop_left", t(com.shazan.airbridge.R.string.ss_desktop), Icons.Outlined.KeyboardDoubleArrowLeft, t(com.shazan.airbridge.R.string.ss_previous_desktop_d)),
+            Shortcut("desktop_right", t(com.shazan.airbridge.R.string.ss_desktop), Icons.Outlined.KeyboardDoubleArrowRight, t(com.shazan.airbridge.R.string.ss_next_desktop_d)),
+            Shortcut("app_drawer", t(com.shazan.airbridge.R.string.ss_start), Icons.Outlined.Apps, t(com.shazan.airbridge.R.string.ss_start_menu_d)),
         )
         else -> listOf(
-            Shortcut(KEYBOARD_TOGGLE, "Keyboard", Icons.Outlined.Keyboard, "Show or hide the keyboard"),
-            Shortcut("mission_control", "Mission", Icons.Outlined.SpaceDashboard, "Mission Control"),
-            Shortcut("app_expose", "Windows", Icons.Outlined.FilterNone, "App Exposé"),
-            Shortcut("desktop_left", "Space", Icons.Outlined.KeyboardDoubleArrowLeft, "Space on the left"),
-            Shortcut("desktop_right", "Space", Icons.Outlined.KeyboardDoubleArrowRight, "Space on the right"),
-            Shortcut("app_drawer", "Apps", Icons.Outlined.Apps, "Launchpad"),
+            Shortcut(KEYBOARD_TOGGLE, t(com.shazan.airbridge.R.string.ss_keyboard), Icons.Outlined.Keyboard, t(com.shazan.airbridge.R.string.ss_show_or_hide_the_keyboard_d)),
+            Shortcut("mission_control", t(com.shazan.airbridge.R.string.ss_mission), Icons.Outlined.SpaceDashboard, t(com.shazan.airbridge.R.string.ss_mission_control_d)),
+            Shortcut("app_expose", t(com.shazan.airbridge.R.string.ss_windows), Icons.Outlined.FilterNone, t(com.shazan.airbridge.R.string.ss_app_expos_d)),
+            Shortcut("desktop_left", t(com.shazan.airbridge.R.string.ss_space), Icons.Outlined.KeyboardDoubleArrowLeft, t(com.shazan.airbridge.R.string.ss_space_on_the_left_d)),
+            Shortcut("desktop_right", t(com.shazan.airbridge.R.string.ss_space), Icons.Outlined.KeyboardDoubleArrowRight, t(com.shazan.airbridge.R.string.ss_space_on_the_right_d)),
+            Shortcut("app_drawer", t(com.shazan.airbridge.R.string.ss_apps), Icons.Outlined.Apps, t(com.shazan.airbridge.R.string.ss_launchpad_d)),
         )
     }
 
     fun right(platform: String): List<Shortcut> = when (platform) {
         "android" -> listOf(
-            Shortcut("notifications", "Alerts", Icons.Outlined.Notifications, "Notifications"),
-            Shortcut("quick_settings", "Settings", Icons.Outlined.Tune, "Quick settings"),
-            Shortcut("vol_up", "Vol +", Icons.AutoMirrored.Outlined.VolumeUp, "Volume up"),
-            Shortcut("vol_down", "Vol −", Icons.AutoMirrored.Outlined.VolumeDown, "Volume down"),
-            Shortcut("lock", "Lock", Icons.Outlined.Lock, "Lock screen"),
+            Shortcut("notifications", t(com.shazan.airbridge.R.string.ss_alerts), Icons.Outlined.Notifications, t(com.shazan.airbridge.R.string.ss_notifications_d)),
+            Shortcut("quick_settings", t(com.shazan.airbridge.R.string.ss_settings), Icons.Outlined.Tune, t(com.shazan.airbridge.R.string.ss_quick_settings_d)),
+            Shortcut("vol_up", t(com.shazan.airbridge.R.string.ss_vol_up), Icons.AutoMirrored.Outlined.VolumeUp, t(com.shazan.airbridge.R.string.ss_volume_up_d)),
+            Shortcut("vol_down", t(com.shazan.airbridge.R.string.ss_vol_down), Icons.AutoMirrored.Outlined.VolumeDown, t(com.shazan.airbridge.R.string.ss_volume_down_d)),
+            Shortcut("lock", t(com.shazan.airbridge.R.string.ss_lock), Icons.Outlined.Lock, t(com.shazan.airbridge.R.string.ss_lock_screen_d)),
         )
         "windows" -> listOf(
-            Shortcut("spotlight", "Search", Icons.Outlined.Search),
-            Shortcut("notifications", "Alerts", Icons.Outlined.Notifications, "Notifications"),
-            Shortcut("screenshot", "Capture", Icons.Outlined.Crop, "Screenshot"),
-            Shortcut("lock", "Lock", Icons.Outlined.Lock, "Lock screen"),
+            Shortcut("spotlight", t(com.shazan.airbridge.R.string.ss_search), Icons.Outlined.Search),
+            Shortcut("notifications", t(com.shazan.airbridge.R.string.ss_alerts), Icons.Outlined.Notifications, t(com.shazan.airbridge.R.string.ss_notifications_d)),
+            Shortcut("screenshot", t(com.shazan.airbridge.R.string.ss_capture), Icons.Outlined.Crop, t(com.shazan.airbridge.R.string.ss_screenshot_d)),
+            Shortcut("lock", t(com.shazan.airbridge.R.string.ss_lock), Icons.Outlined.Lock, t(com.shazan.airbridge.R.string.ss_lock_screen_d)),
         )
         else -> listOf(
-            Shortcut("spotlight", "Spotlight", Icons.Outlined.Search),
-            Shortcut("dock_toggle", "Dock", Icons.Outlined.CallToAction, "Show or hide the Dock"),
-            Shortcut("menu_bar_toggle", "Menu bar", Icons.Outlined.WebAsset, "Show or hide the menu bar"),
-            Shortcut("notifications", "Alerts", Icons.Outlined.Notifications, "Notification Center"),
-            Shortcut("screenshot", "Capture", Icons.Outlined.Crop, "Screenshot"),
-            Shortcut("lock", "Lock", Icons.Outlined.Lock, "Lock screen"),
+            Shortcut("spotlight", t(com.shazan.airbridge.R.string.ss_spotlight), Icons.Outlined.Search),
+            Shortcut("dock_toggle", t(com.shazan.airbridge.R.string.ss_dock), Icons.Outlined.CallToAction, t(com.shazan.airbridge.R.string.ss_show_or_hide_the_dock_d)),
+            Shortcut("menu_bar_toggle", t(com.shazan.airbridge.R.string.ss_menu_bar), Icons.Outlined.WebAsset, t(com.shazan.airbridge.R.string.ss_show_or_hide_the_menu_bar_d)),
+            Shortcut("notifications", t(com.shazan.airbridge.R.string.ss_alerts), Icons.Outlined.Notifications, t(com.shazan.airbridge.R.string.ss_notification_center_d)),
+            Shortcut("screenshot", t(com.shazan.airbridge.R.string.ss_capture), Icons.Outlined.Crop, t(com.shazan.airbridge.R.string.ss_screenshot_d)),
+            Shortcut("lock", t(com.shazan.airbridge.R.string.ss_lock), Icons.Outlined.Lock, t(com.shazan.airbridge.R.string.ss_lock_screen_d)),
         )
     }
 }

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- English source text. Translations live in values-<lang>/strings_tile.xml. -->
+<resources>
+    <plurals name="tile_sync_n">
+        <item quantity="one">Sync %1$d device</item>
+        <item quantity="other">Sync %1$d devices</item>
+    </plurals>
+</resources>

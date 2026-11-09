@@ -50,9 +50,13 @@ class AirBridgeService : Service() {
         @Volatile var isRunning = false
             private set
 
-        /** Run while anything is paired or the phone is visible to nearby phones. */
+        /**
+         * Run while anything is paired, a connection is open or being set up (a first pairing, over Wi-Fi or
+         * Nearby), or the phone is visible to nearby phones. Stopping closes every connection, so a phone with
+         * nothing paired yet must not stop in the middle of pairing.
+         */
         fun shouldRun(ctx: Context): Boolean =
-            !PairStore.isEmpty() || Hub.isPairing() ||
+            !PairStore.isEmpty() || Hub.isPairing() || Hub.hasLiveSessions() || NearbyTransport.isBusy() ||
                 ctx.getSharedPreferences("AirBridgePrefs", Context.MODE_PRIVATE).getBoolean(NearbyTransport.PREF_VISIBLE, false)
 
         fun start(ctx: Context, action: String? = null) {
@@ -134,8 +138,8 @@ class AirBridgeService : Service() {
                     session == null
                 }
                 if (gone.isNotEmpty()) {
-                    val names = gone.map { id -> PairStore.all().firstOrNull { it.id == id }?.name ?: "Device" }
-                    Hub.toast("${names.joinToString(", ")} ${if (names.size == 1) "is" else "are"} not connected")
+                    val names = gone.map { id -> PairStore.all().firstOrNull { it.id == id }?.name ?: getString(R.string.plat_device) }
+                    Hub.toast(resources.getQuantityString(R.plurals.svc_not_connected, names.size, names.joinToString(", ")))
                 }
             }
             ACTION_REFRESH_BUBBLE -> refreshBubble()
@@ -159,9 +163,9 @@ class AirBridgeService : Service() {
     private fun buildNotification(peers: List<PairedPeer>, status: Map<String, PeerStatus>): Notification {
         val connected = peers.filter { status[it.id] == PeerStatus.CONNECTED }.map { it.name }
         val (title, text) = when {
-            connected.isNotEmpty() -> "Connected" to connected.joinToString(", ")
-            peers.isNotEmpty() -> "Waiting for devices" to "${peers.size} paired, none reachable right now"
-            else -> "Visible to nearby phones" to "Open AirBridge to pair"
+            connected.isNotEmpty() -> getString(R.string.st_connected) to connected.joinToString(", ")
+            peers.isNotEmpty() -> getString(R.string.svc_waiting) to resources.getQuantityString(R.plurals.svc_paired_none, peers.size, peers.size)
+            else -> getString(R.string.visible_nearby) to getString(R.string.svc_open_to_pair)
         }
         val push = PendingIntent.getActivity(
             this, 1,
@@ -176,7 +180,7 @@ class AirBridgeService : Service() {
             .setOngoing(true)
             .setSilent(true)
             .setContentIntent(Notifs.openAppIntent(this))
-            .apply { if (connected.isNotEmpty()) addAction(0, "Send clipboard", push) }
+            .apply { if (connected.isNotEmpty()) addAction(0, getString(R.string.bubble_send), push) }
             .build()
     }
 

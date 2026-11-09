@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- English source text for phone notifications and calls on the computer (PROTOCOL §13). -->
+<resources>
+    <string name="pn_listener_name">AirBridge Notifications</string>
+    <string name="pn_section">Notifications &amp; calls</string>
+
+    <string name="pn_notifs_title">Show phone notifications on your computers</string>
+    <string name="pn_notifs_sub">See, reply to and clear them from your paired Mac or PC. They go only to your own devices, encrypted.</string>
+    <string name="pn_access_off_title">Notification access is off</string>
+    <string name="pn_access_off_sub">Turn on “%1$s” in the system settings. If its switch is greyed out, open App info › ⋮ › Allow restricted settings first, then try again.</string>
+    <string name="pn_app_info">App info</string>
+
+    <string name="pn_access_dialog_title">Notifications on your computers</string>
+    <string name="pn_access_dialog_body">AirBridge will read the notifications on this phone and show them on the computers you paired, so you can reply or clear them there.\n\nThey are sent only to your own paired devices, encrypted, and never uploaded anywhere. Nothing is sent while this switch is off.\n\nOn the next screen, turn on “%1$s”. If the switch is greyed out, go back, open App info › ⋮ › Allow restricted settings, and try again.</string>
+    <string name="pn_continue">Continue</string>
+
+    <string name="pn_apps_title">Apps</string>
+    <string name="pn_apps_all">All apps</string>
+    <plurals name="pn_apps_muted">
+        <item quantity="one">%1$d app hidden</item>
+        <item quantity="other">%1$d apps hidden</item>
+    </plurals>
+    <string name="pn_apps_header">Notifications from apps that are on reach your computers. Apps that posted recently come first.</string>
+    <string name="pn_apps_loading">Loading apps…</string>
+    <string name="pn_private_hint">When the lock screen hides sensitive content, notifications wait until you unlock the phone.</string>
+
+    <string name="pn_calls_title">Calls on your computer</string>
+    <string name="pn_calls_sub">See who is calling, then answer, decline or end the call from your computer. The call audio stays on your phone.</string>
+    <string name="pn_calls_dialog_body">To show calls and answer or end them, AirBridge needs the Phone permission. Contacts are optional and only used to show names for numbers.\n\nThe call itself stays on your phone: talk through its speaker, earpiece or a Bluetooth headset. Android doesn\'t let apps carry call audio to a computer.\n\nCall details are sent only to your own paired devices, encrypted.</string>
+    <string name="pn_calls_limited_title">Phone permission is off</string>
+    <string name="pn_calls_limited_sub">Only calls your phone app shows in a notification reach your computer, and answering may not work. Allow Phone in the app permissions.</string>
+</resources>

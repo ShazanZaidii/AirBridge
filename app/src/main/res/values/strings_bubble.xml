@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- English source text. Translations live in values-<lang>/strings_bubble.xml. -->
+<resources>
+    <string name="bubble_locked">Bubble position locked</string>
+    <string name="bubble_hidden">Bubble hidden. Re-enable it in AirBridge settings.</string>
+    <string name="bubble_pending">Clipboard not sent yet. Tap to send.</string>
+    <string name="bubble_send">Send clipboard</string>
+    <string name="bubble_control">Control a device</string>
+    <string name="bubble_move">Move bubble</string>
+    <string name="bubble_unlocked">Position unlocked (60s)</string>
+</resources>
