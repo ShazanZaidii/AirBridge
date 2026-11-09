@@ -27,14 +27,14 @@
     <string name="aw_start_failed">ಏರ್‌ವೆಬ್ ಪ್ರಾರಂಭಿಸಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ</string>
     <string name="aw_start_failed_sub">ಬೇರೊಂದು ಆ್ಯಪ್ ನೆಟ್‌ವರ್ಕ್ ಪೋರ್ಟ್‌ಗಳನ್ನು ಬಳಸುತ್ತಿರಬಹುದು. ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.</string>
     <string name="aw_try_again">ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ</string>
-    <string name="aw_files_to_send">ಕಳುಹಿಸಬೇಕಾದ ಫೈಲ್‌ಗಳು</string>
+    <string name="aw_files_to_send">ಈ ಫೋನ್ ಹಂಚಿಕೊಂಡ ಫೈಲ್‌ಗಳು</string>
     <string name="aw_nothing_added">ಏನನ್ನೂ ಸೇರಿಸಿಲ್ಲ</string>
-    <string name="aw_nothing_added_sub">ಆ ವ್ಯಕ್ತಿ ಈಗಲೂ ಈ ಫೋನ್‌ಗೆ ಫೈಲ್‌ಗಳನ್ನು ಕಳುಹಿಸಬಹುದು. ಅವರಿಗೆ ಕಳುಹಿಸಲು ಫೈಲ್‌ಗಳನ್ನು ಸೇರಿಸಿ.</string>
+    <string name="aw_nothing_added_sub">ಸಂಪರ್ಕಗೊಂಡ ಎಲ್ಲರೂ ಫೈಲ್‌ಗಳನ್ನು ಸೇರಿಸಬಹುದು. ಹಂಚಿಕೊಳ್ಳಲು ಇಲ್ಲಿ ಕೆಲವು ಫೈಲ್‌ಗಳನ್ನು ಸೇರಿಸಿ.</string>
     <string name="aw_downloaded_ago">ಡೌನ್‌ಲೋಡ್ ಆಗಿದೆ: %1$s</string>
     <string name="aw_remove">%1$s ತೆಗೆದುಹಾಕಿ</string>
-    <string name="aw_received">ಸ್ವೀಕರಿಸಿದವು</string>
+    <string name="aw_received">ಇತರರು ಸೇರಿಸಿದ ಫೈಲ್‌ಗಳು</string>
     <string name="aw_nothing_yet">ಇನ್ನೂ ಏನೂ ಇಲ್ಲ</string>
-    <string name="aw_nothing_yet_sub">ಇನ್ನೊಂದು ಸಾಧನದಿಂದ ಕಳುಹಿಸಿದ ಫೈಲ್‌ಗಳು ಇಲ್ಲಿ ಮತ್ತು %1$s ನಲ್ಲಿ ಕಾಣಿಸುತ್ತವೆ.</string>
+    <string name="aw_nothing_yet_sub">ಇತರರು ಸೇರಿಸಿದ ಫೈಲ್‌ಗಳು ಇಲ್ಲಿ ಮತ್ತು %1$s ನಲ್ಲಿ ಕಾಣಿಸುತ್ತವೆ.</string>
     <string name="aw_tap_to_open">ತೆರೆಯಲು ಟ್ಯಾಪ್ ಮಾಡಿ</string>
     <string name="aw_didnt_finish">ಪೂರ್ಣಗೊಳ್ಳಲಿಲ್ಲ</string>
     <string name="aw_receiving_pct">ಸ್ವೀಕರಿಸಲಾಗುತ್ತಿದೆ · %1$d%%</string>
@@ -425,4 +425,14 @@
     <string name="xf_cancelled_by">%1$s ರದ್ದುಮಾಡಿದೆ</string>
     <string name="xf_in_failed">%1$s ನಿಂದ ವರ್ಗಾವಣೆ ವಿಫಲವಾಗಿದೆ</string>
     <string name="xf_received_from">%1$s ನಿಂದ ಸ್ವೀಕರಿಸಲಾಗಿದೆ</string>
+    <string name="xfer_tap_open">ತೆರೆಯಲು ಟ್ಯಾಪ್ ಮಾಡಿ</string>
+    <string name="aw_connected_none">ಇನ್ನೂ ಯಾರೂ ಸಂಪರ್ಕಗೊಂಡಿಲ್ಲ</string>
+    <string name="aw_connected_none_sub">ಸೇರುವ ಪ್ರತಿಯೊಬ್ಬರಿಗೂ ಅದೇ ಫೈಲ್‌ಗಳು ಕಾಣುತ್ತವೆ; ಅವರು ಫೈಲ್‌ಗಳನ್ನು ಸೇರಿಸಬಹುದು ಅಥವಾ ಡೌನ್‌ಲೋಡ್ ಮಾಡಬಹುದು.</string>
+    <string name="aw_from">%1$s ಅವರಿಂದ</string>
+    <string name="aw_stop_sharing">%1$s ಹಂಚಿಕೆ ನಿಲ್ಲಿಸಿ</string>
+    <string name="aw_not_shared">ಹಂಚಿಕೊಂಡಿಲ್ಲ</string>
+    <plurals name="aw_connected">
+        <item quantity="one">%d ಸಾಧನ ಸಂಪರ್ಕಗೊಂಡಿದೆ</item>
+        <item quantity="other">%d ಸಾಧನಗಳು ಸಂಪರ್ಕಗೊಂಡಿವೆ</item>
+    </plurals>
 </resources>

@@ -60,6 +60,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -174,12 +175,18 @@ data class OfferedFile(
     val added: Long = System.currentTimeMillis(), val downloadedAt: Long = 0L,
 )
 
-/** One upload from the browser: in progress ([done] < [size]) or finished ([saved] set) or failed. */
+/**
+ * One upload from a browser: in progress ([done] < [size]) or finished ([saved] set) or failed. A saved one is in the
+ * shared pool, downloadable by everyone connected, until [shared] is turned off here.
+ */
 data class ReceivedFile(
     val id: Long, val name: String, val size: Long, val done: Long = 0,
     val saved: Boolean = false, val failed: Boolean = false, val uri: Uri? = null, val mime: String? = null,
     /** When it started, then when it finished (epoch ms). */
     val at: Long = System.currentTimeMillis(),
+    /** Which browser sent it (its device label) and that page's client id. */
+    val by: String? = null, val owner: String? = null,
+    val shared: Boolean = true, val downloads: Int = 0,
 )
 
 /**
@@ -205,6 +212,9 @@ class AirWebModel(app: Application) : AndroidViewModel(app) {
     val offered: StateFlow<List<OfferedFile>> = _offered
     private val _received = MutableStateFlow<List<ReceivedFile>>(emptyList())
     val received: StateFlow<List<ReceivedFile>> = _received
+    private val _peers = MutableStateFlow<List<AirWebServer.Peer>>(emptyList())
+    /** The browsers connected right now. */
+    val peers: StateFlow<List<AirWebServer.Peer>> = _peers
     private val _addresses = MutableStateFlow<List<String>>(emptyList())
     val addresses: StateFlow<List<String>> = _addresses
     private val _address = MutableStateFlow<String?>(null)
@@ -224,12 +234,19 @@ class AirWebModel(app: Application) : AndroidViewModel(app) {
 
         override fun deviceName() = Identity.name.ifBlank { ctx.getString(R.string.aw_this_phone) }
         override fun page() = page
-        override fun offered() = _offered.value.map { AirWebServer.WebFile(it.id, it.name, it.size, it.mime, it.added) }
+        /** The shared pool: what this phone added plus what browsers uploaded (saved and still shared). */
+        override fun offered() = _offered.value.map { AirWebServer.WebFile(it.id, it.name, it.size, it.mime, it.added) } +
+            _received.value.filter { it.saved && it.shared && it.uri != null }.map {
+                AirWebServer.WebFile(AirWebServer.UPLOAD_ID_BASE + it.id.toInt(), it.name, it.size, it.mime, it.at, it.by, it.owner)
+            }
 
         override fun open(file: AirWebServer.WebFile): InputStream? {
-            val f = _offered.value.firstOrNull { it.id == file.id } ?: return null
-            return if (f.uri.scheme == ContentResolver.SCHEME_FILE) f.uri.path?.let { File(it).inputStream() }
-            else ctx.contentResolver.openInputStream(f.uri)
+            val uri = if (file.id >= AirWebServer.UPLOAD_ID_BASE) {
+                _received.value.firstOrNull { it.id.toInt() == file.id - AirWebServer.UPLOAD_ID_BASE && it.shared }?.uri
+            } else _offered.value.firstOrNull { it.id == file.id }?.uri
+            uri ?: return null
+            return if (uri.scheme == ContentResolver.SCHEME_FILE) uri.path?.let { File(it).inputStream() }
+            else ctx.contentResolver.openInputStream(uri)
         }
 
         override fun freeSpace(): Long = try {
@@ -240,15 +257,25 @@ class AirWebModel(app: Application) : AndroidViewModel(app) {
             maxOf(0L, StatFs(dir.path).availableBytes - 64L * 1024 * 1024)
         } catch (_: Exception) { -1 }
 
+        override fun qr(text: String): Array<BooleanArray>? = try {
+            val m = com.google.zxing.qrcode.QRCodeWriter().encode(
+                text, com.google.zxing.BarcodeFormat.QR_CODE, 0, 0,
+                mapOf(com.google.zxing.EncodeHintType.MARGIN to 0, com.google.zxing.EncodeHintType.ERROR_CORRECTION to com.google.zxing.qrcode.decoder.ErrorCorrectionLevel.M),
+            )
+            Array(m.height) { y -> BooleanArray(m.width) { x -> m.get(x, y) } }
+        } catch (_: Exception) { null }
+
         override fun createUpload(rawName: String, mime: String?, size: Long): AirWebServer.UploadTarget {
             val name = rawName.ifBlank { "file" }
             val t = synchronized(taken) { Saver.create(ctx, name, mime, taken) }
             return Upload(t, mime)
         }
 
-        override fun onUploadStarted(id: Long, name: String, size: Long) {
-            _received.update { it + ReceivedFile(id, Saver.sanitize(name.ifBlank { "file" }), size) }
+        override fun onUploadStarted(id: Long, name: String, size: Long, by: AirWebServer.Peer?) {
+            _received.update { it + ReceivedFile(id, Saver.sanitize(name.ifBlank { "file" }), size, by = by?.label, owner = by?.id) }
         }
+
+        override fun onPeersChanged(peers: List<AirWebServer.Peer>) { _peers.value = peers }
 
         override fun onUploadProgress(id: Long, done: Long, total: Long) {
             _received.update { l -> l.map { if (it.id == id) it.copy(done = done) else it } }
@@ -263,7 +290,11 @@ class AirWebModel(app: Application) : AndroidViewModel(app) {
         }
 
         override fun onDownloaded(file: AirWebServer.WebFile) {
-            _offered.update { l -> l.map { if (it.id == file.id) it.copy(downloads = it.downloads + 1, downloadedAt = System.currentTimeMillis()) else it } }
+            if (file.id >= AirWebServer.UPLOAD_ID_BASE) {
+                _received.update { l -> l.map { if (it.id.toInt() == file.id - AirWebServer.UPLOAD_ID_BASE) it.copy(downloads = it.downloads + 1) else it } }
+            } else {
+                _offered.update { l -> l.map { if (it.id == file.id) it.copy(downloads = it.downloads + 1, downloadedAt = System.currentTimeMillis()) else it } }
+            }
         }
     }
 
@@ -292,6 +323,9 @@ class AirWebModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun remove(id: Int) = _offered.update { l -> l.filterNot { it.id == id } }
+
+    /** Stops sharing an uploaded file with the other browsers (it stays in Downloads on this phone). */
+    fun stopSharing(id: Long) = _received.update { l -> l.map { if (it.id == id) it.copy(shared = false) else it } }
 
     private fun describe(uri: Uri): OfferedFile? {
         val cr = ctx.contentResolver
@@ -364,6 +398,8 @@ class AirWebModel(app: Application) : AndroidViewModel(app) {
             _port.value = p
             if (p != 0) {
                 lastPort = p
+                // Debug builds only (the link carries the session secret): lets the test rigs find the server.
+                if (BuildConfig.DEBUG) Log.d(TAG, "airweb link http://127.0.0.1:$p/?t=$token")
                 if (!locked) { TransferLocks.acquire(ctx); locked = true } // Wi-Fi out of power save while AirWeb is up
             }
         }
@@ -371,6 +407,7 @@ class AirWebModel(app: Application) : AndroidViewModel(app) {
 
     private fun stopServer() {
         server.stop()
+        _peers.value = emptyList()
         _port.value = 0
         if (locked) { TransferLocks.release(); locked = false }
     }
@@ -389,6 +426,7 @@ private fun AirWebScreen(model: AirWebModel, onClose: () -> Unit) {
     val ctx = LocalContext.current
     val offered by model.offered.collectAsState()
     val received by model.received.collectAsState()
+    val peers by model.peers.collectAsState()
     val address by model.address.collectAsState()
     val addresses by model.addresses.collectAsState()
     val port by model.port.collectAsState()
@@ -440,6 +478,19 @@ private fun AirWebScreen(model: AirWebModel, onClose: () -> Unit) {
                 }
             }
 
+            // Who is here: everyone connected shares one pool (this phone's files and everything browsers upload).
+            item(key = "peers") {
+                AbCard {
+                    val names = peers.map { it.label }
+                    InfoRow(
+                        title = if (names.isEmpty()) stringResource(R.string.aw_connected_none)
+                        else pluralStringResource(R.plurals.aw_connected, names.size, names.size),
+                        subtitle = if (names.isEmpty()) stringResource(R.string.aw_connected_none_sub)
+                        else names.take(4).joinToString(" · ") + if (names.size > 4) " · +${names.size - 4}" else "",
+                    )
+                }
+            }
+
             item(key = "offered-h") { SectionHeader(stringResource(R.string.aw_files_to_send)) }
             if (offered.isEmpty()) item(key = "offered-empty") {
                 AbCard { InfoRow(title = stringResource(R.string.aw_nothing_added), subtitle = stringResource(R.string.aw_nothing_added_sub)) }
@@ -465,11 +516,19 @@ private fun AirWebScreen(model: AirWebModel, onClose: () -> Unit) {
             items(received.asReversed(), key = { "r" + it.id }) { r ->
                 AbCard(onClick = if (r.saved) ({ openReceived(ctx, r) }) else null) {
                     val sub = when {
-                        r.saved -> listOfNotNull(formatSize(r.size), relativeTime(r.at, now), stringResource(R.string.aw_tap_to_open)).joinToString(" · ")
+                        r.saved -> listOfNotNull(
+                            formatSize(r.size), r.by?.let { stringResource(R.string.aw_from, it) }, relativeTime(r.at, now),
+                            stringResource(if (r.shared) R.string.aw_tap_to_open else R.string.aw_not_shared),
+                        ).joinToString(" · ")
                         r.failed -> stringResource(R.string.aw_didnt_finish) + " · " + relativeTime(r.at, now)
                         else -> stringResource(R.string.aw_receiving_pct, if (r.size > 0) (r.done * 100 / r.size).toInt() else 0)
                     }
-                    InfoRow(title = r.name, subtitle = sub)
+                    InfoRow(title = r.name, subtitle = sub) {
+                        // Uploaded files are shared with everyone connected until you stop sharing them here.
+                        if (r.saved && r.shared) IconButton(onClick = { model.stopSharing(r.id) }) {
+                            Icon(Icons.Outlined.Close, contentDescription = stringResource(R.string.aw_stop_sharing, r.name))
+                        }
+                    }
                     if (!r.saved && !r.failed) {
                         LinearProgressIndicator(
                             progress = { if (r.size > 0) (r.done.toFloat() / r.size).coerceIn(0f, 1f) else 0f },

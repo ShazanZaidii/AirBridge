@@ -16,6 +16,7 @@ import android.telephony.TelephonyCallback
 import android.telephony.TelephonyManager
 import android.util.Log
 import androidx.core.content.ContextCompat
+import com.shazan.airbridge.net.Hub
 import java.util.concurrent.Executor
 
 /**
@@ -41,8 +42,6 @@ object CallWatcher {
     private var lastNotif: CallNotif? = null
     private var registered: Any? = null
     private var numberReceiver: BroadcastReceiver? = null
-    /** Answered from a computer: turn the speaker on once the call is active (setting). */
-    private var speakerWhenActive = false
     /** The caller's photo (base64 JPEG) for the current call, and which call it was last sent for. */
     private var photo: String? = null
     private var photoSentFor: String? = null
@@ -165,11 +164,7 @@ object CallWatcher {
             if (who.photoJpgB64 != null) photo = who.photoJpgB64
             changed = machine.onCallNotification(lastNotif?.kind ?: CallMachine.NotifKind.INCOMING, who.name, who.number, who.label) || changed
         }
-        if (s == CallMachine.Telephony.OFFHOOK && speakerWhenActive) {
-            speakerWhenActive = false
-            worker.postDelayed({ speakerAfterAnswer() }, 700)
-        }
-        if (s == CallMachine.Telephony.IDLE) { speakerWhenActive = false; resetAudio() }
+        if (s == CallMachine.Telephony.IDLE) resetAudio()
         if (!changed) return
         val c = machine.current
         if (s == CallMachine.Telephony.RINGING && wasNew && c != null && c.name.isNullOrBlank() && c.number.isNullOrBlank()) {
@@ -196,13 +191,9 @@ object CallWatcher {
         // Dialers wrap numbers in invisible direction marks ("\u202A555-9876\u202C"): drop them first.
         val title = n.title.replace(BIDI, "").trim()
         val who = CallerInfo.resolve(app, title.takeIf { it.isNotBlank() }, null, n.notification)
-        Log.i(TAG, "call notification ${n.kind} from ${n.sbnKey.substringAfter('|').substringBefore('|')}: name ${if (who.name.isNullOrBlank()) "no" else "yes"}, number ${if (who.number.isNullOrBlank()) "no" else "yes"}")
+        Log.i(TAG, "call notification ${n.kind} from ${n.sbnKey.substringAfter('|').substringBefore('|')}: name ${if (who.name.isNullOrBlank()) "no" else "yes"}, number ${if (who.number.isNullOrBlank()) "no" else "yes"}, buttons ${n.notification.actions?.map { it.title } ?: "none"}")
         if (who.photoJpgB64 != null) photo = who.photoJpgB64
         if (machine.onCallNotification(n.kind, who.name, who.number, who.label) || holding) publish()
-        if (n.kind == CallMachine.NotifKind.ONGOING && speakerWhenActive && !machine.telephonyAuthoritative) {
-            speakerWhenActive = false
-            worker.postDelayed({ speakerAfterAnswer() }, 700)
-        }
     }
 
     private fun publish() {
@@ -290,20 +281,6 @@ object CallWatcher {
         commListener = null
     }
 
-    /**
-     * "Speaker on when answered from the computer": not when the call went to a Bluetooth headset — that may be the
-     * computer itself carrying the call audio (hands-free), which the speaker would take it away from.
-     */
-    private fun speakerAfterAnswer() {
-        val am = audio() ?: return
-        val bt = try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                am.communicationDevice?.type in setOf(AudioDeviceInfo.TYPE_BLUETOOTH_SCO, AudioDeviceInfo.TYPE_BLE_HEADSET)
-            } else @Suppress("DEPRECATION") am.isBluetoothScoOn
-        } catch (_: Throwable) { false }
-        if (!bt) setSpeaker(true)
-        syncAudio()
-    }
 
     private fun speakerOn(am: AudioManager): Boolean =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) am.communicationDevice?.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER
@@ -314,7 +291,7 @@ object CallWatcher {
         val c = machine.current ?: return
         if (c.state != NotifWire.CallState.ACTIVE && c.state != NotifWire.CallState.HELD) return
         val am = audio() ?: return
-        val muted = try { am.isMicrophoneMute } catch (_: Throwable) { c.muted }
+        val muted = (try { am.isMicrophoneMute } catch (_: Throwable) { c.muted }) || dialerMuted() == true
         val speaker = try { speakerOn(am) } catch (_: Throwable) { c.speaker }
         val a = machine.setMuted(muted)
         val b = machine.setSpeaker(speaker)
@@ -365,7 +342,8 @@ object CallWatcher {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             val dev = am.availableCommunicationDevices.firstOrNull { d ->
                 d.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO && CallAudioInfo.isComputerAudio(d.productName?.toString(), d.address, d.type)
-            } ?: return false
+            } ?: return false.also { Log.i(TAG, "call audio to the computer: not an audio device yet") }
+            if (am.communicationDevice?.id == dev.id) return true
             if (speakerOn(am)) setSpeaker(false)
             return am.setCommunicationDevice(dev).also { if (it) forcedSpeaker = true; Log.i(TAG, "call audio to the computer: $it") }
         }
@@ -382,7 +360,14 @@ object CallWatcher {
     @SuppressLint("MissingPermission")
     private fun selectRoute(id: String): Boolean {
         val am = audio() ?: return false
-        if (id == "computer") return routeToComputer(am)
+        if (id == "computer") {
+            if (routeToComputer(am)) return true
+            // Asked the moment the computer's link came up: Android may list it as an audio device a moment later.
+            for (delay in listOf(500L, 1000L, 2000L, 4000L)) worker.postDelayed({
+                if (machine.current?.state == NotifWire.CallState.ACTIVE && audio()?.let { routeToComputer(it) } == true) syncAudio()
+            }, delay)
+            return true
+        }
         return when (val p = CallRoutes.parse(id)) {
             null -> false
             CallRoutes.Pick.Speaker -> setSpeaker(true)
@@ -427,7 +412,7 @@ object CallWatcher {
         }
         val ok = try {
             when (op) {
-                "answer" -> answer().also { if (it && PhoneRelaySettings.speakerOnAnswer) speakerWhenActive = true }
+                "answer" -> answer()
                 "decline" -> hangUp(EXTRA_DECLINE_INTENT)
                 "end" -> hangUp(EXTRA_HANG_UP_INTENT)
                 "mute", "unmute" -> setMuted(op == "mute")
@@ -477,11 +462,36 @@ object CallWatcher {
 
     private fun audio(): AudioManager? = app.getSystemService(AudioManager::class.java)
 
+    /**
+     * Mute / unmute. Android's microphone mute first (the phone's call screen follows it on most phones). Some
+     * phones (vivo) ignore it from apps: then the dialer's own Mute button from its call notification, as for the
+     * speaker.
+     */
     private fun setMuted(on: Boolean): Boolean {
         val am = audio() ?: return false
-        am.isMicrophoneMute = on
-        return am.isMicrophoneMute == on
+        try { am.isMicrophoneMute = on } catch (_: Throwable) {}
+        if (am.isMicrophoneMute == on) return true
+        if (dialerMuted() == on) return true
+        val pi = dialerAction(if (on) MUTE_WORDS else UNMUTE_WORDS + MUTE_WORDS) ?: return false
+        return try { pi.send(); Log.i(TAG, "mute through the call screen's own button"); true } catch (_: Throwable) { false }
     }
+
+    /** The dialer's call notification says whether the call is muted (its button reads "Unmute"), if it says. */
+    private fun dialerMuted(): Boolean? {
+        val titles = lastNotif?.notification?.actions?.mapNotNull { it.title?.toString()?.lowercase() } ?: return null
+        if (titles.any { t -> UNMUTE_WORDS.any { t.contains(it) } }) return true
+        if (titles.any { t -> MUTE_WORDS.any { t.contains(it) } }) return false
+        return null
+    }
+
+    private fun dialerAction(words: List<String>): PendingIntent? =
+        lastNotif?.notification?.actions?.firstOrNull { a ->
+            val t = a.title?.toString()?.lowercase() ?: return@firstOrNull false
+            words.any { t.contains(it) }
+        }?.actionIntent
+
+    private val UNMUTE_WORDS = listOf("unmute", "अनम्यूट", "réactiver le micro", "stummschaltung aufheben", "activar micrófono")
+    private val MUTE_WORDS = listOf("mute", "म्यूट", "মিউট", "મ્યૂટ", "ம்யூட்", "మ్యూట్", "ಮ್ಯೂಟ್", "muet", "couper le micro", "stumm", "silenciar")
 
     /**
      * Speaker on/off. Prefer pressing the dialer's own Speaker button (its call notification action): then the

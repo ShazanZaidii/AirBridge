@@ -368,6 +368,7 @@ class FileTransfer(private val s: Session) {
         // Names already in the destination folder, read once per transfer (not once per file) and kept current.
         private val taken: MutableSet<String> by lazy { Saver.existingNames(ctx).toMutableSet() }
         private val saved = ArrayList<String>()
+        private val savedFiles = ArrayList<ReceivedFiles.Item>()
         private val started = System.currentTimeMillis()
         private var lastUi = 0L
 
@@ -462,6 +463,7 @@ class FileTransfer(private val s: Session) {
             val t = target ?: return
             t.out.close()
             saved.add(Saver.publish(ctx, t))
+            Saver.shareUri(ctx, t)?.let { savedFiles.add(ReceivedFiles.Item(it, Saver.mimeFor(t.name, null))) }
             target = null
             cur++
             curWritten = 0
@@ -493,8 +495,10 @@ class FileTransfer(private val s: Session) {
         private fun finishAll() {
             s.send(Protocol.msg("xfer_complete").put("id", id).put("ok", true).put("saved", JSONArray(saved)))
             val label = if (saved.size == 1) saved[0] else Hub.app.resources.getQuantityString(com.shazan.airbridge.R.plurals.sh_files, saved.size, saved.size)
-            Hub.putTransfer(TransferUi(key, true, peerName, label, saved.size, files.size, total, total, 0, result = Hub.app.getString(com.shazan.airbridge.R.string.xfer_received)))
-            val open = PendingIntent.getActivity(ctx, 0,
+            val received = ReceivedFiles(savedFiles.toList()).takeIf { it.items.isNotEmpty() }
+            Hub.putTransfer(TransferUi(key, true, peerName, label, saved.size, files.size, total, total, 0,
+                result = Hub.app.getString(com.shazan.airbridge.R.string.xfer_received), received = received))
+            val open = received?.pendingIntent(ctx) ?: PendingIntent.getActivity(ctx, 0,
                 Intent(DownloadManager.ACTION_VIEW_DOWNLOADS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
             resultNotification(notifId, Hub.app.getString(com.shazan.airbridge.R.string.xf_received_from, peerName), "$label · Downloads/${Saver.SUBDIR}", open)
@@ -556,7 +560,7 @@ internal object Saver {
         return "$base (${System.currentTimeMillis()})$ext"
     }
 
-    private fun mimeFor(name: String, offered: String?): String {
+    fun mimeFor(name: String, offered: String?): String {
         val ext = name.substringAfterLast('.', "").lowercase(Locale.ROOT)
         return MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext)
             ?: offered?.takeIf { it.contains('/') && ext.isEmpty() }
@@ -595,6 +599,12 @@ internal object Saver {
         val f = File(dir, name)
         if (f.canonicalFile.parentFile != dir.canonicalFile) throw IOException("bad path")
         return Target(FileOutputStream(f).buffered(256 * 1024), null, f, name)
+    }
+
+    /** A content URI other apps can open the saved file by (MediaStore on Android 10+, our FileProvider before). */
+    fun shareUri(ctx: Context, t: Target): Uri? = t.uri ?: t.file?.let { f ->
+        try { androidx.core.content.FileProvider.getUriForFile(ctx, "${ctx.packageName}.files", f) }
+        catch (e: Exception) { Log.w(TAG, "share uri", e); null }
     }
 
     /** Makes the file visible; returns its final name. */

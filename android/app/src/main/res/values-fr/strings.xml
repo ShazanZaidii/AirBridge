@@ -27,14 +27,14 @@
     <string name="aw_start_failed">Impossible de démarrer AirWeb</string>
     <string name="aw_start_failed_sub">Une autre appli utilise peut-être les ports réseau. Réessayez.</string>
     <string name="aw_try_again">Réessayer</string>
-    <string name="aw_files_to_send">Fichiers à envoyer</string>
+    <string name="aw_files_to_send">Partagés par ce téléphone</string>
     <string name="aw_nothing_added">Aucun fichier ajouté</string>
-    <string name="aw_nothing_added_sub">L\'autre personne peut quand même envoyer des fichiers à ce téléphone. Ajoutez des fichiers pour lui en envoyer.</string>
+    <string name="aw_nothing_added_sub">Toutes les personnes connectées peuvent aussi ajouter des fichiers. Ajoutez-en ici pour les partager.</string>
     <string name="aw_downloaded_ago">Téléchargé : %1$s</string>
     <string name="aw_remove">Retirer %1$s</string>
-    <string name="aw_received">Reçus</string>
+    <string name="aw_received">Ajoutés par les autres</string>
     <string name="aw_nothing_yet">Rien pour l\'instant</string>
-    <string name="aw_nothing_yet_sub">Les fichiers envoyés par l\'autre appareil apparaissent ici et dans %1$s.</string>
+    <string name="aw_nothing_yet_sub">Les fichiers ajoutés par les autres apparaissent ici et dans %1$s.</string>
     <string name="aw_tap_to_open">Touchez pour ouvrir</string>
     <string name="aw_didnt_finish">Inachevé</string>
     <string name="aw_receiving_pct">Réception · %1$d%%</string>
@@ -434,4 +434,14 @@
     <string name="xf_cancelled_by">Annulé par %1$s</string>
     <string name="xf_in_failed">Échec du transfert depuis %1$s</string>
     <string name="xf_received_from">Reçu de %1$s</string>
+    <string name="xfer_tap_open">Touchez pour ouvrir</string>
+    <string name="aw_connected_none">Personne n\'est connecté pour l\'instant</string>
+    <string name="aw_connected_none_sub">Chaque personne qui rejoint voit les mêmes fichiers et peut en ajouter ou en télécharger.</string>
+    <string name="aw_from">De %1$s</string>
+    <string name="aw_stop_sharing">Arrêter de partager %1$s</string>
+    <string name="aw_not_shared">Non partagé</string>
+    <plurals name="aw_connected">
+        <item quantity="one">%d appareil connecté</item>
+        <item quantity="other">%d appareils connectés</item>
+    </plurals>
 </resources>
