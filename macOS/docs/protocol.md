@@ -164,8 +164,8 @@ Client                                   Host
     advertises both `_source` caps (the user still turns each feature on; `notif_state` says whether it is on);
     macOS and Windows advertise both `_sink` caps.
   - `call_audio` / `call_audio_info` – a computer that carries call audio as the phone's Bluetooth hands-free unit
-    / a phone that reports its Bluetooth facts for that (§13.4). macOS advertises `call_audio`, Android
-    `call_audio_info`.
+    / a phone that reports its Bluetooth facts for that (§13.4). Android advertises `call_audio_info`. No computer
+    advertises `call_audio` yet: macOS refuses the voice link to third-party apps (§13.4); Windows can take it.
   - `adb_wifi` – Android 11+ phone that answers `adb_wifi` (§8.9): reports and opens Wireless debugging for a
     computer's Pro mirroring.
 - `nonce` – fresh per connection, used in auth/pair MACs.
@@ -500,7 +500,14 @@ charging. Edges with no assigned or offline peer never capture.
 
 ```json
 {"t":"key","hid":0x04,"down":true,"mods":1,"rep":false,"text":"A"}
+{"t":"key","hid":0x2A,"down":true,"mods":0,"mirror":true}
 ```
+
+`mirror:true` marks keys typed into a **mirror window** (§8.7) rather than through a shared cursor. The target then
+treats the keyboard as the phone's own: no cursor-mode shortcuts (no solo ⌘/Ctrl taps, no Delete = recents, no
+H/D holds, no Option+Tab = last app); Delete deletes, Tab tabs, Esc is Back. ⌘/Ctrl combinations (copy, paste,
+select all) still apply. Without the flag the target applies its cursor-mode shortcuts, and only when it can tell
+that nothing is being typed into (its text service is running and reports no focused editable field).
 
 | Field  | Meaning |
 |--------|---------|
@@ -1003,7 +1010,13 @@ S→K {"t":"call_result","id":"c3-mxk2a1","op":"answer","ok":false,"reason":"no_
 
 ### 13.4 Call audio through the computer (Bluetooth hands-free)
 
-A Mac can be the phone's Bluetooth **Hands-Free unit** (HFP "HF"; the phone is the Audio Gateway), the way
+**Status.** Not implemented by any computer yet. On macOS (tested 26.5 on Apple silicon, and reported on 27) the
+Bluetooth daemon accepts a voice (SCO) link only for audio its own code set up; a third-party app gets the command
+link but never the voice link, from either side, and no public API, entitlement or setting changes that. The Mac
+app therefore does not advertise `call_audio` and never links to the phone over Bluetooth. Windows has a native
+hands-free role (what Phone Link uses), so the Windows app is where this section applies.
+
+A computer can be the phone's Bluetooth **Hands-Free unit** (HFP "HF"; the phone is the Audio Gateway), the way
 Phone Link and headsets do it: the user talks and listens on the computer's microphone and speakers. The audio
 travels over Bluetooth (SCO), never over AirBridge. The phone and the computer must be paired over Bluetooth
 classic first (the computer's "Talk from your Mac" setup guides this). Two small messages help the computer
@@ -1080,8 +1093,8 @@ names the caller, the source waits up to 800 ms for it before the first `call_st
 `isSpeakerphoneOn` before; plus a 1 s poll as a fallback) and sends `call_state` whenever either changes — whether the
 change came from a sink or from the phone's own call screen. A sink's Mute / Speaker buttons send `call_action` and
 then show only what the next `call_state` reports (no optimistic toggling). When the sink itself carries the call
-audio (Bluetooth hands-free, §13.4), its Mute button mutes the computer's microphone instead. "Speaker on when
-answered from the computer" is skipped when the call audio went to a Bluetooth headset (possibly the computer).
+audio (Bluetooth hands-free, §13.4), its Mute button mutes the computer's microphone instead. The phone never
+forces a call route by itself: forcing one locks out the phone app's own audio choices.
 
 **Presence (`call_presence`).** What the phone knows about its user, sent after `ready`, whenever the screen turns on or
 off or the phone is unlocked, after a tap at most every 4 s, and right before the first `call_state` of a ringing call.

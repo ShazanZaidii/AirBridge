@@ -16,9 +16,7 @@
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>AirBridge finds and connects to your phone and other computers on this network to sync the clipboard, send files and share the keyboard and mouse.</string>
 	<key>NSBluetoothAlwaysUsageDescription</key>
-	<string>AirBridge uses Bluetooth to tell whether your phone is next to this Mac, so calls ring where you are, and to connect to your phone like a headset so you can talk on calls from this Mac.</string>
-	<key>NSMicrophoneUsageDescription</key>
-	<string>AirBridge sends your voice to your phone when you talk on a phone call from this Mac.</string>
+	<string>AirBridge uses Bluetooth to tell whether your phone is next to this Mac, so calls ring where you are.</string>
 	<key>NSAppleEventsUsageDescription</key>
 	<string>AirBridge asks System Events to show or hide the menu bar when you tap the menu bar shortcut on your phone.</string>
 	<key>NSBonjourServices</key>

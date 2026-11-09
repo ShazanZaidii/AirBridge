@@ -2,7 +2,9 @@ import Foundation
 import Darwin
 import Security
 
-/// One file offered for download. `added` is epoch milliseconds, for "1 min ago" on the page.
+/// One file in the shared pool. `added` is epoch milliseconds, for "1 min ago" on the page. `by`: who put it there
+/// (a device label; nil = this Mac). `owner`: the client id of the page that uploaded it, so that page can mark it
+/// "yours".
 nonisolated struct AirWebFile: Sendable, Equatable {
     let id: Int
     let url: URL
@@ -10,6 +12,38 @@ nonisolated struct AirWebFile: Sendable, Equatable {
     let size: Int64
     let mime: String?
     let added: Int64
+    var by: String? = nil
+    var owner: String? = nil
+}
+
+/// A browser that is connected (heard from within the TTL). `label` is unique among the connected ones.
+nonisolated struct AirWebPeer: Sendable, Equatable {
+    let id: String
+    let label: String
+    let joined: Int64
+    let lastSeen: Int64
+}
+
+/// Every limit in one place (the same numbers as the Android app's, except the transfer slots: a Mac can take more).
+nonisolated struct AirWebLimits: Sendable {
+    /// Connections open at once (each holds a thread); more get 503 + Retry-After.
+    var maxConnections = 128
+    /// Connections from one address (a browser opens about six): one device can't starve the rest.
+    var perIp = 24
+    /// Files moving at once; the others wait their turn in the waiting room.
+    var maxTransfers = 12
+    /// Requests allowed to wait for a transfer slot; beyond that: 503 + Retry-After.
+    var maxWaiting = 32
+    var transferWaitMs = 120_000
+    /// The whole request head must arrive within this (slow-client / half-open connection guard).
+    var headDeadlineMs = 10_000
+    /// No byte moving for this long (reading a body or writing a file): the connection is dropped.
+    var idleSeconds = 30
+    /// A browser not heard from for this long is no longer "connected".
+    var peerTtlMs: Int64 = 20_000
+    var maxPeers = 256
+    /// Files in the pool; uploads beyond this are refused.
+    var maxPool = 1000
 }
 
 /// What the server needs from its owner. Called from connection threads.
@@ -17,6 +51,7 @@ nonisolated protocol AirWebHost: AnyObject, Sendable {
     func deviceName() -> String
     /// The page, with `{{NAME}}` where the device name goes.
     func page() -> String
+    /// The whole pool: what this Mac added and what browsers uploaded. Ids are unique across both.
     func offered() -> [AirWebFile]
     /// Bytes free for uploads, or -1 when unknown.
     func freeSpace() -> Int64
@@ -24,29 +59,42 @@ nonisolated protocol AirWebHost: AnyObject, Sendable {
     func uploadDirectory() throws -> URL
     /// A safe file name for an upload (no path parts, no control characters).
     func cleanName(_ raw: String) -> String
-    func uploadStarted(id: Int, name: String, size: Int64)
+    /// The QR code of `text` as rows of modules (true = dark, no quiet zone), or nil if it can't be drawn.
+    func qr(_ text: String) -> [[Bool]]?
+    /// `by` is the uploading browser (nil when it didn't identify itself).
+    func uploadStarted(id: Int, name: String, size: Int64, by: AirWebPeer?)
     func uploadProgress(id: Int, done: Int64)
     /// `saved` is nil when the upload failed.
     func uploadFinished(id: Int, saved: URL?)
     func downloaded(_ file: AirWebFile)
+    /// The set of connected browsers changed. Called on a server thread: return quickly.
+    func peersChanged(_ peers: [AirWebPeer])
 }
 
-/// AirWeb: a small HTTP/1.1 server so a phone or computer without AirBridge can swap files with this
-/// Mac from its browser. Same contract as the Android app's AirWebServer, so the same page works:
+/// AirWeb: a small HTTP/1.1 server so phones and computers without AirBridge can swap files through this Mac from
+/// their browsers. Same contract as the Android app's AirWebServer, so the same page works. Everyone who opens the
+/// link joins one **shared pool**: a file added here or uploaded by any browser is listed for, and downloadable by,
+/// everyone else who is connected.
 ///
 ///  - `GET /` the page
-///  - `GET /api/state` JSON: device name, free space, server clock, offered files
-///  - `GET|HEAD /d/<id>[/<name>]` download one offered file
-///  - `POST /u?n=<file name>` upload one file, raw body, Content-Length required
+///  - `GET /api/state?c=&w=&v=` JSON: device name, free space, poll interval, who is connected, the pool (omitted,
+///    with `"same":true`, when `v` is the pool's current version)
+///  - `GET|HEAD /d/<id>[/<name>]` download one pool file
+///  - `POST /u?n=<file name>&c=&w=` upload one file into the pool, raw body, Content-Length required
+///  - `GET /qr.svg` the QR code of this page's own link, so any connected browser can show it to invite more people
 ///
-/// Every request needs the session token (`?t=…`, 128 random bits) or the answer is 403. One thread per
-/// connection, `Connection: close` on every response, files streamed both ways (never held in memory).
+/// Every request needs the session token (`?t=…`, 128 random bits) or the answer is 403. Built to stay up with 50+
+/// browsers (see `AirWebLimits`): one thread per connection up to a cap, a per-address cap, a head-read deadline
+/// against slow clients, a fair waiting room for the transfer slots, space reserved for uploads in flight, socket
+/// timeouts for stalled clients, and a state poll that answers "nothing changed" in a couple of hundred bytes.
+/// `Connection: close` on every response, files streamed both ways (never held in memory).
 nonisolated final class AirWebServer: @unchecked Sendable {
     static let ports: ClosedRange<UInt16> = 47650...47659
-    static let maxConnections = 48
-    private static let ioTimeout: Int = 30
+    /// Pool ids of uploaded files start here (the host's own files count up from 1).
+    static let uploadIdBase = 1_000_000
     private static let bufSize = 64 * 1024
     private static let progressEvery: Int64 = 256 * 1024
+    private static let maxPeersListed = 24
 
     /// 16 random bytes as 22 base64url characters.
     static func newToken() -> String {
@@ -64,7 +112,15 @@ nonisolated final class AirWebServer: @unchecked Sendable {
         "http://\(address):\(port)/?t=\(token)"
     }
 
+    private struct PeerRec {
+        let id: String
+        var label: String
+        let joined: Int64
+        var lastSeen: Int64
+    }
+
     let token: String
+    let limits: AirWebLimits
     private weak var host: AirWebHost?
 
     private let lock = NSLock()
@@ -72,19 +128,37 @@ nonisolated final class AirWebServer: @unchecked Sendable {
     private var wakeFd: Int32 = -1
     private var open = Set<Int32>()
     private var connections = 0
+    private var perIpCount: [String: Int] = [:]
     private var transfers = 0
+    private var waiting = 0
+    private var rejecting = 0
     private var uploadIds = 0
     private var boundPort: UInt16 = 0
+    private var stopped = false
+    private var reservedBytes: Int64 = 0
+    private var peerMap: [String: PeerRec] = [:]
+    private var lastPeerKey = ""
+    private var sweeper: DispatchSourceTimer?
+    private let slots: DispatchSemaphore
 
-    init(token: String, host: AirWebHost) {
+    init(token: String, host: AirWebHost, limits: AirWebLimits = AirWebLimits()) {
         self.token = token
         self.host = host
+        self.limits = limits
+        slots = DispatchSemaphore(value: limits.maxTransfers)
     }
 
     var port: UInt16 { lock.withLock { boundPort } }
     var isRunning: Bool { lock.withLock { listenFd >= 0 } }
     /// Downloads and uploads in progress right now.
     var activeTransfers: Int { lock.withLock { transfers } }
+    /// Requests waiting for a transfer slot right now.
+    var waitingTransfers: Int { lock.withLock { waiting } }
+    var openConnections: Int { lock.withLock { connections } }
+    private var isStopped: Bool { lock.withLock { stopped } }
+
+    /// The connected browsers, oldest first.
+    func peers() -> [AirWebPeer] { lock.withLock { snapshotLocked() } }
 
     /// Listens on `preferred` if it is free, else the first free port of `ports`. Returns the port.
     @discardableResult
@@ -101,10 +175,16 @@ nonisolated final class AirWebServer: @unchecked Sendable {
             listenFd = fd
             wakeFd = pipeFds[1]
             boundPort = p
+            stopped = false
             let wakeRead = pipeFds[0]
             let t = Thread { [self] in acceptLoop(fd, wakeRead) }
             t.name = "airweb-accept"
             t.start()
+            let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .utility))
+            timer.schedule(deadline: .now() + 2, repeating: 2)
+            timer.setEventHandler { [weak self] in self?.sweep() }
+            timer.resume()
+            sweeper = timer
             return p
         }
         throw POSIXError(.EADDRINUSE)
@@ -115,12 +195,17 @@ nonisolated final class AirWebServer: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         guard listenFd >= 0 else { return }
+        stopped = true
         var one: UInt8 = 1
         _ = write(wakeFd, &one, 1)
         close(wakeFd)
         wakeFd = -1
         listenFd = -1 // closed by the accept thread once it wakes
         boundPort = 0
+        sweeper?.cancel()
+        sweeper = nil
+        peerMap.removeAll()
+        lastPeerKey = ""
         for fd in open { shutdown(fd, SHUT_RDWR) }
     }
 
@@ -140,7 +225,7 @@ nonisolated final class AirWebServer: @unchecked Sendable {
                 bind(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) == 0
             }
         }
-        guard ok, Darwin.listen(fd, 64) == 0 else { close(fd); return nil }
+        guard ok, Darwin.listen(fd, 128) == 0 else { close(fd); return nil }
         return fd
     }
 
@@ -153,25 +238,28 @@ nonisolated final class AirWebServer: @unchecked Sendable {
             if r < 0 { if errno == EINTR { continue } else { return } }
             if fds[1].revents != 0 { return }
             guard fds[0].revents & Int16(POLLIN) != 0 else { if fds[0].revents != 0 { return }; continue }
-            let conn = accept(fd, nil, nil)
+            var peer = sockaddr_in()
+            var peerLen = socklen_t(MemoryLayout<sockaddr_in>.size)
+            let conn = withUnsafeMutablePointer(to: &peer) {
+                $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { accept(fd, $0, &peerLen) }
+            }
             if conn < 0 { if errno == EINTR || errno == ECONNABORTED || errno == EAGAIN { continue } else { return } }
-            Self.configure(conn)
+            let ip = Self.text(of: peer)
+            Self.configure(conn, seconds: limits.idleSeconds)
             let admitted: Bool = lock.withLock {
-                guard listenFd == fd, connections < Self.maxConnections else { return false }
+                guard listenFd == fd, connections < limits.maxConnections, perIpCount[ip, default: 0] < limits.perIp else { return false }
                 connections += 1
+                perIpCount[ip, default: 0] += 1
                 open.insert(conn)
                 return true
             }
-            guard admitted else {
-                try? Self.sendAll(conn, Array(AirWebHTTP.head(503, "Service Unavailable", "text/plain", 0).utf8))
-                close(conn)
-                continue
-            }
+            guard admitted else { reject(conn); continue }
             let t = Thread { [self] in
                 serve(conn)
                 lock.withLock {
                     open.remove(conn)
                     connections -= 1
+                    if let n = perIpCount[ip] { if n <= 1 { perIpCount[ip] = nil } else { perIpCount[ip] = n - 1 } }
                 }
                 close(conn)
             }
@@ -180,17 +268,142 @@ nonisolated final class AirWebServer: @unchecked Sendable {
         }
     }
 
-    private static func configure(_ fd: Int32) {
+    private static func text(of addr: sockaddr_in) -> String {
+        var a = addr.sin_addr
+        var buf = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
+        return inet_ntop(AF_INET, &a, &buf, socklen_t(buf.count)).map { String(cString: $0) } ?? "?"
+    }
+
+    /// Too busy: answer 503 (so the browser retries) without tying up a connection slot. A few at a time; past that
+    /// the connection is just closed.
+    private func reject(_ conn: Int32) {
+        let go: Bool = lock.withLock { if rejecting >= 16 { return false }; rejecting += 1; return true }
+        guard go else { close(conn); return }
+        let t = Thread { [self] in
+            let body = Array("503 Service Unavailable\n".utf8)
+            try? Self.sendAll(conn, Array(AirWebHTTP.head(503, "Service Unavailable", "text/plain; charset=utf-8", Int64(body.count),
+                                                          extra: "Retry-After: 3\r\n").utf8) + body)
+            shutdown(conn, SHUT_WR)
+            // Read what it sent, so closing doesn't reset the connection before it has read the answer.
+            var tv = timeval(tv_sec: 0, tv_usec: 500_000)
+            setsockopt(conn, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
+            var buf = [UInt8](repeating: 0, count: 2048)
+            while recv(conn, &buf, buf.count, 0) > 0 {}
+            close(conn)
+            lock.withLock { rejecting -= 1 }
+        }
+        t.name = "airweb-reject"
+        t.start()
+    }
+
+    private static func configure(_ fd: Int32, seconds: Int) {
         var yes: Int32 = 1
         let len = socklen_t(MemoryLayout<Int32>.size)
         setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &yes, len)
         setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &yes, len)
         _ = fcntl(fd, F_SETFD, FD_CLOEXEC)
-        var tv = timeval(tv_sec: ioTimeout, tv_usec: 0)
-        let tvLen = socklen_t(MemoryLayout<timeval>.size)
-        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, tvLen)
-        setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, tvLen)
+        setTimeouts(fd, receive: seconds, send: seconds)
     }
+
+    private static func setTimeouts(_ fd: Int32, receive: Int, send: Int) {
+        var rv = timeval(tv_sec: receive, tv_usec: 0)
+        var sv = timeval(tv_sec: send, tv_usec: 0)
+        let l = socklen_t(MemoryLayout<timeval>.size)
+        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &rv, l)
+        setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &sv, l)
+    }
+
+    /// Every couple of seconds: browsers that went quiet leave.
+    private func sweep() {
+        let now = Int64(Date().timeIntervalSince1970 * 1000)
+        let gone: Bool = lock.withLock {
+            let before = peerMap.count
+            peerMap = peerMap.filter { now - $0.value.lastSeen <= limits.peerTtlMs }
+            return peerMap.count != before
+        }
+        if gone { notifyPeers() }
+    }
+
+    // MARK: Who is connected
+
+    @discardableResult
+    private func touch(_ id: String?, _ rawLabel: String?) -> AirWebPeer? {
+        guard let id else { return nil }
+        let now = Int64(Date().timeIntervalSince1970 * 1000)
+        let label = AirWebHTTP.cleanLabel(rawLabel)
+        let changed: Bool = lock.withLock {
+            if var p = peerMap[id] {
+                p.lastSeen = now
+                let c = p.label != label
+                p.label = label
+                peerMap[id] = p
+                return c
+            }
+            if peerMap.count >= limits.maxPeers, let oldest = peerMap.values.min(by: { $0.lastSeen < $1.lastSeen }) {
+                peerMap[oldest.id] = nil
+            }
+            peerMap[id] = PeerRec(id: id, label: label, joined: now, lastSeen: now)
+            return true
+        }
+        if changed { notifyPeers() }
+        return peers().first { $0.id == id }
+    }
+
+    private func snapshotLocked() -> [AirWebPeer] {
+        let list = peerMap.values.sorted { $0.joined != $1.joined ? $0.joined < $1.joined : $0.id < $1.id }
+        var total: [String: Int] = [:]
+        for p in list { total[p.label, default: 0] += 1 }
+        var seen: [String: Int] = [:]
+        return list.map { p in
+            seen[p.label, default: 0] += 1
+            let label = (total[p.label] ?? 1) > 1 ? "\(p.label) \(seen[p.label]!)" : p.label
+            return AirWebPeer(id: p.id, label: label, joined: p.joined, lastSeen: p.lastSeen)
+        }
+    }
+
+    private func notifyPeers() {
+        let snap: [AirWebPeer]? = lock.withLock {
+            let s = snapshotLocked()
+            let key = s.map { "\($0.id)=\($0.label)" }.joined(separator: "|")
+            if key == lastPeerKey { return nil }
+            lastPeerKey = key
+            return s
+        }
+        if let snap { host?.peersChanged(snap) }
+    }
+
+    // MARK: Transfer slots (the waiting room)
+
+    /// A transfer slot, waiting for one if need be; false when the room is full, time ran out or the server stopped.
+    private func acquireSlot() -> Bool {
+        if slots.wait(timeout: .now()) == .success { return true }
+        let ok: Bool = lock.withLock {
+            if waiting >= limits.maxWaiting { return false }
+            waiting += 1
+            return true
+        }
+        guard ok else { return false }
+        defer { lock.withLock { waiting -= 1 } }
+        let end = DispatchTime.now() + .milliseconds(limits.transferWaitMs)
+        while !isStopped && DispatchTime.now() < end {
+            if slots.wait(timeout: .now() + .milliseconds(500)) == .success { return true }
+        }
+        return false
+    }
+
+    private func releaseSlot() { slots.signal() }
+
+    /// Space for an upload of `len` bytes on top of the uploads already running, or false when it won't fit.
+    private func reserve(_ len: Int64, _ host: AirWebHost) -> Bool {
+        lock.withLock {
+            let free = host.freeSpace()
+            if free >= 0 && reservedBytes + len > free { return false }
+            reservedBytes += len
+            return true
+        }
+    }
+
+    private func unreserve(_ len: Int64) { lock.withLock { reservedBytes = max(0, reservedBytes - len) } }
 
     // MARK: One request per connection
 
@@ -199,7 +412,16 @@ nonisolated final class AirWebServer: @unchecked Sendable {
         do {
             guard let host else { return }
             let input = SocketReader(fd: fd, size: Self.bufSize)
-            guard let req = AirWebHTTP.readRequest(input) else { try simple(fd, 400, "Bad Request"); return }
+            // The head must arrive in full by the deadline; each read waits a few seconds at most.
+            let headMs = limits.headDeadlineMs
+            Self.setTimeouts(fd, receive: max(1, min(5, (headMs + 999) / 1000)), send: limits.idleSeconds)
+            input.deadline = DispatchTime.now().uptimeNanoseconds + UInt64(headMs) * 1_000_000
+            guard let req = AirWebHTTP.readRequest(input) else {
+                if input.timedOut || input.received == 0 { return } // too slow or nothing sent: just hang up
+                try simple(fd, 400, "Bad Request"); return
+            }
+            input.deadline = 0
+            Self.setTimeouts(fd, receive: limits.idleSeconds, send: limits.idleSeconds)
             guard AirWebHTTP.tokenMatches(req.query["t"], token) else {
                 if req.path == "/" && req.method == "GET" { try html(fd, 403, "Forbidden", AirWebHTTP.expiredPage) }
                 else { try simple(fd, 403, "Forbidden") }
@@ -212,7 +434,10 @@ nonisolated final class AirWebServer: @unchecked Sendable {
                 try html(fd, 200, "OK", page, headOnly: req.method == "HEAD")
             case "/api/state":
                 guard req.method == "GET" else { try simple(fd, 405, "Method Not Allowed"); return }
-                try state(fd, host)
+                try state(fd, req, host)
+            case "/qr.svg":
+                guard req.method == "GET" else { try simple(fd, 405, "Method Not Allowed"); return }
+                try qr(fd, req, host)
             case "/u":
                 guard req.method == "POST" else { try simple(fd, 405, "Method Not Allowed"); return }
                 try upload(fd, input, req, host)
@@ -230,6 +455,12 @@ nonisolated final class AirWebServer: @unchecked Sendable {
         try Self.sendAll(fd, Array(AirWebHTTP.head(code, reason, "text/plain; charset=utf-8", Int64(body.count)).utf8) + body)
     }
 
+    private func busy(_ fd: Int32) throws {
+        let body = Array("503 Busy, try again in a moment\n".utf8)
+        try Self.sendAll(fd, Array(AirWebHTTP.head(503, "Service Unavailable", "text/plain; charset=utf-8", Int64(body.count),
+                                                   extra: "Retry-After: 5\r\n").utf8) + body)
+    }
+
     private func html(_ fd: Int32, _ code: Int, _ reason: String, _ page: String, headOnly: Bool = false) throws {
         let body = Array(page.utf8)
         let head = AirWebHTTP.head(code, reason, "text/html; charset=utf-8", Int64(body.count), extra: AirWebHTTP.pageHeaders)
@@ -241,14 +472,48 @@ nonisolated final class AirWebServer: @unchecked Sendable {
         try Self.sendAll(fd, Array(AirWebHTTP.head(code, reason, "application/json; charset=utf-8", Int64(b.count)).utf8) + b)
     }
 
-    private func state(_ fd: Int32, _ host: AirWebHost) throws {
-        let files = host.offered().map {
-            "{\"id\":\($0.id),\"name\":\(AirWebHTTP.jsonString($0.name)),\"size\":\($0.size),\"added\":\($0.added)}"
-        }.joined(separator: ",")
+    private func state(_ fd: Int32, _ req: AirWebHTTP.Request, _ host: AirWebHost) throws {
+        let c = AirWebHTTP.cleanClientId(req.query["c"])
+        touch(c, req.query["w"])
+        let peers = self.peers()
+        let pool = host.offered()
+        let sig = AirWebHTTP.signature(pool)
+        let same = req.query["v"] == sig
         let now = Int64(Date().timeIntervalSince1970 * 1000)
-        // "now" lets the page turn "added" into "1 min ago" even when the two clocks disagree.
-        try json(fd, 200, "OK", "{\"name\":\(AirWebHTTP.jsonString(host.deviceName())),\"free\":\(host.freeSpace())," +
-                 "\"now\":\(now),\"files\":[\(files)]}")
+        var s = "{\"name\":\(AirWebHTTP.jsonString(host.deviceName())),\"free\":\(host.freeSpace()),\"now\":\(now)"
+        // The page polls this often: slower the more browsers there are, so 50 of them stay cheap.
+        s += ",\"poll\":\(min(max(2_000 + 100 * peers.count, 2_000), 8_000)),\"v\":\"\(sig)\",\"count\":\(peers.count),\"peers\":["
+        // With a big crowd only some names are listed; the asking page is always among them (it marks itself "you").
+        var shown = Array(peers.prefix(Self.maxPeersListed))
+        if let mine = peers.first(where: { $0.id == c }), !shown.contains(where: { $0.id == c }) {
+            shown.removeLast(); shown.append(mine)
+        }
+        s += shown.map { "{\"id\":\(AirWebHTTP.jsonString($0.id)),\"name\":\(AirWebHTTP.jsonString($0.label))}" }
+            .joined(separator: ",")
+        s += "]"
+        if same {
+            s += ",\"same\":true"
+        } else {
+            s += ",\"files\":["
+            s += pool.map { f in
+                var o = "{\"id\":\(f.id),\"name\":\(AirWebHTTP.jsonString(f.name)),\"size\":\(f.size),\"added\":\(f.added)"
+                if let by = f.by { o += ",\"by\":\(AirWebHTTP.jsonString(by))" }
+                if let owner = f.owner, owner == c { o += ",\"own\":true" }
+                return o + "}"
+            }.joined(separator: ",")
+            s += "]"
+        }
+        s += "}"
+        try json(fd, 200, "OK", s)
+    }
+
+    private func qr(_ fd: Int32, _ req: AirWebHTTP.Request, _ host: AirWebHost) throws {
+        // The link the browser itself used (hotspot and Wi-Fi addresses differ), so whoever scans it can reach us.
+        guard let h = req.headers["host"], (3...80).contains(h.count),
+              h.allSatisfy({ $0.isLetter || $0.isNumber || ".-:[]".contains($0) }),
+              let matrix = host.qr("http://\(h)/?t=\(token)"), !matrix.isEmpty else { try simple(fd, 404, "Not Found"); return }
+        let body = Array(AirWebHTTP.qrSvg(matrix).utf8)
+        try Self.sendAll(fd, Array(AirWebHTTP.head(200, "OK", "image/svg+xml; charset=utf-8", Int64(body.count)).utf8) + body)
     }
 
     private func download(_ fd: Int32, _ req: AirWebHTTP.Request, _ host: AirWebHost) throws {
@@ -256,19 +521,19 @@ nonisolated final class AirWebServer: @unchecked Sendable {
         guard let id = Int(idPart), let f = host.offered().first(where: { $0.id == id }) else {
             try simple(fd, 404, "Not Found"); return
         }
-        let headOnly = req.method == "HEAD"
-        var file: Int32 = -1
-        if !headOnly {
-            file = Darwin.open(f.url.path, O_RDONLY | O_CLOEXEC)
-            if file < 0 { try simple(fd, 410, "Gone"); return }
-        }
-        defer { if file >= 0 { close(file) } }
-        lock.withLock { transfers += 1 }
-        defer { lock.withLock { transfers -= 1 } }
         let type = f.mime.flatMap { $0.contains("/") ? $0 : nil } ?? "application/octet-stream"
         let extra = "Content-Disposition: \(AirWebHTTP.contentDisposition(f.name))\r\n"
+        if req.method == "HEAD" {
+            try Self.sendAll(fd, Array(AirWebHTTP.head(200, "OK", type, f.size >= 0 ? f.size : nil, extra: extra).utf8))
+            return
+        }
+        guard acquireSlot() else { try busy(fd); return }
+        lock.withLock { transfers += 1 }
+        defer { lock.withLock { transfers -= 1 }; releaseSlot() }
+        let file = Darwin.open(f.url.path, O_RDONLY | O_CLOEXEC)
+        if file < 0 { try simple(fd, 410, "Gone"); return }
+        defer { close(file) }
         try Self.sendAll(fd, Array(AirWebHTTP.head(200, "OK", type, f.size >= 0 ? f.size : nil, extra: extra).utf8))
-        if headOnly { return }
         var buf = [UInt8](repeating: 0, count: Self.bufSize)
         var sent: Int64 = 0
         while true {
@@ -290,8 +555,18 @@ nonisolated final class AirWebServer: @unchecked Sendable {
         guard len >= 0 else { try simple(fd, 400, "Bad Request"); return }
         var name = host.cleanName(AirWebHTTP.baseName(req.query["n"] ?? ""))
         if name.isEmpty || name == "." || name == ".." || name.contains("/") { name = "file" }
-        let free = host.freeSpace()
-        if free >= 0 && len > free { try json(fd, 507, "Insufficient Storage", "{\"ok\":false,\"error\":\"space\"}"); return }
+        let who = touch(AirWebHTTP.cleanClientId(req.query["c"]), req.query["w"])
+        if host.offered().count >= limits.maxPool {
+            try json(fd, 507, "Insufficient Storage", "{\"ok\":false,\"error\":\"full\"}"); return
+        }
+        // Wait for a transfer slot first: the browser keeps sending into the connection's buffers meanwhile.
+        guard acquireSlot() else { try busy(fd); return }
+        lock.withLock { transfers += 1 }
+        defer { lock.withLock { transfers -= 1 }; releaseSlot() }
+        guard reserve(len, host) else {
+            try json(fd, 507, "Insufficient Storage", "{\"ok\":false,\"error\":\"space\"}"); return
+        }
+        defer { unreserve(len) }
         let target: AirWebUpload
         do { target = try AirWebUpload(dir: host.uploadDirectory(), name: name) } catch {
             try json(fd, 507, "Insufficient Storage", "{\"ok\":false,\"error\":\"save\"}"); return
@@ -299,13 +574,10 @@ nonisolated final class AirWebServer: @unchecked Sendable {
         if req.headers["expect"]?.lowercased() == "100-continue" {
             do { try Self.sendAll(fd, Array("HTTP/1.1 100 Continue\r\n\r\n".utf8)) } catch { target.discard(); throw error }
         }
-        let id: Int = lock.withLock { uploadIds += 1; transfers += 1; return uploadIds }
-        host.uploadStarted(id: id, name: name, size: len)
+        let id: Int = lock.withLock { uploadIds += 1; return uploadIds }
+        host.uploadStarted(id: id, name: name, size: len, by: who)
         var saved: URL?
-        defer {
-            lock.withLock { transfers -= 1 }
-            host.uploadFinished(id: id, saved: saved)
-        }
+        defer { host.uploadFinished(id: id, saved: saved) }
         do {
             var buf = [UInt8](repeating: 0, count: Self.bufSize)
             var got: Int64 = 0
@@ -348,6 +620,14 @@ nonisolated final class SocketReader {
     private var buf: [UInt8]
     private var start = 0
     private var end = 0
+    /// `DispatchTime` uptime nanoseconds after which reading stops (0 = none): a client dribbling bytes can't hold a
+    /// connection open.
+    var deadline: UInt64 = 0
+    /// A read timed out or the deadline passed.
+    private(set) var timedOut = false
+    func markTimedOut() { timedOut = true }
+    /// Bytes received so far.
+    private(set) var received = 0
 
     init(fd: Int32, size: Int) {
         self.fd = fd
@@ -356,8 +636,11 @@ nonisolated final class SocketReader {
 
     private func recvInto(_ p: UnsafeMutableRawPointer, _ max: Int) -> Int {
         while true {
+            if deadline != 0 && DispatchTime.now().uptimeNanoseconds > deadline { timedOut = true; return -1 }
             let n = recv(fd, p, max, 0)
             if n < 0 && errno == EINTR { continue }
+            if n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK) { timedOut = true }
+            if n > 0 { received += n }
             return n
         }
     }
@@ -475,6 +758,7 @@ nonisolated enum AirWebHTTP {
             if c < 0 { return nil }
             total += 1
             if total > maxHead { return nil }
+            if input.deadline != 0 && DispatchTime.now().uptimeNanoseconds > input.deadline { input.markTimedOut(); return nil }
             if c == 0x0A {
                 if line.last == 0x0D { line.removeLast() }
                 // ISO-8859-1: one byte, one character.
@@ -528,6 +812,55 @@ nonisolated enum AirWebHTTP {
 
     private static func decode(_ s: String, plusIsSpace: Bool) -> String? {
         (plusIsSpace ? s.replacingOccurrences(of: "+", with: " ") : s).removingPercentEncoding
+    }
+
+    /// The page's random client id, or nil when absent or not 8 to 40 of `A-Z a-z 0-9 _ -`.
+    static func cleanClientId(_ raw: String?) -> String? {
+        guard let raw, (8...40).contains(raw.utf8.count),
+              raw.utf8.allSatisfy({ ($0 >= 0x41 && $0 <= 0x5A) || ($0 >= 0x61 && $0 <= 0x7A) || ($0 >= 0x30 && $0 <= 0x39) || $0 == 0x5F || $0 == 0x2D })
+        else { return nil }
+        return raw
+    }
+
+    /// A device label for the page's "who is here": no control characters, collapsed spaces, 40 characters.
+    static func cleanLabel(_ raw: String?) -> String {
+        let kept = String(String.UnicodeScalarView((raw ?? "").unicodeScalars.filter {
+            $0.value >= 0x20 && $0.value != 0x7F && $0.value != 0x2028 && $0.value != 0x2029
+        }))
+        let collapsed = kept.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+        let cut = collapsed.count > 40 ? String(collapsed.prefix(40)).trimmingCharacters(in: .whitespaces) : collapsed
+        return cut.isEmpty ? "Browser" : cut
+    }
+
+    /// A short fingerprint of the pool (ids, names, sizes, owners): the page sends it back to skip an unchanged list.
+    /// (FNV-1a; the same value as the Android app's for the same pool, which doesn't matter but is nice.)
+    static func signature(_ pool: [AirWebFile]) -> String {
+        var h: UInt64 = 0xcbf29ce484222325
+        func mix(_ x: Int64) { h = (h ^ UInt64(bitPattern: x)) &* 0x100000001b3 }
+        func mix(_ s: String?) {
+            if let s { for u in s.utf16 { mix(Int64(u)) }; mix(0x1f) } else { mix(-1) }
+        }
+        for f in pool { mix(Int64(f.id)); mix(f.name); mix(f.size); mix(f.added); mix(f.by); mix(f.owner) }
+        mix(Int64(pool.count))
+        return String(h, radix: 16)
+    }
+
+    /// `matrix` (rows of modules, true = dark) as an SVG with the 4-module quiet zone scanners need, black on white.
+    static func qrSvg(_ matrix: [[Bool]]) -> String {
+        let n = matrix.count, q = 4
+        var s = "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 \(n + 2 * q) \(n + 2 * q)\" shape-rendering=\"crispEdges\">" +
+            "<rect width=\"100%\" height=\"100%\" fill=\"#fff\"/><path fill=\"#000\" d=\""
+        for y in 0..<n {
+            var x = 0
+            while x < n {
+                if !matrix[y][x] { x += 1; continue }
+                var e = x
+                while e < n && matrix[y][e] { e += 1 }
+                s += "M\(x + q) \(y + q)h\(e - x)v1h-\(e - x)z"
+                x = e
+            }
+        }
+        return s + "\"/></svg>"
     }
 
     /// Constant-time token check.

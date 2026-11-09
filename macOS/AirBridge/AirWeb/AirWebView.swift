@@ -18,6 +18,7 @@ struct AirWebView: View {
                 ScrollView {
                     TimelineView(.periodic(from: .now, by: 1)) { ctx in
                         VStack(alignment: .leading, spacing: 20) {
+                            peersSection
                             offeredSection(now: ctx.date)
                             receivedSection(now: ctx.date)
                         }
@@ -64,7 +65,7 @@ struct AirWebView: View {
                         .frame(width: 232, height: 232)
                 }
                 linkRow(link)
-                Text("On the other device, scan this with the camera and open the link. Both must be on the same Wi-Fi.")
+                Text("Scan this with a camera and open the link. Everyone who joins shares the same files. All devices must be on the same Wi-Fi.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -122,14 +123,32 @@ struct AirWebView: View {
         .padding(.top, 80)
     }
 
-    // MARK: Right: files
+    // MARK: Right: who is here, files
+
+    /// Everyone connected shares one pool: this Mac's files and everything browsers upload.
+    private var peersSection: some View {
+        VStack(alignment: .leading, spacing: Theme.sm) {
+            SectionHeader(title: "Connected")
+            card {
+                let names = session.peers.map(\.label)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(names.isEmpty ? "No one connected yet" : "\(names.count) \(names.count == 1 ? "device" : "devices") connected")
+                    Text(names.isEmpty ? "Everyone who joins sees the same files and can add or download."
+                         : names.prefix(4).joined(separator: " · ") + (names.count > 4 ? " · +\(names.count - 4)" : ""))
+                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.vertical, Theme.sm)
+                .accessibilityElement(children: .combine)
+            }
+        }
+    }
 
     private func offeredSection(now: Date) -> some View {
         VStack(alignment: .leading, spacing: Theme.sm) {
-            SectionHeader(title: "Files to send")
+            SectionHeader(title: "Shared by this Mac")
             card {
                 if session.offered.isEmpty {
-                    emptyRow("Nothing added", "The other device can still send files to this Mac. Add files to send them some.")
+                    emptyRow("Nothing added", "Everyone connected can add files too. Add some here to share them.")
                 } else {
                     ForEach(Array(session.offered.enumerated()), id: \.element.id) { i, f in
                         if i > 0 { Divider() }
@@ -163,10 +182,10 @@ struct AirWebView: View {
 
     private func receivedSection(now: Date) -> some View {
         VStack(alignment: .leading, spacing: Theme.sm) {
-            SectionHeader(title: "Received")
+            SectionHeader(title: "Added by others")
             card {
                 if session.received.isEmpty {
-                    emptyRow("Nothing yet", "Files sent from the other device appear here and in Downloads › AirBridge Transfers.")
+                    emptyRow("Nothing yet", "Files that others add appear here and in Downloads › AirBridge Transfers.")
                 } else {
                     let list = Array(session.received.reversed())
                     ForEach(Array(list.enumerated()), id: \.element.id) { i, r in
@@ -180,24 +199,38 @@ struct AirWebView: View {
 
     @ViewBuilder private func receivedRow(_ r: AirWebSession.Received, now: Date) -> some View {
         if let url = r.saved {
-            Button { NSWorkspace.shared.activateFileViewerSelecting([url]) } label: {
-                HStack(spacing: 10) {
-                    Image(systemName: "doc").foregroundStyle(.secondary).frame(width: 20)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(r.name).lineLimit(1).truncationMode(.middle)
-                        Text("\(formatBytes(r.size)) · \(airWebAgo(r.finished ?? r.started, now: now))")
-                            .font(.caption).foregroundStyle(.secondary)
+            HStack(spacing: 0) {
+                Button { NSWorkspace.shared.activateFileViewerSelecting([url]) } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: "doc").foregroundStyle(.secondary).frame(width: 20)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(r.name).lineLimit(1).truncationMode(.middle)
+                            let parts = [formatBytes(r.size), r.by.map { "from \($0)" }, airWebAgo(r.finished ?? r.started, now: now),
+                                         r.shared ? nil : "Not shared"]
+                            Text(parts.compactMap { $0 }.joined(separator: " · "))
+                                .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        }
+                        Spacer(minLength: Theme.sm)
+                        Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
                     }
-                    Spacer(minLength: Theme.sm)
-                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                    .padding(.vertical, Theme.xs)
                 }
-                .padding(.vertical, Theme.xs)
+                .buttonStyle(MenuRowButtonStyle())
+                .help("Show in Finder")
+                .accessibilityHint("Shows the file in Finder")
+                // Uploaded files are shared with everyone connected until you stop sharing them here.
+                if r.shared {
+                    Button { session.stopSharing(r.id) } label: {
+                        Image(systemName: "xmark").font(.system(size: 11, weight: .semibold)).frame(width: 22, height: 22)
+                    }
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(.secondary)
+                    .help("Stop sharing with the others")
+                    .accessibilityLabel("Stop sharing \(r.name)")
+                }
             }
-            .buttonStyle(MenuRowButtonStyle())
             .padding(.horizontal, -Theme.sm)
             .padding(.vertical, Theme.xs)
-            .help("Show in Finder")
-            .accessibilityHint("Shows the file in Finder")
         } else {
             HStack(spacing: 10) {
                 Image(systemName: r.failed ? "exclamationmark.circle" : "arrow.down.circle")

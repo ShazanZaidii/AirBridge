@@ -15,7 +15,8 @@ import UniformTypeIdentifiers
         var downloads = 0
     }
 
-    /// One upload from the browser: in progress, saved (`saved` set) or failed.
+    /// One upload from a browser: in progress, saved (`saved` set) or failed. A saved one is in the shared pool,
+    /// downloadable by everyone connected, until `shared` is turned off here.
     struct Received: Identifiable, Equatable {
         let id: Int
         var name: String
@@ -25,12 +26,19 @@ import UniformTypeIdentifiers
         var finished: Date?
         var saved: URL?
         var failed = false
+        /// Which browser sent it (its device label) and that page's client id.
+        var by: String?
+        var owner: String?
+        var shared = true
+        var downloads = 0
     }
 
     @Published private(set) var offered: [Offered] = [] {
         didSet { bridge.setOffered(offered.map(Self.webFile)) }
     }
     @Published private(set) var received: [Received] = []
+    /// The browsers connected right now.
+    @Published private(set) var peers: [AirWebPeer] = []
     @Published private(set) var addresses: [String] = []
     @Published private(set) var address: String?
     @Published private(set) var port: UInt16 = 0
@@ -111,6 +119,7 @@ import UniformTypeIdentifiers
         ticker = nil
         server.stop()
         port = 0
+        peers = []
         updateLink()
         if let activity { ProcessInfo.processInfo.endActivity(activity) }
         activity = nil
@@ -149,6 +158,13 @@ import UniformTypeIdentifiers
 
     func remove(_ id: Int) { offered.removeAll { $0.id == id } }
 
+    /// Stops sharing an uploaded file with the other browsers (it stays in Downloads on this Mac).
+    func stopSharing(_ id: Int) {
+        guard let i = received.firstIndex(where: { $0.id == id }) else { return }
+        received[i].shared = false
+        bridge.unshare(AirWebServer.uploadIdBase + id)
+    }
+
     private static func webFile(_ f: Offered) -> AirWebFile {
         let ext = f.url.pathExtension
         let mime = ext.isEmpty ? nil : UTType(filenameExtension: ext)?.preferredMIMEType
@@ -160,8 +176,8 @@ import UniformTypeIdentifiers
 
     private func handle(_ e: AirWebBridge.Event) {
         switch e {
-        case let .started(id, name, size):
-            received.append(Received(id: id, name: name, size: size, started: Date()))
+        case let .started(id, name, size, by):
+            received.append(Received(id: id, name: name, size: size, started: Date(), by: by?.label, owner: by?.id))
         case let .progress(id, done):
             if let i = received.firstIndex(where: { $0.id == id }) { received[i].done = done }
         case let .finished(id, saved):
@@ -175,7 +191,13 @@ import UniformTypeIdentifiers
                 received[i].failed = true
             }
         case let .downloaded(id):
-            if let i = offered.firstIndex(where: { $0.id == id }) { offered[i].downloads += 1 }
+            if id >= AirWebServer.uploadIdBase {
+                if let i = received.firstIndex(where: { $0.id == id - AirWebServer.uploadIdBase }) { received[i].downloads += 1 }
+            } else if let i = offered.firstIndex(where: { $0.id == id }) {
+                offered[i].downloads += 1
+            }
+        case let .peers(list):
+            peers = list
         }
     }
 
@@ -238,14 +260,20 @@ import UniformTypeIdentifiers
 /// The server's view of the session, safe to call from its connection threads.
 nonisolated final class AirWebBridge: AirWebHost, @unchecked Sendable {
     enum Event: Sendable {
-        case started(id: Int, name: String, size: Int64)
+        case started(id: Int, name: String, size: Int64, by: AirWebPeer?)
         case progress(id: Int, done: Int64)
         case finished(id: Int, saved: URL?)
         case downloaded(id: Int)
+        case peers([AirWebPeer])
     }
 
     private let lock = NSLock()
+    /// What this Mac added.
     private var files: [AirWebFile] = []
+    /// What browsers uploaded (pool id → file). Kept here, not in the session, so a file is in the pool before its
+    /// upload is answered (the session only hears about it a moment later, on the main thread).
+    private var uploads: [Int: AirWebFile] = [:]
+    private var uploaders: [Int: AirWebPeer] = [:]
     private var name = "Mac"
     var sink: (@Sendable (Event) -> Void)? {
         get { lock.withLock { _sink } }
@@ -265,7 +293,11 @@ nonisolated final class AirWebBridge: AirWebHost, @unchecked Sendable {
 
     func deviceName() -> String { lock.withLock { name } }
     func page() -> String { Self.pageText }
-    func offered() -> [AirWebFile] { lock.withLock { files } }
+    /// The shared pool: this Mac's files, then the uploads in the order they arrived.
+    func offered() -> [AirWebFile] { lock.withLock { files + uploads.values.sorted { $0.id < $1.id } } }
+
+    /// Takes an uploaded file out of the pool (it stays in Downloads on this Mac).
+    func unshare(_ poolId: Int) { _ = lock.withLock { uploads.removeValue(forKey: poolId) } }
 
     func freeSpace() -> Int64 {
         var dir = TransferService.destination
@@ -286,9 +318,41 @@ nonisolated final class AirWebBridge: AirWebHost, @unchecked Sendable {
         Proto.sanitizeFileName(raw.precomposedStringWithCanonicalMapping)
     }
 
-    func uploadStarted(id: Int, name: String, size: Int64) { sink?(.started(id: id, name: name, size: size)) }
+    func uploadStarted(id: Int, name: String, size: Int64, by: AirWebPeer?) {
+        if let by { lock.withLock { uploaders[id] = by } }
+        sink?(.started(id: id, name: name, size: size, by: by))
+    }
+    func peersChanged(_ peers: [AirWebPeer]) { sink?(.peers(peers)) }
+
+    /// The QR code of `text` from CoreImage, one module per pixel (no quiet zone; the page adds it).
+    func qr(_ text: String) -> [[Bool]]? {
+        let filter = CIFilter.qrCodeGenerator()
+        filter.message = Data(text.utf8)
+        filter.correctionLevel = "M"
+        guard let image = filter.outputImage else { return nil }
+        let w = Int(image.extent.width), h = Int(image.extent.height)
+        guard w > 0, w == h, w < 200 else { return nil }
+        var pixels = [UInt8](repeating: 0, count: w * h * 4)
+        let space = CGColorSpaceCreateDeviceRGB()
+        CIContext(options: [.workingColorSpace: NSNull()]).render(image, toBitmap: &pixels, rowBytes: w * 4,
+                                                                  bounds: image.extent, format: .RGBA8, colorSpace: space)
+        // Row 0 of the bitmap is the top of the image; a dark module has a low red value.
+        return (0..<h).map { y in (0..<w).map { x in pixels[(y * w + x) * 4] < 128 } }
+    }
     func uploadProgress(id: Int, done: Int64) { sink?(.progress(id: id, done: done)) }
-    func uploadFinished(id: Int, saved: URL?) { sink?(.finished(id: id, saved: saved)) }
+    func uploadFinished(id: Int, saved: URL?) {
+        let by: AirWebPeer? = lock.withLock { uploaders.removeValue(forKey: id) }
+        if let saved {
+            let values = try? saved.resourceValues(forKeys: [.fileSizeKey])
+            let ext = saved.pathExtension
+            let file = AirWebFile(id: AirWebServer.uploadIdBase + id, url: saved, name: saved.lastPathComponent,
+                                  size: Int64(values?.fileSize ?? -1),
+                                  mime: ext.isEmpty ? nil : UTType(filenameExtension: ext)?.preferredMIMEType,
+                                  added: Int64(Date().timeIntervalSince1970 * 1000), by: by?.label, owner: by?.id)
+            lock.withLock { uploads[file.id] = file }
+        }
+        sink?(.finished(id: id, saved: saved))
+    }
     func downloaded(_ file: AirWebFile) { sink?(.downloaded(id: file.id)) }
 }
 

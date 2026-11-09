@@ -1,8 +1,10 @@
 import Foundation
 import Combine
 
-/// Where the audio of the phone call currently is, and switching it (shared by the call window and the
-/// Bluetooth hands-free code). This file is the contract; the hands-free implementation fills it in.
+/// Where the audio of the phone call currently is, and switching it between the phone's own routes (earpiece,
+/// speaker, headsets). The `.mac` route exists in the contract for a computer that can be the phone's Bluetooth
+/// hands-free unit; macOS can't (the OS refuses the voice link to third-party apps, PROTOCOL §13.4), so on the Mac
+/// nothing sets it and the call window never offers it.
 @MainActor final class CallAudio: ObservableObject {
     static let shared = CallAudio()
 
@@ -15,7 +17,7 @@ import Combine
         case mac
     }
 
-    @Published private(set) var route: Route = .unavailable(reason: "Pair your phone with this Mac over Bluetooth to talk from here.")
+    @Published private(set) var route: Route = .phone
     /// The Mac's own microphone is muted (only meaningful while `route == .mac`).
     @Published private(set) var macMicMuted = false
     /// One short line to show with an available route, e.g. "Your phone is using Galaxy Buds2." (audio stays

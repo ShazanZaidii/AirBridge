@@ -175,11 +175,6 @@ struct IncomingCallBanner: View {
                 HStack(spacing: 12) {
                     RoundCallButton(kind: .decline, size: 34, enabled: ui.call.can.contains("decline")) { ui.perform(.decline) }
                     RoundCallButton(kind: .accept, size: 34, enabled: ui.call.can.contains("answer")) { ui.perform(.answer) }
-                        // Accept answers here (the audio comes to this Mac when it can); the menu offers the phone.
-                        .contextMenu {
-                            Button("Answer on This Mac") { ui.perform(.answer) }
-                            Button("Answer on \(ui.phoneName)") { ui.perform(.answerOnPhone) }
-                        }
                 }
                 .transition(.opacity.combined(with: .scale(scale: 0.9)))
             }

@@ -45,7 +45,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         InputInterceptor.shared.start()
         DropDock.shared.start()
         PhoneNotifCenter.shared.start()
-        CallAudioController.shared.install()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -146,8 +145,17 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
             }
             // airbridge://debug/fake_call?state=ringing|active|ended&name=Asha&label=Mobile — the call UI without a phone.
             if url.path == "/fake_call" { CallPanels.debugFakeCall(q) }
-            // airbridge://debug/talk_setup — the "Talk from your Mac" window; pro_setup?to=ID — the Pro Mirroring one.
-            if url.path == "/talk_setup" { TalkFromMacWindow.shared.show() }
+            // airbridge://debug/airweb?out=/path — opens AirWeb and writes its local link (127.0.0.1) to that file.
+            if url.path == "/airweb", let out = q.first(where: { $0.name == "out" })?.value {
+                AirWebWindow.shared.show()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                    guard let sess = AirWebWindow.shared.session, sess.port != 0 else { return }
+                    try? "http://127.0.0.1:\(sess.port)/?t=\(sess.token)".write(toFile: out, atomically: true, encoding: .utf8)
+                }
+            }
+            // airbridge://debug/airweb_stop — closes AirWeb.
+            if url.path == "/airweb_stop" { AirWebWindow.shared.stop() }
+            // airbridge://debug/pro_setup?to=ID — the Pro Mirroring setup window.
             if url.path == "/pro_setup", let peer { ProMirrorSetupWindow.shared.show(peerId: peer.id, name: peer.name) }
             // airbridge://debug/phone_route?dev=speaker — the Audio menu's pick of one of the phone's routes.
             if url.path == "/phone_route", let dev = q.first(where: { $0.name == "dev" })?.value {
@@ -296,6 +304,64 @@ struct MenuRowButtonStyle: ButtonStyle {
     }
 }
 
+/// A row that opens and closes what is under it: the whole row is the button, not just the chevron
+/// (SwiftUI's `DisclosureGroup` in a menu bar window only reacts to a tap on its small chevron).
+struct ExpandRow<Label: View, Content: View>: View {
+    @Binding var isExpanded: Bool
+    var highlight = true
+    /// The highlight reaches the menu's edges (a row inside padded content).
+    var bleed = false
+    @ViewBuilder var label: () -> Label
+    @ViewBuilder var content: () -> Content
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button {
+                if reduceMotion { isExpanded.toggle() } else { withAnimation(Theme.motion) { isExpanded.toggle() } }
+            } label: {
+                HStack(spacing: 6) {
+                    label()
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                }
+            }
+            .buttonStyle(ExpandRowStyle(highlight: highlight))
+            .padding(.horizontal, bleed ? -Theme.sm : 0)
+            .accessibilityAddTraits(.isHeader)
+            .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
+            if isExpanded {
+                content()
+                    .transition(.opacity)
+            }
+        }
+    }
+}
+
+/// Full-width hover highlight for [ExpandRow] (the plain-row look of [MenuRowButtonStyle], without its padding
+/// when the row sits in a card that already has some).
+struct ExpandRowStyle: ButtonStyle {
+    var highlight = true
+    @State private var hovering = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, Theme.sm)
+            .padding(.vertical, 5)
+            .contentShape(Rectangle())
+            .background(RoundedRectangle(cornerRadius: 6)
+                .fill(Color.primary.opacity(highlight ? (configuration.isPressed ? 0.14 : (hovering ? 0.08 : 0)) : 0)))
+            .onHover { h in
+                if reduceMotion { hovering = h } else { withAnimation(Theme.motion) { hovering = h } }
+            }
+    }
+}
+
 /// A square, quiet action button for the menu's action bar.
 struct ActionTile: View {
     let title: String
@@ -379,8 +445,10 @@ struct MenuView: View {
                             .buttonStyle(.borderless).accessibilityLabel("Close")
                     }
                     pairingSection
-                    DisclosureGroup(isExpanded: $showHosts) { hostsSection } label: {
+                    ExpandRow(isExpanded: $showHosts, bleed: true) {
                         Text("Connect by address").font(.callout)
+                    } content: {
+                        hostsSection
                     }
                 }
             }
@@ -412,11 +480,11 @@ struct MenuView: View {
             Divider()
 
             VStack(alignment: .leading, spacing: 0) {
-                DisclosureGroup(isExpanded: $showSettings) { settingsList } label: {
+                ExpandRow(isExpanded: $showSettings) {
                     Label("Settings", systemImage: "gearshape")
+                } content: {
+                    settingsList.padding(.horizontal, Theme.sm)
                 }
-                .padding(.horizontal, Theme.sm)
-                .padding(.vertical, 5)
                 Button { NSApplication.shared.terminate(nil) } label: {
                     Label("Quit AirBridge", systemImage: "power")
                 }
@@ -492,9 +560,6 @@ struct MenuView: View {
             settingsSection
             dropSettingsSection
             phoneSettingsSection
-            Button { CallAudio.shared.openSetup() } label: {
-                Label("Talk from your Mac…", systemImage: "phone.connection")
-            }
             if !model.screenCaptureAllowed {
                 Button { model.requestScreenCapture() } label: {
                     Label("Let phones show this Mac's screen…", systemImage: "rectangle.on.rectangle")

@@ -196,8 +196,6 @@ import SwiftUI
             l.ui.ringingHere = false
             updateRinger()
             send(c, "answer")
-            // Answered on the Mac: talk on the Mac when it can carry the call (as with an iPhone).
-            if case .unavailable = CallAudio.shared.route {} else { CallAudio.shared.useMac() }
         case .answerOnPhone:
             l.answeredHere = true
             l.ring = nil

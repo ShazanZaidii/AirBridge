@@ -1,11 +1,9 @@
 import AppKit
 import SwiftUI
 
-/// The call's "Audio" menu, built like the macOS sound menu / FaceTime's: a real NSMenu with a "This Mac" section
-/// (Microphone and Speaker, each device with a checkmark on the one in use) and a "Phone" section (earpiece,
-/// speaker, wired and Bluetooth headsets by name, from the phone). Talking from the Mac needs the Bluetooth
-/// hands-free link (`CallAudio`); while it's unavailable the Mac rows are greyed out with the reason and a
-/// "Set up Talk from your Mac…" item.
+/// The call's "Audio" menu, built like the macOS sound menu: a real NSMenu with the phone's routes (earpiece,
+/// speaker, wired and Bluetooth headsets by name, as the phone reports them) and a checkmark on the one in use.
+/// The Mac itself is not offered: macOS refuses the Bluetooth voice link to third-party apps (PROTOCOL §13.4).
 @MainActor final class AudioRouteMenu: NSObject {
     private let ui: CallUI
     private var handlers: [() -> Void] = []
@@ -14,43 +12,9 @@ import SwiftUI
 
     func make() -> NSMenu {
         handlers = []
-        let ca = CallAudio.shared
         let menu = NSMenu(title: "Audio")
         menu.autoenablesItems = false
-        let onMac = ca.route == .mac
-        var macReason: String?
-        if case .unavailable(let r) = ca.route { macReason = r }
-
-        // This Mac
-        menu.addItem(.sectionHeader(title: "This Mac"))
-        if ca.macInputs.isEmpty && ca.macOutputs.isEmpty {
-            let it = item("Mac Microphone and Speakers", symbol: "laptopcomputer", checked: onMac, enabled: macReason == nil) { ca.useMac() }
-            menu.addItem(it)
-        } else {
-            menu.addItem(subheader("Microphone"))
-            for d in ca.macInputs {
-                menu.addItem(item(d.name, symbol: d.symbol, checked: onMac && d.id == ca.selectedMacInput, enabled: macReason == nil) {
-                    if CallAudio.shared.route != .mac { CallAudio.shared.useMac() }
-                    CallAudio.shared.selectMacInput(d.id)
-                })
-            }
-            menu.addItem(subheader("Speaker"))
-            for d in ca.macOutputs {
-                menu.addItem(item(d.name, symbol: d.symbol, checked: onMac && d.id == ca.selectedMacOutput, enabled: macReason == nil) {
-                    if CallAudio.shared.route != .mac { CallAudio.shared.useMac() }
-                    CallAudio.shared.selectMacOutput(d.id)
-                })
-            }
-        }
-        if let r = macReason {
-            menu.addItem(note(r))
-            menu.addItem(item("Set up Talk from your Mac…", symbol: nil, checked: false, enabled: true) { CallAudio.shared.openSetup() })
-        } else if let n = ca.note {
-            menu.addItem(note(n))
-        }
-
-        // Phone
-        menu.addItem(.separator())
+        let onMac = false
         menu.addItem(.sectionHeader(title: "Phone"))
         let routes = RouteText.menuRoutes(ui.call.routes)
         if routes.isEmpty {

@@ -335,9 +335,6 @@ nonisolated final class Session: @unchecked Sendable {
             ClipboardSync.receive(msg, from: peerId)
         case _ where t.hasPrefix("xfer_"):
             transfers?.handle(t, msg)
-        case _ where t.hasPrefix("call_audio_"):
-            // §13.4 the phone's Bluetooth facts for call audio over hands-free.
-            CallAudioController.receive(from: peerId, msg)
         case _ where t.hasPrefix("notif_") || t.hasPrefix("call_"):
             // §13 phone notifications and calls: shown by PhoneNotifCenter, never the input half.
             PhoneNotifCenter.receive(from: peerId, msg)

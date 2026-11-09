@@ -212,8 +212,8 @@ final class MirrorScreenView: NSView {
             // Other shortcuts (⌘C, ⌘V, ⌘A, ⌘Z…) go to the phone. macOS sends no key-up for a ⌘ combo, so send both.
             guard canControl, let hid = KeyMap.hid(forMac: e.keyCode) else { return true }
             let mods = MirrorGeometry.mods(f)
-            send(["t": "key", "hid": hid, "down": true, "mods": mods])
-            send(["t": "key", "hid": hid, "down": false, "mods": mods])
+            send(["t": "key", "mirror": true, "hid": hid, "down": true, "mods": mods])
+            send(["t": "key", "mirror": true, "hid": hid, "down": false, "mods": mods])
             return true
         }
     }
@@ -226,7 +226,7 @@ final class MirrorScreenView: NSView {
         }
         guard let hid = KeyMap.hid(forMac: e.keyCode) else { return }
         let mods = MirrorGeometry.mods(e.modifierFlags)
-        var msg: [String: Any] = ["t": "key", "hid": hid, "down": true, "mods": mods]
+        var msg: [String: Any] = ["t": "key", "mirror": true, "hid": hid, "down": true, "mods": mods]
         if e.isARepeat { msg["rep"] = true }
         if let t = MirrorGeometry.text(e.characters, mods: mods) {
             msg["text"] = t
@@ -244,22 +244,22 @@ final class MirrorScreenView: NSView {
 
     override func keyUp(with e: NSEvent) {
         guard heldKeys.remove(e.keyCode) != nil, let hid = KeyMap.hid(forMac: e.keyCode) else { return }
-        send(["t": "key", "hid": hid, "down": false, "mods": MirrorGeometry.mods(e.modifierFlags)])
+        send(["t": "key", "mirror": true, "hid": hid, "down": false, "mods": MirrorGeometry.mods(e.modifierFlags)])
     }
 
     override func flagsChanged(with e: NSEvent) {
         guard canControl else { return }
         let kc = e.keyCode
         if kc == 0x39 { // Caps Lock: one event per toggle, sent as a full press
-            send(["t": "key", "hid": 0x39, "down": true, "mods": MirrorGeometry.mods(e.modifierFlags)])
-            send(["t": "key", "hid": 0x39, "down": false, "mods": MirrorGeometry.mods(e.modifierFlags)])
+            send(["t": "key", "mirror": true, "hid": 0x39, "down": true, "mods": MirrorGeometry.mods(e.modifierFlags)])
+            send(["t": "key", "mirror": true, "hid": 0x39, "down": false, "mods": MirrorGeometry.mods(e.modifierFlags)])
             return
         }
         guard let f = KeyMap.modifierFlags(forMac: kc), let hid = KeyMap.hid(forMac: kc) else { return }
         let down = UInt64(e.modifierFlags.rawValue) & f.device != 0
         if down { guard heldKeys.insert(kc).inserted else { return } }
         else { guard heldKeys.remove(kc) != nil else { return } }
-        send(["t": "key", "hid": hid, "down": down, "mods": MirrorGeometry.mods(e.modifierFlags)])
+        send(["t": "key", "mirror": true, "hid": hid, "down": down, "mods": MirrorGeometry.mods(e.modifierFlags)])
     }
 
     /// Focus lost, window closing, control gone: every key and the button come back up on the phone.
@@ -270,7 +270,7 @@ final class MirrorScreenView: NSView {
             send(["t": "ptr_btn", "b": 0, "down": false])
         }
         for kc in heldKeys {
-            if let hid = KeyMap.hid(forMac: kc) { send(["t": "key", "hid": hid, "down": false, "mods": 0]) }
+            if let hid = KeyMap.hid(forMac: kc) { send(["t": "key", "mirror": true, "hid": hid, "down": false, "mods": 0]) }
         }
         heldKeys.removeAll()
     }

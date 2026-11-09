@@ -14,9 +14,8 @@ nonisolated enum Proto {
     /// `drag_files`: we show a drag carried onto us and take the files (§8.8).
     /// `mirror_sink`: shows a phone's screen in a window and controls it (§8.7, phone as source).
     /// `notif_sink` / `call_sink`: shows a phone's notifications and calls and sends replies/controls back (§13).
-    /// `call_audio`: carries call audio as the phone's Bluetooth hands-free unit, wants `call_audio_state` (§13.4).
     /// `call_ring`: decides where calls ring from the phone's presence and beacon (§13.5).
-    static let baseCaps = ["clip", "xfer", "ctl_source", "ctl_target", "drag_files", "mirror_sink", "notif_sink", "call_sink", "call_audio", "call_ring"]
+    static let baseCaps = ["clip", "xfer", "ctl_source", "ctl_target", "drag_files", "mirror_sink", "notif_sink", "call_sink", "call_ring"]
 
     /// `hello.caps`: `mirror_source` only while the screen-recording permission is granted (§8.7).
     static var caps: [String] { CGPreflightScreenCaptureAccess() ? baseCaps + ["mirror_source"] : baseCaps }
