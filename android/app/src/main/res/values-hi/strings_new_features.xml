@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="drag_items">
+        <item quantity="one">%d आइटम</item>
+        <item quantity="other">%d आइटम</item>
+    </plurals>
+    <string name="drag_and_more">%1$s और बाकी</string>
+    <string name="drag_receiving_one">%2$s से %1$s आ रही है</string>
+    <plurals name="drag_receiving_many">
+        <item quantity="one">%2$s से %1$d आइटम आ रहा है</item>
+        <item quantity="other">%2$s से %1$d आइटम आ रहे हैं</item>
+    </plurals>
+    <string name="pm_channel_request">स्क्रीन शेयर के अनुरोध</string>
+    <string name="pm_channel_ongoing">स्क्रीन शेयर</string>
+    <string name="pm_request_title">%1$s इस फ़ोन की स्क्रीन दिखाना चाहता है</string>
+    <string name="pm_request_text">अनुमति देने के लिए टैप करें</string>
+    <string name="pm_request_decline">अभी नहीं</string>
+    <string name="pm_ongoing_title">आपकी स्क्रीन %1$s पर दिख रही है</string>
+    <string name="pm_ongoing_text">स्क्रीन पर जो भी है, वहां दिख रहा है</string>
+    <string name="pm_stop">रोकें</string>
+    <string name="pm_sink_allow">%1$s पर अनुमति दें टैप करें</string>
+    <string name="pm_sink_denied">%1$s ने स्क्रीन शेयर करने की अनुमति नहीं दी</string>
+    <string name="pm_sink_stopped">%1$s ने स्क्रीन शेयर करना बंद कर दिया</string>
+    <string name="lk_fallback">%1$s। अभी के कनेक्शन से भेज रहे हैं।</string>
+</resources>

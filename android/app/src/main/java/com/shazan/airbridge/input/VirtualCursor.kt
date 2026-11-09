@@ -14,7 +14,9 @@ import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
 import android.widget.FrameLayout
+import android.widget.TextView
 import kotlin.math.abs
+import kotlin.math.max
 
 /**
  * Accessibility overlay that draws the virtual cursor, smoothed with a Choreographer loop.
@@ -26,6 +28,10 @@ class VirtualCursor(private val ctx: Context) {
     private companion object {
         const val SMOOTHING = 0.45f // owner-tuned feel
         const val FADE_MS = 120L // §8.6 smooth hand-off
+        const val GHOST_IN_MS = 260L
+        const val GHOST_OUT_MS = 140L
+        const val GHOST_DROP_MS = 200L
+        const val NOTE_MS = 2_200L
     }
 
     private val wm = ctx.getSystemService(WindowManager::class.java)
@@ -34,6 +40,11 @@ class VirtualCursor(private val ctx: Context) {
 
     private var container: FrameLayout? = null
     private var dot: DotView? = null
+    /** §8.8: card that follows the cursor while a controller carries files over. */
+    private var ghost: DragGhostView? = null
+    private var note: TextView? = null
+    private val ghostDx = 8 * density   // card corner relative to the cursor hotspot
+    private val ghostDy = 12 * density
     private var offX = 0 // overlay window origin on screen (normally 0,0)
     private var offY = 0
 
@@ -113,6 +124,8 @@ class VirtualCursor(private val ctx: Context) {
         container?.let { try { wm.removeView(it) } catch (_: Throwable) {} }
         container = null
         dot = null
+        ghost = null
+        note = null
     }
 
     /** True display size in the current orientation (the overlay covers all of it, bars and cutout included). */
@@ -178,6 +191,91 @@ class VirtualCursor(private val ctx: Context) {
         fadingOut = false
         if (framePending) { choreographer.removeFrameCallback(frame); framePending = false }
         dot?.let { it.animate().cancel(); it.alpha = 1f; it.visibility = View.GONE }
+        ghost?.let { it.animate().cancel(); it.visibility = View.GONE }
+    }
+
+    // ---------------------------------------------------------------- carried drag (§8.8)
+
+    val ghostShown: Boolean get() = ghost?.visibility == View.VISIBLE
+
+    /** Show (or update) the drag ghost next to the cursor; springs in when it wasn't up. */
+    fun showGhost(title: String, subtitle: String, kind: String, count: Int) {
+        val c = container ?: return
+        val g = ghost ?: DragGhostView(ctx).also {
+            it.visibility = View.GONE
+            c.addView(it, FrameLayout.LayoutParams(it.fullW, it.fullH))
+            ghost = it
+        }
+        g.bind(title, subtitle, kind, count)
+        g.animate().cancel()
+        if (g.visibility != View.VISIBLE) {
+            g.visibility = View.VISIBLE
+            if (animationsOn()) {
+                g.alpha = 0f; g.scaleX = 0.82f; g.scaleY = 0.82f
+                g.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(GHOST_IN_MS)
+                    .setInterpolator(android.view.animation.OvershootInterpolator(1.6f)).start()
+            } else { g.alpha = 1f; g.scaleX = 1f; g.scaleY = 1f }
+        } else { g.alpha = 1f; g.scaleX = 1f; g.scaleY = 1f }
+        apply()
+    }
+
+    /** [dropped] = it was let go here: shrink into the cursor; otherwise just fade. */
+    fun hideGhost(dropped: Boolean) {
+        val g = ghost ?: return
+        if (g.visibility != View.VISIBLE) return
+        g.animate().cancel()
+        if (!animationsOn()) { g.visibility = View.GONE; return }
+        val a = g.animate().alpha(0f)
+        if (dropped) a.scaleX(0.5f).scaleY(0.5f).setDuration(GHOST_DROP_MS).setInterpolator(android.view.animation.AccelerateInterpolator(1.4f))
+        else a.setDuration(GHOST_OUT_MS)
+        a.withEndAction { if (g.alpha == 0f) g.visibility = View.GONE }.start()
+    }
+
+    /** Short line under the cursor ("Receiving photo.jpg from Shazan's Mac"), gone after a moment. */
+    fun showNote(text: String) {
+        val c = container ?: return
+        val n = note ?: TextView(ctx).also {
+            it.setTextColor(Color.WHITE)
+            it.textSize = 13f
+            it.isSingleLine = true
+            it.ellipsize = android.text.TextUtils.TruncateAt.MIDDLE
+            it.background = android.graphics.drawable.GradientDrawable().apply {
+                setColor(Color.parseColor("#F22A2C30")); cornerRadius = 999f
+                setStroke((1 * density).toInt().coerceAtLeast(1), Color.parseColor("#33FFFFFF"))
+            }
+            val h = (12 * density).toInt(); val v = (7 * density).toInt()
+            it.setPadding(h, v, h, v)
+            it.elevation = 12f
+            it.visibility = View.GONE
+            c.addView(it, FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT))
+            note = it
+        }
+        n.animate().cancel()
+        n.text = text
+        n.maxWidth = (screenW * 0.8f).toInt().coerceAtLeast((160 * density).toInt())
+        n.measure(View.MeasureSpec.makeMeasureSpec(screenW, View.MeasureSpec.AT_MOST),
+            View.MeasureSpec.makeMeasureSpec(screenH, View.MeasureSpec.AT_MOST))
+        val w = n.measuredWidth.toFloat()
+        val h = n.measuredHeight.toFloat()
+        val m = 12 * density
+        val nx = (curX - w / 2).coerceIn(m, max(m, screenW - w - m))
+        val below = curY + 26 * density
+        val ny = if (below + h + m < screenH) below else (curY - 26 * density - h).coerceAtLeast(m)
+        n.translationX = nx - offX
+        n.translationY = ny - offY
+        n.visibility = View.VISIBLE
+        if (animationsOn()) {
+            n.alpha = 0f; n.scaleX = 0.94f; n.scaleY = 0.94f
+            n.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(180).start()
+        } else n.alpha = 1f
+        n.removeCallbacks(hideNote)
+        n.postDelayed(hideNote, NOTE_MS)
+    }
+
+    private val hideNote = Runnable {
+        val n = note ?: return@Runnable
+        if (!animationsOn()) { n.visibility = View.GONE; return@Runnable }
+        n.animate().alpha(0f).setDuration(220).withEndAction { if (n.alpha == 0f) n.visibility = View.GONE }.start()
     }
 
     fun setPressed(pressed: Boolean) { dot?.setPressedLook(pressed) }
@@ -190,6 +288,12 @@ class VirtualCursor(private val ctx: Context) {
     }
 
     private fun apply() {
+        ghost?.let { g ->
+            if (g.visibility == View.VISIBLE) {
+                g.translationX = curX - offX + ghostDx - g.cardInset
+                g.translationY = curY - offY + ghostDy - g.cardInset
+            }
+        }
         val d = dot ?: return
         d.translationX = curX - offX - sizePx / 2f
         d.translationY = curY - offY - sizePx / 2f

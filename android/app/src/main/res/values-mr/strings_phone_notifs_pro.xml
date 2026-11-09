@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="pn_listener_name">एअरब्रिज नोटिफिकेशन्स</string>
+    <string name="pn_section">सूचना आणि कॉल</string>
+
+    <string name="pn_notifs_title">फोनच्या सूचना कॉंप्युटरवर दाखवा</string>
+    <string name="pn_notifs_sub">पेअर केलेल्या Mac किंवा PC वरूनच त्या पाहा, त्यांना उत्तर द्या किंवा काढून टाका. त्या एन्क्रिप्ट होऊन फक्त तुमच्याच डिव्हाइसवर जातात.</string>
+    <string name="pn_access_off_title">सूचनांचा ॲक्सेस बंद आहे</string>
+    <string name="pn_access_off_sub">सिस्टम सेटिंग्जमध्ये “%1$s” चालू करा. त्याचे स्विच धूसर असल्यास, आधी ॲप माहिती › ⋮ › प्रतिबंधित सेटिंग्जना अनुमती द्या उघडा आणि मग पुन्हा प्रयत्न करा.</string>
+    <string name="pn_app_info">ॲप माहिती</string>
+
+    <string name="pn_access_dialog_title">कॉंप्युटरवर फोनच्या सूचना</string>
+    <string name="pn_access_dialog_body">एअरब्रिज या फोनवर येणाऱ्या सूचना वाचून तुम्ही पेअर केलेल्या कॉंप्युटरवर दाखवेल, म्हणजे तुम्ही तिथूनच उत्तर देऊ शकता किंवा त्या काढून टाकू शकता.\n\nत्या एन्क्रिप्ट होऊन फक्त तुमच्याच पेअर केलेल्या डिव्हाइसवर जातात आणि कुठेही अपलोड होत नाहीत. हे स्विच बंद असताना काहीही पाठवले जात नाही.\n\nपुढच्या स्क्रीनवर “%1$s” चालू करा. स्विच धूसर असल्यास, मागे या, ॲप माहिती › ⋮ › प्रतिबंधित सेटिंग्जना अनुमती द्या उघडा आणि पुन्हा प्रयत्न करा.</string>
+    <string name="pn_continue">पुढे जा</string>
+
+    <string name="pn_apps_title">ॲप्स</string>
+    <string name="pn_apps_all">सर्व ॲप्स</string>
+    <plurals name="pn_apps_muted">
+        <item quantity="one">%1$d ॲप लपवले आहे</item>
+        <item quantity="other">%1$d ॲप्स लपवली आहेत</item>
+    </plurals>
+    <string name="pn_apps_header">ज्या ॲप्सचे स्विच चालू आहे, त्यांच्या सूचना तुमच्या कॉंप्युटरवर पोहोचतात. अलीकडे सूचना पाठवलेली ॲप्स सर्वात वर दिसतात.</string>
+    <string name="pn_apps_loading">ॲप्स लोड होत आहेत…</string>
+    <string name="pn_private_hint">लॉक स्क्रीनवर खाजगी मजकूर लपवला जात असल्यास, तुम्ही फोन अनलॉक करेपर्यंत सूचना थांबून राहतात.</string>
+
+    <string name="pn_calls_title">कॉंप्युटरवर कॉल</string>
+    <string name="pn_calls_sub">कोण कॉल करत आहे ते पाहा आणि कॉंप्युटरवरूनच कॉल उचला, नाकारा किंवा संपवा. Mac वर तुम्ही त्यावरूनच बोलूही शकता.</string>
+    <string name="pn_calls_dialog_body">कॉल दाखवण्यासाठी आणि ते उचलण्यासाठी किंवा संपवण्यासाठी एअरब्रिजला फोनची परवानगी हवी आहे. संपर्कांची परवानगी पर्यायी आहे; ती फक्त नंबरऐवजी नावे दाखवण्यासाठी वापरली जाते.\n\nकॉल फोनवरच चालू राहतो: फोनचा स्पीकर, इअरपीस किंवा Bluetooth हेडसेट वापरून बोला. Android कोणत्याही ॲपला कॉलचा आवाज कॉंप्युटरवर नेऊ देत नाही.\n\nकॉलची माहिती एन्क्रिप्ट होऊन फक्त तुमच्याच पेअर केलेल्या डिव्हाइसवर जाते.</string>
+    <string name="pn_calls_limited_title">फोनची परवानगी बंद आहे</string>
+    <string name="pn_calls_limited_sub">तुमचे फोन ॲप ज्या कॉलची सूचना दाखवते, फक्त तेच कॉल कॉंप्युटरवर पोहोचतात, आणि कॉल उचलणे कदाचित चालणार नाही. ॲप परवानग्यांमध्ये फोनला अनुमती द्या.</string>
+    <string name="pn_speaker_title">कॉंप्युटरवरून कॉल उचलल्यावर स्पीकर चालू करा</string>
+    <string name="pn_speaker_sub">म्हणजे तुम्ही डेस्कवर बसूनच बोलू शकता. काही फोनवर हे चालत नाही.</string>
+
+    <string name="promirror_notif_title">वायरलेस डीबगिंग चालू करा</string>
+    <string name="promirror_notif_text">Pro मिररिंगसाठी डेव्हलपर पर्याय उघडायला टॅप करा</string>
+</resources>

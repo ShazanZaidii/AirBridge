@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="ch_live">ನಡೆಯುತ್ತಿರುವ ವರ್ಗಾವಣೆಗಳು</string>
+    <string name="xn_file_of">ಫೈಲ್ %1$d / %2$d</string>
+    <string name="xn_sec_left">%1$d ಸೆ. ಉಳಿದಿದೆ</string>
+    <string name="xn_min_left">%1$d ನಿಮಿ. ಉಳಿದಿದೆ</string>
+</resources>

@@ -95,13 +95,13 @@ class SystemActions(private val host: TargetController) {
     /** Only adjusts when manual brightness is already active; never flips auto-brightness off. */
     private fun brightness(dir: Int) {
         if (!Settings.System.canWrite(svc)) {
-            toastOnce("perm", "Grant 'Modify system settings' to AirBridge to change brightness")
+            toastOnce("perm", svc.getString(com.shazan.airbridge.R.string.sa_brightness_perm))
             return
         }
         val cr = svc.contentResolver
         val mode = Settings.System.getInt(cr, Settings.System.SCREEN_BRIGHTNESS_MODE, Settings.System.SCREEN_BRIGHTNESS_MODE_MANUAL)
         if (mode == Settings.System.SCREEN_BRIGHTNESS_MODE_AUTOMATIC) {
-            toastOnce("auto", "Auto-brightness is on — AirBridge only adjusts manual brightness")
+            toastOnce("auto", svc.getString(com.shazan.airbridge.R.string.sa_auto_brightness))
             return
         }
         val cur = Settings.System.getInt(cr, Settings.System.SCREEN_BRIGHTNESS, 128)
@@ -121,19 +121,19 @@ class SystemActions(private val host: TargetController) {
         try {
             svc.startActivity(Intent(Intent.ACTION_VOICE_COMMAND).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP))
         } catch (_: Throwable) {
-            Toast.makeText(svc, "No assistant app found", Toast.LENGTH_SHORT).show()
+            Toast.makeText(svc, svc.getString(com.shazan.airbridge.R.string.sa_no_assistant), Toast.LENGTH_SHORT).show()
         }
     }
 
     private fun dnd() {
         val nm = svc.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         if (!nm.isNotificationPolicyAccessGranted) {
-            Toast.makeText(svc, "Grant 'Do Not Disturb access' to AirBridge in Android Settings", Toast.LENGTH_LONG).show()
+            Toast.makeText(svc, svc.getString(com.shazan.airbridge.R.string.sa_dnd_perm), Toast.LENGTH_LONG).show()
             return
         }
         val on = nm.currentInterruptionFilter == NotificationManager.INTERRUPTION_FILTER_ALL
         nm.setInterruptionFilter(if (on) NotificationManager.INTERRUPTION_FILTER_PRIORITY else NotificationManager.INTERRUPTION_FILTER_ALL)
-        Toast.makeText(svc, if (on) "DND: ON" else "DND: OFF", Toast.LENGTH_SHORT).show()
+        Toast.makeText(svc, svc.getString(if (on) com.shazan.airbridge.R.string.sa_dnd_on else com.shazan.airbridge.R.string.sa_dnd_off), Toast.LENGTH_SHORT).show()
     }
 
     private fun toastOnce(key: String, text: String) {

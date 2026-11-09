@@ -242,6 +242,7 @@ class Session:
         self.priv = None
         self.ready = True
         log(f"READY (encrypted) with {h['name']} ({h['plat']}) caps={h.get('caps')}")
+        self.last_rx = time.time()  # liveness starts at ready, not at the (slow, human) pairing
         return True
 
     async def run_host_handshake(self):
@@ -311,6 +312,7 @@ class Session:
         self.priv = None
         self.ready = True
         log(f"READY (encrypted) with {h['name']} ({h['plat']}) caps={h.get('caps')}")
+        self.last_rx = time.time()  # liveness starts at ready, not at the (slow, human) pairing
         return True
 
     # -- steady state --------------------------------------------------------

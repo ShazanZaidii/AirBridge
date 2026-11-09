@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- English source text. Translations live in values-<lang>/strings_trackpad.xml. -->
+<resources>
+    <string name="tp_mode_trackpad">Trackpad</string>
+    <string name="tp_mode_keyboard">Keyboard</string>
+    <string name="tp_mode_screen">Screen</string>
+    <string name="tp_controlled_by">Being controlled by %1$s</string>
+    <string name="tp_not_connected_to">Not connected to %1$s</string>
+    <string name="tp_no_computer">No computer connected</string>
+    <string name="tp_controlled_body">%1$s is controlling this phone, so this phone can\'t control it back.</string>
+    <string name="tp_stop_controlled">Stop being controlled</string>
+    <string name="tp_not_connected_body">Open AirBridge on %1$s and make sure both are on the same Wi-Fi. Input is sent only while it\'s connected.</string>
+    <string name="tp_no_computer_body">Connect a computer from the AirBridge home screen.</string>
+    <string name="tp_help_phone">Tap to tap · hold, then move to drag · two fingers to scroll\nThree to five fingers: swipe up for recent apps, down for notifications, sideways for the previous app, pinch for all apps, spread for home</string>
+    <string name="tp_help_computer">Tap to click · two-finger tap to right-click · hold, then move to drag · press firmly to force click\nTwo fingers: scroll, pinch to zoom · Three to five fingers: swipe up for Mission Control, down for App Exposé, left / right for spaces · four or five: pinch for Launchpad, spread for the desktop</string>
+    <string name="tp_os_took_touch">Your phone took that touch for itself</string>
+    <string name="tp_os_took_touch_body">AirBridge uses four and five fingers. If those are taken too, search Settings for “three-finger” and turn off the screenshot and split-screen gestures.</string>
+    <string name="tp_open_settings">Open settings</string>
+    <string name="tp_dont_show">Don\'t show again</string>
+    <string name="tp_used_by">Being used by %1$s</string>
+    <string name="tp_firm">Firm press</string>
+    <string name="tp_firm_desc">Firm press for force click</string>
+    <string name="tp_natural">Natural scroll</string>
+    <string name="tp_natural_desc">Natural scrolling</string>
+    <string name="tp_hide_kb">Hide keyboard</string>
+    <string name="tp_show_kb">Show keyboard</string>
+    <string name="tp_close">Close</string>
+    <string name="tp_chip_desc">%1$s. Tap to choose a device</string>
+    <string name="tp_controlling">Controlling %1$s</string>
+    <string name="tp_no_device">No device</string>
+    <string name="tp_none_paired">No paired computers or phones yet. Pair one from the AirBridge home screen.</string>
+    <string name="tp_controlling_this">Controlling this phone</string>
+    <string name="tp_needs_service">Turn on AirBridge Universal Control on it</string>
+    <string name="tp_offline">Not connected</string>
+    <string name="tp_selected">Selected</string>
+    <string name="tp_toggle_desc">%1$s, %2$s</string>
+    <string name="tp_on">on</string>
+    <string name="tp_off">off</string>
+</resources>

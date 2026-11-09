@@ -10,16 +10,20 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.outlined.Circle
+import androidx.compose.material.icons.outlined.QrCode2
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
@@ -37,6 +41,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -82,8 +88,9 @@ class SyncActivity : Activity() {
 
 /**
  * Share sheet target: send files (xfer) or text (clip) to one or more connected devices. A Direct
- * Share shortcut, or a single connected device, sends straight away. In the sheet a tap sends to that
- * device; touch and hold starts picking several, and the same items then go to each at the same time.
+ * Share shortcut sends straight away; so does text with a single connected device. Files always open
+ * the sheet, which also offers AirWeb (a link for a device without the app). In the sheet a tap sends
+ * to that device; touch and hold starts picking several, and the same items then go to each at once.
  */
 class ShareActivity : ComponentActivity() {
 
@@ -97,15 +104,17 @@ class ShareActivity : ComponentActivity() {
             val peer = connected.firstOrNull { it.id == direct }
             if (peer != null) share(listOf(peer))
             else {
-                toast("Device is not connected right now")
+                toast(getString(R.string.sh_not_connected))
                 if (AirBridgeService.shouldRun(this)) AirBridgeService.start(this)
             }
             finish(); return
         }
-        when (connected.size) {
+        // With files the sheet always opens, so AirWeb (no app needed on the other side) is always there.
+        val hasFiles = sharedUris().isNotEmpty()
+        if (connected.isEmpty() && AirBridgeService.shouldRun(this)) AirBridgeService.start(this)
+        if (!hasFiles) when (connected.size) {
             0 -> {
-                toast("No devices connected")
-                if (AirBridgeService.shouldRun(this)) AirBridgeService.start(this)
+                toast(getString(R.string.sh_no_devices))
                 finish(); return
             }
             1 -> { share(connected); finish(); return }
@@ -133,9 +142,14 @@ class ShareActivity : ComponentActivity() {
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Column(Modifier.weight(1f)) {
-                                Text("Send to", style = MaterialTheme.typography.titleLarge)
+                                Text(stringResource(R.string.sh_send_to), style = MaterialTheme.typography.titleLarge)
                                 Text(
-                                    if (picking) "${chosen.size} selected" else "Touch and hold to choose several",
+                                    when {
+                                        picking -> pluralStringResource(R.plurals.sh_selected, chosen.size, chosen.size)
+                                        connected.isEmpty() -> stringResource(R.string.sh_no_devices)
+                                        connected.size == 1 -> stringResource(R.string.sh_tap_to_send)
+                                        else -> stringResource(R.string.sh_hold_to_choose)
+                                    },
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
@@ -144,7 +158,7 @@ class ShareActivity : ComponentActivity() {
                                 Button(
                                     onClick = { share(connected.filter { it.id in chosen }); finish() },
                                     shape = MaterialTheme.shapes.medium,
-                                ) { Text("Send", style = MaterialTheme.typography.labelLarge) }
+                                ) { Text(stringResource(R.string.sh_send), style = MaterialTheme.typography.labelLarge) }
                             }
                         }
                         connected.forEach { peer ->
@@ -163,7 +177,7 @@ class ShareActivity : ComponentActivity() {
                                             haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                                             chosen = if (on) chosen - peer.id else chosen + peer.id
                                         },
-                                        onLongClickLabel = "Choose several",
+                                        onLongClickLabel = stringResource(R.string.sh_choose_several),
                                     )
                                     .semantics { if (picking) selected = on },
                             ) {
@@ -178,10 +192,43 @@ class ShareActivity : ComponentActivity() {
                                 }
                             }
                         }
+                        // AirWeb: the other phone or computer opens a link from a QR code; no app needed there.
+                        if (hasFiles) {
+                            Surface(
+                                onClick = { openAirWeb() },
+                                shape = MaterialTheme.shapes.large,
+                                color = MaterialTheme.colorScheme.background,
+                                modifier = Modifier.fillMaxWidth().padding(top = if (connected.isEmpty()) 0.dp else Dimens.sm),
+                            ) {
+                                InfoRow(
+                                    title = stringResource(R.string.airweb),
+                                    subtitle = stringResource(R.string.sh_airweb_sub),
+                                    leading = {
+                                        Box(
+                                            Modifier.size(Dimens.avatar).background(MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.shapes.medium),
+                                            contentAlignment = Alignment.Center,
+                                        ) {
+                                            Icon(Icons.Outlined.QrCode2, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface,
+                                                modifier = Modifier.size(Dimens.iconMd))
+                                        }
+                                    },
+                                )
+                            }
+                        }
                     }
                 }
             }
         }
+    }
+
+    private fun openAirWeb() {
+        try {
+            startActivity(AirWebActivity.intent(this, sharedUris()))
+        } catch (e: SecurityException) {
+            // The sharing app didn't let us pass on what it shared.
+            toast(getString(R.string.sh_cant_read_files))
+        }
+        finish()
     }
 
     private fun share(peers: List<PeerInfo>) {
@@ -193,9 +240,9 @@ class ShareActivity : ComponentActivity() {
         when {
             uris.isNotEmpty() -> {
                 val (ok, no) = peers.partition { "xfer" in it.caps }
-                if (no.isNotEmpty()) toast("${no.joinToString(", ") { it.name }} can't receive files")
+                if (no.isNotEmpty()) toast(getString(R.string.sh_cant_receive_files, no.joinToString(", ") { it.name }))
                 if (ok.isEmpty()) return
-                val files = if (uris.size == 1) "1 file" else "${uris.size} files"
+                val files = resources.getQuantityString(R.plurals.sh_files, uris.size, uris.size)
                 // Hand the URIs (and our read grant) to the long-lived service, which sends to each device.
                 val clip = ClipData.newRawUri("files", uris[0]).apply { uris.drop(1).forEach { addItem(ClipData.Item(it)) } }
                 try {
@@ -206,21 +253,21 @@ class ShareActivity : ComponentActivity() {
                             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                             .also { it.clipData = clip }
                     )
-                    toast("Sending $files to ${ok.joinToString(", ") { it.name }}…")
+                    toast(getString(R.string.sh_sending, files, ok.joinToString(", ") { it.name }))
                 } catch (e: SecurityException) {
                     // The sharing app didn't let us read what it shared.
-                    toast("Couldn't read the shared ${if (uris.size == 1) "file" else "files"}")
+                    toast(getString(if (uris.size == 1) R.string.sh_cant_read_file else R.string.sh_cant_read_files))
                 }
             }
             !text.isNullOrBlank() -> {
                 val failed = peers.filterNot { ClipboardSync.sendTextTo(it.id, text) }
                 when {
-                    failed.isEmpty() -> toast("Sent to $names")
-                    failed.size == peers.size -> toast("Couldn't send: ${failed.joinToString(", ") { it.name }} not connected")
-                    else -> toast("Sent, except to ${failed.joinToString(", ") { it.name }}")
+                    failed.isEmpty() -> toast(getString(R.string.sh_sent_to, names))
+                    failed.size == peers.size -> toast(getString(R.string.sh_send_failed, failed.joinToString(", ") { it.name }))
+                    else -> toast(getString(R.string.sh_sent_except, failed.joinToString(", ") { it.name }))
                 }
             }
-            else -> toast("Nothing to share")
+            else -> toast(getString(R.string.sh_nothing))
         }
     }
 

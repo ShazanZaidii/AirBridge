@@ -43,6 +43,8 @@ class AirBridgeTextService : AccessibilityService() {
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         event ?: return
         try { ClipboardSync.onAccessibilityEvent(event) } catch (t: Throwable) { Log.w(TAG, "clipboard signal", t) }
+        // §13.4: only "the user did something now" (type and package), for where calls ring.
+        try { com.shazan.airbridge.phone.PhonePresence.onAccessibilityEvent(event.eventType, event.packageName) } catch (_: Throwable) {}
     }
 
     override fun onInterrupt() {}

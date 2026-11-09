@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- English source text. Translations live in values-<lang>/strings_screen.xml. -->
+<resources>
+    <string name="sc_phone_no_share">Phones can\'t share their screen yet</string>
+    <string name="sc_phone_no_share_body">Screen mode works with a Mac or PC. Use Trackpad or Keyboard to control %1$s.</string>
+    <string name="sc_cant_share">%1$s can\'t share its screen</string>
+    <string name="sc_cant_share_body">Update AirBridge on the computer and allow Screen Recording in its system settings.</string>
+    <string name="sc_connecting">Connecting to %1$s\'s screen…</string>
+    <string name="sc_stopped">Screen sharing stopped</string>
+</resources>

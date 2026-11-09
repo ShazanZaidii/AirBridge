@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="ch_live">Laufende Übertragungen</string>
+    <string name="xn_file_of">Datei %1$d von %2$d</string>
+    <string name="xn_sec_left">noch %1$d s</string>
+    <string name="xn_min_left">noch %1$d Min.</string>
+</resources>

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Calls on your computer: the explanation shown before Android asks for the permissions (Phone, Contacts, Nearby devices). -->
+    <string name="ce_calls_dialog_body">To show calls and answer or end them, AirBridge needs the Phone permission.\n\nContacts: your computer shows the caller\'s name and photo, as your phone does. Optional.\n\nNearby devices: your computer rings only when you\'re at it or your phone is close by, and keeps quiet otherwise. Optional.\n\nCall logs: lets AirBridge see the number of the call that is ringing, so your computer shows who\'s calling right away. Your call history is never read. Optional.\n\nCall details are sent only to your own paired devices, encrypted.</string>
+    <string name="ce_number_title">Show who\'s calling from the first ring</string>
+    <string name="ce_number_sub">Your phone gives AirBridge the caller\'s number only with the Call logs permission. It\'s used just for the call that\'s ringing; your call history is never read.</string>
+</resources>
