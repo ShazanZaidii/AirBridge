@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="ch_live">జరుగుతున్న బదిలీలు</string>
+    <string name="xn_file_of">ఫైల్ %1$d / %2$d</string>
+    <string name="xn_sec_left">%1$d సె. మిగిలి ఉంది</string>
+    <string name="xn_min_left">%1$d నిమి. మిగిలి ఉంది</string>
+</resources>

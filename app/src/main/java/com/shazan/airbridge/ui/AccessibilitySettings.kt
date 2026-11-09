@@ -24,6 +24,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import com.shazan.airbridge.R
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import com.shazan.airbridge.AirBridgeInputService
@@ -36,7 +38,7 @@ import com.shazan.airbridge.ui.theme.StatusChip
 
 private fun openSafely(ctx: android.content.Context, intent: Intent) {
     try { ctx.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
-    catch (_: Exception) { Toast.makeText(ctx, "Not available on this device", Toast.LENGTH_SHORT).show() }
+    catch (_: Exception) { Toast.makeText(ctx, ctx.getString(R.string.not_available), Toast.LENGTH_SHORT).show() }
 }
 
 /**
@@ -53,11 +55,11 @@ fun RemoteControlServiceRows() {
     val a11y = { openSafely(ctx, Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
 
     InfoRow(
-        title = "Control from your computer",
-        subtitle = "Required. \"AirBridge Universal Control\" shows the cursor, taps, scrolls and does back, home and volume. It can't read your screen.",
+        title = stringResource(R.string.a11y_core_title),
+        subtitle = stringResource(R.string.a11y_core_sub, stringResource(R.string.svc_core_name)),
         trailing = {
-            if (coreOn) StatusChip("On", ChipTone.SUCCESS)
-            else TextButton(onClick = a11y, modifier = Modifier.height(Dimens.touch)) { Text("Turn on") }
+            if (coreOn) StatusChip(stringResource(R.string.tp_on_cap), ChipTone.SUCCESS)
+            else TextButton(onClick = a11y, modifier = Modifier.height(Dimens.touch)) { Text(stringResource(R.string.turn_on)) }
         },
     )
     RowDivider()
@@ -71,13 +73,10 @@ fun RemoteControlServiceRows() {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
-            Text("Typing & clipboard (optional) · ${if (textOn) "On" else "Off"}",
+            Text(stringResource(R.string.a11y_text_title, stringResource(if (textOn) R.string.tp_on_cap else R.string.tp_off_cap)),
                 style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface)
             Text(
-                "\"AirBridge Typing & Clipboard\" can read the text field you're typing in, so your computer can type, " +
-                    "copy and paste there, and it notices when you copy so the text is sent automatically. " +
-                    "Banking and UPI apps may warn about accessibility services that read the screen: switch it off while paying. " +
-                    "Without it, remote control still works and the bubble sends your clipboard.",
+                stringResource(R.string.a11y_text_body, stringResource(R.string.svc_text_name)),
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
@@ -100,20 +99,12 @@ private fun KeepAliveHint() {
     val ctx = LocalContext.current
     val m = (Build.MANUFACTURER ?: "").lowercase()
     val vivo = m.contains("vivo") || m.contains("iqoo")
-    val text = if (vivo) {
-        "Service keeps turning off? On vivo / iQOO phones the system closes background apps and Android then " +
-            "switches their accessibility services off. In Settings › Battery › Background power consumption " +
-            "management, allow high background power consumption for AirBridge, and lock AirBridge in Recents " +
-            "(swipe its card down or tap the lock). Menu names differ between OriginOS / Funtouch versions."
-    } else {
-        "Service keeps turning off? Some phones close background apps, and Android then switches their " +
-            "accessibility services off. Set AirBridge's battery use to unrestricted and lock it in Recents if your phone offers that."
-    }
+    val text = stringResource(if (vivo) R.string.a11y_keepalive_vivo else R.string.a11y_keepalive)
     Column(Modifier.padding(horizontal = Dimens.md, vertical = Dimens.sm)) {
         Text(text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         TextButton(
             onClick = { openSafely(ctx, Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${ctx.packageName}"))) },
             modifier = Modifier.height(Dimens.touch),
-        ) { Text("App settings") }
+        ) { Text(stringResource(R.string.app_settings)) }
     }
 }

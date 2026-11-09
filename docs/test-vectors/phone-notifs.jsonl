@@ -1,0 +1,4 @@
+{"t":"notif_post","key":"9f2c01ab34cd56ef78","pkg":"com.whatsapp","app":"WhatsApp","title":"Asha","text":"See you at 6","ts":1762070400000,"cat":"msg","reply":true,"alert":true,"conv":"Family","reply_label":"Reply","msgs":[{"text":"Hi","ts":1762070300000,"from":"Asha"},{"text":"Hello","ts":1762070350000,"me":true}],"acts":[{"i":1,"label":"Mark as read"}]}
+{"t":"call_state","id":"c3-mxk2a1","state":"active","muted":false,"speaker":true,"can":["end","mute","speaker"],"name":"Asha","number":"+91 98765 43210","since":1762070412000}
+{"t":"notif_state","notifs":false,"calls":true,"why":"no_access"}
+{"t":"notif_remove","key":"9f2c01ab34cd56ef78"}

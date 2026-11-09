@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- English source text. Translations live in values-<lang>/strings_share.xml. -->
+<resources>
+    <string name="sh_not_connected">Device is not connected right now</string>
+    <string name="sh_no_devices">No devices connected</string>
+    <string name="sh_send_to">Send to</string>
+    <string name="sh_tap_to_send">Tap to send</string>
+    <string name="sh_hold_to_choose">Touch and hold to choose several</string>
+    <string name="sh_send">Send</string>
+    <string name="sh_choose_several">Choose several</string>
+    <string name="sh_airweb_sub">Send to a phone or computer without the app</string>
+    <string name="sh_cant_read_files">Couldn\'t read the shared files</string>
+    <string name="sh_cant_receive_files">%1$s can\'t receive files</string>
+    <string name="sh_sending">Sending %1$s to %2$s…</string>
+    <string name="sh_cant_read_file">Couldn\'t read the shared file</string>
+    <string name="sh_sent_to">Sent to %1$s</string>
+    <string name="sh_send_failed">Couldn\'t send: %1$s not connected</string>
+    <string name="sh_sent_except">Sent, except to %1$s</string>
+    <string name="sh_nothing">Nothing to share</string>
+    <plurals name="sh_selected">
+        <item quantity="one">%1$d selected</item>
+        <item quantity="other">%1$d selected</item>
+    </plurals>
+    <plurals name="sh_files">
+        <item quantity="one">%1$d file</item>
+        <item quantity="other">%1$d files</item>
+    </plurals>
+</resources>

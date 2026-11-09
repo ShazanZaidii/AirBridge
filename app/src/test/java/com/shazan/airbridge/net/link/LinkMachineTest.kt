@@ -324,7 +324,7 @@ class LinkMachineTest {
         m.onMessage(peer, offer(lid = 0x40000001))
         env.joins.single().second(JoinOutcome.Failed("join_failed"))
         assertEquals(listOf(Triple("no_go_support", true, true), Triple("join_failed", false, false)), env.failures)
-        assertEquals("This PC can't host a Wi-Fi Direct link", LinkPolicy.failText("no_go_support"))
+        assertEquals(com.shazan.airbridge.R.string.lk_no_go, LinkPolicy.failRes("no_go_support"))
     }
 
     @Test fun peerDoneRedialsReplacedLanSession() {

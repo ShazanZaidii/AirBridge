@@ -21,6 +21,8 @@ class AirBridgeApp : Application() {
         Notifs.init(this)
         RemoteControlSetup.init(this)
         Hub.init(this)
+        // Phone notifications / calls on the computer (§13): off until turned on in Settings.
+        com.shazan.airbridge.phone.PhoneRelay.init(this)
         // Input half: routes control messages from PeerBus even before the accessibility service is on.
         InputRouter.install(this)
         // OEM gesture switches the trackpad turned off and could not put back (crash / kill).

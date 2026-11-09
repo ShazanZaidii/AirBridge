@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- English source text. Translations live in values-<lang>/strings_hub.xml. -->
+<resources>
+    <string name="unnamed_device">Unnamed device</string>
+    <string name="hub_who">%1$s (%2$s, %3$s)</string>
+    <string name="hub_wants_pair">%1$s wants to pair</string>
+    <string name="hub_only_accept">Only accept if it shows %1$s. Tap to see the code.</string>
+    <string name="hub_same_code">the same code</string>
+    <string name="hub_turn_on_control">Turn on \"%1$s\" in Accessibility settings so your computer can control this phone</string>
+</resources>

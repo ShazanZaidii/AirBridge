@@ -13,6 +13,7 @@ import com.shazan.airbridge.MainActivity
 object Notifs {
     const val CH_SERVICE = "airbridge_service"
     const val CH_XFER = "airbridge_transfers"
+    const val CH_LIVE = "airbridge_transfers_live"
     const val CH_RESULT = "airbridge_results"
     const val CH_PAIR = "airbridge_pairing"
     const val CH_CONTROL = "airbridge_control"
@@ -25,11 +26,15 @@ object Notifs {
         val nm = ctx.getSystemService(NotificationManager::class.java) ?: return
         nm.createNotificationChannels(
             listOf(
-                NotificationChannel(CH_SERVICE, "Connection status", NotificationManager.IMPORTANCE_LOW),
-                NotificationChannel(CH_XFER, "File transfer progress", NotificationManager.IMPORTANCE_LOW),
-                NotificationChannel(CH_RESULT, "File transfer results", NotificationManager.IMPORTANCE_DEFAULT),
-                NotificationChannel(CH_PAIR, "Pairing requests", NotificationManager.IMPORTANCE_HIGH),
-                NotificationChannel(CH_CONTROL, "Remote control setup", NotificationManager.IMPORTANCE_DEFAULT),
+                NotificationChannel(CH_SERVICE, ctx.getString(com.shazan.airbridge.R.string.ch_service), NotificationManager.IMPORTANCE_LOW),
+                NotificationChannel(CH_XFER, ctx.getString(com.shazan.airbridge.R.string.ch_xfer), NotificationManager.IMPORTANCE_LOW),
+                // Transfers in progress: pops up once when a transfer starts (no sound), then updates quietly.
+                NotificationChannel(CH_LIVE, ctx.getString(com.shazan.airbridge.R.string.ch_live), NotificationManager.IMPORTANCE_HIGH).apply {
+                    setSound(null, null); enableVibration(false)
+                },
+                NotificationChannel(CH_RESULT, ctx.getString(com.shazan.airbridge.R.string.ch_result), NotificationManager.IMPORTANCE_DEFAULT),
+                NotificationChannel(CH_PAIR, ctx.getString(com.shazan.airbridge.R.string.ch_pair), NotificationManager.IMPORTANCE_HIGH),
+                NotificationChannel(CH_CONTROL, ctx.getString(com.shazan.airbridge.R.string.ch_control), NotificationManager.IMPORTANCE_DEFAULT),
             )
         )
         // Channel ids used by v1 builds.

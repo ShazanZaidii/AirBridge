@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="ce_calls_dialog_body">Damit Anrufe angezeigt und angenommen oder beendet werden können, braucht AirBridge die Berechtigung „Telefon“.\n\nKontakte: Dein Computer zeigt Namen und Foto des Anrufers, wie dein Smartphone. Optional.\n\nGeräte in der Nähe: Dein Computer klingelt nur, wenn du gerade an ihm arbeitest oder dein Smartphone in der Nähe ist, sonst bleibt er still. Optional.\n\nAnrufliste: AirBridge sieht die Nummer des Anrufs, der gerade klingelt, damit dein Computer sofort zeigt, wer anruft. Deine Anrufliste wird nie gelesen. Optional.\n\nAnrufdetails werden verschlüsselt und nur an deine eigenen gekoppelten Geräte gesendet.</string>
+    <string name="ce_number_title">Ab dem ersten Klingeln sehen, wer anruft</string>
+    <string name="ce_number_sub">Dein Smartphone gibt AirBridge die Nummer des Anrufers nur mit der Berechtigung „Anrufliste“. Sie wird nur für den Anruf genutzt, der gerade klingelt; deine Anrufliste wird nie gelesen.</string>
+</resources>

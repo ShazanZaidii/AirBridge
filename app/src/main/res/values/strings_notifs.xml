@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- English source text. Translations live in values-<lang>/strings_notifs.xml. -->
+<resources>
+    <string name="ch_service">Connection status</string>
+    <string name="ch_xfer">File transfer progress</string>
+    <string name="ch_result">File transfer results</string>
+    <string name="ch_pair">Pairing requests</string>
+    <string name="ch_control">Remote control setup</string>
+</resources>

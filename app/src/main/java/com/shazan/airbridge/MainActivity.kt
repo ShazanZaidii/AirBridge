@@ -51,7 +51,6 @@ import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Devices
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.ErrorOutline
-import androidx.compose.material.icons.outlined.Layers
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.NearMe
 import androidx.compose.material.icons.outlined.QrCode2
@@ -87,6 +86,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
@@ -203,15 +203,15 @@ private fun granted(ctx: Context, perm: String) =
 
 private fun toast(ctx: Context, msg: String) = Toast.makeText(ctx, msg, Toast.LENGTH_SHORT).show()
 
-private fun pairFailText(reason: String, name: String): String = when (reason) {
-    "rejected" -> "Pairing was declined on $name."
-    "timeout" -> "Pairing timed out. Try again and confirm on both devices within a minute."
-    "locked" -> "Too many attempts. Wait a minute, then try again."
-    "not_pairing" -> "$name isn't accepting new devices right now. Open AirBridge on it and allow pairing."
-    "bad_proof" -> "The two devices didn't agree on the code, so pairing was stopped. If you scanned a QR code, show a fresh one and scan again."
-    "different device at that address" -> "A different device answered at that address. Try again from the list."
-    "", "handshake timeout" -> "Couldn't reach $name. Make sure both devices are on the same Wi-Fi."
-    else -> "Couldn't pair with $name ($reason)."
+private fun pairFailText(ctx: Context, reason: String, name: String): String = when (reason) {
+    "rejected" -> ctx.getString(R.string.pair_fail_rejected, name)
+    "timeout" -> ctx.getString(R.string.pair_fail_timeout)
+    "locked" -> ctx.getString(R.string.pair_fail_locked)
+    "not_pairing" -> ctx.getString(R.string.pair_fail_not_pairing, name)
+    "bad_proof" -> ctx.getString(R.string.pair_fail_bad_proof)
+    "different device at that address" -> ctx.getString(R.string.pair_fail_wrong_device)
+    "", "handshake timeout" -> ctx.getString(R.string.pair_fail_unreachable, name)
+    else -> ctx.getString(R.string.pair_fail_other, name, reason)
 }
 
 /** Re-composes when the activity resumes (permission/settings state read inside). */
@@ -238,17 +238,49 @@ private fun AirBridgeRoot() {
     var screen by rememberSaveable { mutableStateOf(if (PairStore.isEmpty()) Screen.ADD else Screen.DEVICES) }
     var showVpnWarning by remember { mutableStateOf(isVpnActive(ctx)) }
     var pairError by remember { mutableStateOf<PairError?>(null) }
-    val hasOverlay = remember(resumeTick) { Settings.canDrawOverlays(ctx) }
 
+    // Nothing is asked up front: notifications are asked once something is paired (incoming files and
+    // pairing requests show there), "Display over other apps" only when the clipboard bubble is turned on
+    // (Settings), Nearby only from its own card, the camera only for "Scan QR code".
     val notifLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
-    LaunchedEffect(Unit) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !granted(ctx, Manifest.permission.POST_NOTIFICATIONS)) {
-            notifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-        }
+    fun askNotificationsOnce() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU || granted(ctx, Manifest.permission.POST_NOTIFICATIONS)) return
+        val prefs = ctx.getSharedPreferences("AirBridgePrefs", Context.MODE_PRIVATE)
+        if (prefs.getBoolean("NOTIF_ASKED", false)) return
+        prefs.edit().putBoolean("NOTIF_ASKED", true).apply()
+        notifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
     }
-    // Start once the overlay is granted; never re-triggered by device list changes.
-    LaunchedEffect(hasOverlay) {
-        if (hasOverlay && AirBridgeService.shouldRun(ctx)) AirBridgeService.start(ctx)
+    LaunchedEffect(Unit) {
+        if (AirBridgeService.shouldRun(ctx)) AirBridgeService.start(ctx)
+        if (!PairStore.isEmpty()) askNotificationsOnce()
+    }
+
+    // Calls on the computer are on but Android won't hand over the ringing number (Call logs off): some phones'
+    // call screens show nothing else while ringing, so the computer would say "Unknown Caller". Asked once.
+    val callLogLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
+        com.shazan.airbridge.phone.PhoneRelay.onSettingsChanged()
+    }
+    var askCallLog by remember {
+        val prefs = ctx.getSharedPreferences("AirBridgePrefs", Context.MODE_PRIVATE)
+        mutableStateOf(com.shazan.airbridge.phone.PhoneRelaySettings.callsEnabled &&
+            com.shazan.airbridge.phone.PhoneRelaySettings.canWatchCalls(ctx) &&
+            !com.shazan.airbridge.phone.PhoneRelaySettings.canSeeNumber(ctx) &&
+            !prefs.getBoolean("CALL_LOG_ASKED", false))
+    }
+    if (askCallLog) {
+        fun done() {
+            askCallLog = false
+            ctx.getSharedPreferences("AirBridgePrefs", Context.MODE_PRIVATE).edit().putBoolean("CALL_LOG_ASKED", true).apply()
+        }
+        AlertDialog(
+            onDismissRequest = { done() },
+            title = { Text(stringResource(R.string.ce_number_title)) },
+            text = { Text(stringResource(R.string.ce_number_sub)) },
+            confirmButton = {
+                TextButton(onClick = { done(); callLogLauncher.launch(Manifest.permission.READ_CALL_LOG) }) { Text(stringResource(R.string.allow)) }
+            },
+            dismissButton = { TextButton(onClick = { done() }) { Text(stringResource(R.string.cancel)) } },
+        )
     }
 
     LaunchedEffect(Unit) {
@@ -258,14 +290,17 @@ private fun AirBridgeRoot() {
                     if (e.ok) {
                         pairError = null
                         screen = Screen.DEVICES
-                        toast(ctx, "Paired with ${e.peerName}")
+                        toast(ctx, ctx.getString(R.string.paired_with, e.peerName))
+                        // Both sides (also the phone that only accepted) keep the new connection alive.
+                        AirBridgeService.start(ctx)
+                        askNotificationsOnce()
                     } else {
-                        if (e.reason != "cancelled") pairError = PairError(pairFailText(e.reason, e.peerName.ifBlank { "the device" }))
+                        if (e.reason != "cancelled") pairError = PairError(pairFailText(ctx, e.reason, e.peerName.ifBlank { ctx.getString(R.string.the_device) }))
                         AirBridgeService.stopIfIdle(ctx)
                     }
                 }
                 is NetEvent.PairAgain -> {
-                    Toast.makeText(ctx, "${e.peerName} no longer recognises this phone. Pair again.", Toast.LENGTH_LONG).show()
+                    Toast.makeText(ctx, ctx.getString(R.string.pair_again, e.peerName), Toast.LENGTH_LONG).show()
                     AirBridgeService.stopIfIdle(ctx)
                 }
             }
@@ -286,8 +321,8 @@ private fun AirBridgeRoot() {
         val link = PairLink.parse(raw)
         val addr = link?.let { Discovery.lookup(it.id) ?: it.addr?.let { a -> a to it.port } }
         return when {
-            link == null -> { toast(ctx, "That isn't an AirBridge pairing code"); false }
-            addr == null || addr.second !in 1..65535 -> { toast(ctx, "${link.name} isn't on this network"); false }
+            link == null -> { toast(ctx, ctx.getString(R.string.not_a_pairing_code)); false }
+            addr == null || addr.second !in 1..65535 -> { toast(ctx, ctx.getString(R.string.not_on_network, link.name)); false }
             else -> {
                 screen = Screen.ADD
                 startPair(link.name, link.plat, addr.first, addr.second, link.id, PairMode.Qr(link.secret))
@@ -307,30 +342,32 @@ private fun AirBridgeRoot() {
         AlertDialog(
             onDismissRequest = { showVpnWarning = false },
             icon = { Icon(Icons.Outlined.ErrorOutline, contentDescription = null) },
-            title = { Text("VPN is on") },
-            text = { Text("AirBridge talks to your computer over the local network. If your VPN blocks local traffic, allow local network access (split tunnelling) or turn it off.") },
-            confirmButton = { TextButton(onClick = { showVpnWarning = false }) { Text("OK") } },
+            title = { Text(stringResource(R.string.vpn_title)) },
+            text = { Text(stringResource(R.string.vpn_body)) },
+            confirmButton = { TextButton(onClick = { showVpnWarning = false }) { Text(stringResource(R.string.ok)) } },
         )
     }
 
-    progress?.let { p -> PairingDialog(p, onConfirm = { Hub.confirmPairing(true) }, onCancel = { Hub.cancelPairing() }) }
+    progress?.let { p ->
+        PairingDialog(p, onConfirm = { AirBridgeService.start(ctx); Hub.confirmPairing(true) }, onCancel = { Hub.cancelPairing() })
+    }
     if (progress == null) pairError?.let { err ->
         AlertDialog(
             onDismissRequest = { pairError = null },
             icon = { Icon(Icons.Outlined.ErrorOutline, contentDescription = null, tint = AbTheme.status.danger) },
-            title = { Text("Couldn't pair") },
+            title = { Text(stringResource(R.string.pair_failed_title)) },
             text = { Text(err.message) },
-            confirmButton = { TextButton(onClick = { pairError = null }) { Text("OK") } },
+            confirmButton = { TextButton(onClick = { pairError = null }) { Text(stringResource(R.string.ok)) } },
         )
     }
 
     pending.firstOrNull()?.let { p ->
         AlertDialog(
             onDismissRequest = {},
-            title = { Text("Pair with ${p.name}?") },
+            title = { Text(stringResource(R.string.pair_with_q, p.name)) },
             text = {
                 Column {
-                    Text("Make sure both phones show the same code.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(stringResource(R.string.same_code_phones), color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Spacer(Modifier.height(Dimens.md))
                     DigitsText(p.digits)
                 }
@@ -339,15 +376,10 @@ private fun AirBridgeRoot() {
                 TextButton(onClick = {
                     AirBridgeService.start(ctx)
                     NearbyTransport.confirm(p.endpointId, true)
-                }) { Text("Pair") }
+                }) { Text(stringResource(R.string.pair)) }
             },
-            dismissButton = { TextButton(onClick = { NearbyTransport.confirm(p.endpointId, false) }) { Text("Reject") } },
+            dismissButton = { TextButton(onClick = { NearbyTransport.confirm(p.endpointId, false) }) { Text(stringResource(R.string.reject)) } },
         )
-    }
-
-    if (!hasOverlay) {
-        OverlayPermissionScreen()
-        return
     }
 
     when (screen) {
@@ -390,13 +422,16 @@ private fun AirBridgeRoot() {
 /** "483920" → "483 920", read digit by digit by screen readers. */
 @Composable
 private fun DigitsText(digits: String, modifier: Modifier = Modifier) {
+    val codeLabel = stringResource(R.string.code_label)
     val shown = if (digits.length == 6) digits.substring(0, 3) + " " + digits.substring(3) else digits
     Text(
         shown,
         style = MaterialTheme.typography.displayMedium,
         color = MaterialTheme.colorScheme.onSurface,
         textAlign = TextAlign.Center,
-        modifier = modifier.fillMaxWidth().semantics { contentDescription = "Code " + digits.toCharArray().joinToString(" ") },
+        maxLines = 1, // the code must never wrap: shrink to fit narrow screens and big font settings
+        autoSize = com.shazan.airbridge.ui.theme.fitOneLine(MaterialTheme.typography.displayMedium, 22f),
+        modifier = modifier.fillMaxWidth().semantics { contentDescription = codeLabel + " " + digits.toCharArray().joinToString(" ") },
     )
 }
 
@@ -404,14 +439,16 @@ private fun DigitsText(digits: String, modifier: Modifier = Modifier) {
 @Composable
 private fun PairingDialog(p: PairProgress, onConfirm: () -> Unit, onCancel: () -> Unit) {
     val noun = platformNoun(p.plat)
+    val atFmt = stringResource(R.string.at_address)
+    val atAddress = { a: String -> atFmt.format(a) }
     AlertDialog(
         onDismissRequest = {}, // explicit Cancel only, so a stray tap never aborts a pairing
         title = {
             Text(
                 when (p.stage) {
-                    PairStage.CONNECTING -> "Connecting to ${p.peerName}"
-                    PairStage.CONFIRM -> "Pair with ${p.peerName}?"
-                    PairStage.WAITING_PEER -> "Confirm on your $noun"
+                    PairStage.CONNECTING -> stringResource(R.string.connecting_to, p.peerName)
+                    PairStage.CONFIRM -> stringResource(R.string.pair_with_q, p.peerName)
+                    PairStage.WAITING_PEER -> stringResource(R.string.confirm_on_your, noun)
                 }
             )
         },
@@ -421,25 +458,25 @@ private fun PairingDialog(p: PairProgress, onConfirm: () -> Unit, onCancel: () -
                     PairStage.CONNECTING -> Row(verticalAlignment = Alignment.CenterVertically) {
                         CircularProgressIndicator(Modifier.size(Dimens.iconMd), strokeWidth = 3.dp)
                         Spacer(Modifier.width(Dimens.md))
-                        Text(if (p.mode == "qr") "Checking the QR code…" else "Setting up a secure connection…",
+                        Text(if (p.mode == "qr") stringResource(R.string.checking_qr) else stringResource(R.string.securing),
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     PairStage.CONFIRM -> {
                         // Who is this, exactly: kind of device and where it is.
                         Text(
-                            listOfNotNull(com.shazan.airbridge.net.deviceKind(p.plat), p.address?.let { "at $it" }).joinToString(" "),
+                            listOfNotNull(com.shazan.airbridge.net.deviceKind(p.plat), p.address?.let { atAddress(it) }).joinToString(" "),
                             style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurface,
                         )
                         Spacer(Modifier.height(Dimens.sm))
                         Text(
-                            if (p.incoming) "It is asking to pair with this phone. Only confirm if it shows the same code and you started this."
-                            else "Make sure your $noun shows the same code.",
+                            if (p.incoming) stringResource(R.string.incoming_pair_body)
+                            else stringResource(R.string.same_code_your, noun),
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                         Spacer(Modifier.height(Dimens.lg))
                         DigitsText(p.digits ?: "")
                         Spacer(Modifier.height(Dimens.lg))
-                        Text("If the codes are different, tap Cancel.", style = MaterialTheme.typography.bodySmall,
+                        Text(stringResource(R.string.codes_differ), style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     PairStage.WAITING_PEER -> {
@@ -448,50 +485,15 @@ private fun PairingDialog(p: PairProgress, onConfirm: () -> Unit, onCancel: () -
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             CircularProgressIndicator(Modifier.size(Dimens.iconSm), strokeWidth = 2.dp)
                             Spacer(Modifier.width(Dimens.md))
-                            Text("Accept the request on ${p.peerName} to finish.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(stringResource(R.string.accept_on, p.peerName), color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
                 }
             }
         },
-        confirmButton = { if (p.stage == PairStage.CONFIRM) TextButton(onClick = onConfirm) { Text("Confirm") } },
-        dismissButton = { TextButton(onClick = onCancel) { Text("Cancel") } },
+        confirmButton = { if (p.stage == PairStage.CONFIRM) TextButton(onClick = onConfirm) { Text(stringResource(R.string.confirm)) } },
+        dismissButton = { TextButton(onClick = onCancel) { Text(stringResource(R.string.cancel)) } },
     )
-}
-
-@Composable
-private fun OverlayPermissionScreen() {
-    val ctx = LocalContext.current
-    Column(
-        Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().verticalScroll(rememberScrollState()).padding(Dimens.lg),
-        verticalArrangement = Arrangement.spacedBy(Dimens.md),
-    ) {
-        Spacer(Modifier.height(Dimens.xl))
-        Icon(Icons.Outlined.Layers, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(40.dp))
-        Text("One permission first", style = MaterialTheme.typography.headlineSmall)
-        Text(
-            "AirBridge needs \"Display over other apps\" for the clipboard bubble and to show a cursor when your computer controls this phone.",
-            style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        AbCard {
-            InfoRow(
-                title = "1. Allow restricted settings",
-                subtitle = "Only needed if the switch in step 2 is greyed out. In App info, open the menu at the top right and choose \"Allow restricted settings\".",
-            )
-            Box(Modifier.padding(start = Dimens.md, end = Dimens.md, bottom = Dimens.md)) {
-                SecondaryButton("Open App info", onClick = {
-                    ctx.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${ctx.packageName}")))
-                })
-            }
-            RowDivider()
-            InfoRow(title = "2. Turn on \"Display over other apps\"", subtitle = "Then come back here.")
-            Box(Modifier.padding(start = Dimens.md, end = Dimens.md, bottom = Dimens.md)) {
-                PrimaryButton("Grant permission", onClick = {
-                    ctx.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${ctx.packageName}")))
-                })
-            }
-        }
-    }
 }
 
 /** Requests Nearby permissions; returns current grant state and a request function. */
@@ -522,8 +524,8 @@ private fun AddDeviceScreen(
     val hosts by Discovery.hosts.collectAsState()
     val androids by NearbyTransport.found.collectAsState()
 
+    // Asked only from the "Nearby phones" card: phones on the same Wi-Fi pair without it.
     val (nearbyOk, requestNearby) = rememberNearbyPermission()
-    LaunchedEffect(Unit) { requestNearby() }
     // Nearby discovery only after permissions are granted.
     DisposableEffect(nearbyOk) {
         if (nearbyOk) NearbyTransport.acquireUi()
@@ -537,7 +539,7 @@ private fun AddDeviceScreen(
         onDispose { Discovery.releaseSweep() }
     }
     val cameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
-        if (ok) onOpenScanner() else toast(ctx, "Camera permission is needed to scan the QR code")
+        if (ok) onOpenScanner() else toast(ctx, ctx.getString(R.string.camera_needed))
     }
 
     val hostList = hosts.values.sortedBy { it.name.lowercase() }
@@ -548,36 +550,53 @@ private fun AddDeviceScreen(
     if (showQr) {
         if (com.shazan.airbridge.net.EmulatorHost.isEmulator) AlertDialog(
             onDismissRequest = { showQr = false },
-            title = { Text("Scan from this emulator instead") },
-            text = { Text("An emulator's address only exists inside the computer it runs on, so a phone that scans its code can't reach it. Show the code on the phone and scan it here, or pick the phone under On this Wi-Fi.") },
-            confirmButton = { TextButton(onClick = { showQr = false }) { Text("OK") } },
+            title = { Text(stringResource(R.string.emu_qr_title)) },
+            text = { Text(stringResource(R.string.emu_qr_body)) },
+            confirmButton = { TextButton(onClick = { showQr = false }) { Text(stringResource(R.string.ok)) } },
         ) else ShowQrDialog(onDismiss = { showQr = false })
     }
     if (askAddress) AddressDialog(onDismiss = { askAddress = false }, onConnect = { h, p -> askAddress = false; onPickAddress(h, p) })
 
     AbScaffold(
-        title = "Add a device",
+        title = stringResource(R.string.add_a_device),
         onBack = onBack,
-        actions = { if (onBack == null) IconButton(onClick = onOpenSettings) { Icon(Icons.Outlined.Settings, contentDescription = "Settings") } },
+        actions = { if (onBack == null) IconButton(onClick = onOpenSettings) { Icon(Icons.Outlined.Settings, contentDescription = stringResource(R.string.settings)) } },
         bottomBar = {
             Row(Modifier.navigationBarsPadding().padding(Dimens.md), horizontalArrangement = Arrangement.spacedBy(Dimens.sm)) {
-                SecondaryButton("Scan QR code", icon = Icons.Outlined.QrCodeScanner, modifier = Modifier.weight(1f), onClick = {
+                SecondaryButton(stringResource(R.string.scan_qr), icon = Icons.Outlined.QrCodeScanner, modifier = Modifier.weight(1f), onClick = {
                     if (granted(ctx, Manifest.permission.CAMERA)) onOpenScanner() else cameraLauncher.launch(Manifest.permission.CAMERA)
                 })
-                SecondaryButton("Show QR code", icon = Icons.Outlined.QrCode2, modifier = Modifier.weight(1f), onClick = { showQr = true })
+                SecondaryButton(stringResource(R.string.show_qr), icon = Icons.Outlined.QrCode2, modifier = Modifier.weight(1f), onClick = { showQr = true })
             }
         },
     ) {
         LazyColumn(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(Dimens.sm)) {
             item {
                 Text(
-                    "Pick a computer or phone to pair. You'll check that both screens show the same code.",
+                    stringResource(R.string.add_intro),
                     style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            item { SectionHeader("On this Wi-Fi") }
+            item {
+                // The other device doesn't have the app: AirWeb works through any browser, nothing to pair.
+                AbCard(onClick = { ctx.startActivity(AirWebActivity.intent(ctx, emptyList())) }) {
+                    InfoRow(
+                        title = stringResource(R.string.airweb),
+                        subtitle = stringResource(R.string.airweb_card_sub),
+                        leading = {
+                            Box(Modifier.size(Dimens.avatar).background(MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.shapes.medium),
+                                contentAlignment = Alignment.Center) {
+                                Icon(Icons.Outlined.QrCode2, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.size(Dimens.iconMd))
+                            }
+                        },
+                        trailing = { Text(stringResource(R.string.open), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.tertiary) },
+                    )
+                }
+            }
+            item { SectionHeader(stringResource(R.string.on_this_wifi)) }
             if (hostList.isEmpty()) item {
-                SearchingCard(Icons.Outlined.Wifi, "Looking on this Wi-Fi…", "Open AirBridge on your Mac, PC or other phone. Both need to be on the same Wi-Fi.")
+                SearchingCard(Icons.Outlined.Wifi, stringResource(R.string.looking_wifi), stringResource(R.string.looking_wifi_sub))
             }
             items(hostList, key = { it.id }) { host ->
                 val isPaired = host.id in pairedIds
@@ -587,8 +606,8 @@ private fun AddDeviceScreen(
                         subtitle = platformLabel(host.plat),
                         leading = { PlatformAvatar(host.plat) },
                         trailing = {
-                            if (isPaired) StatusChip("Paired", ChipTone.SUCCESS)
-                            else Text("Pair", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.tertiary)
+                            if (isPaired) StatusChip(stringResource(R.string.paired), ChipTone.SUCCESS)
+                            else Text(stringResource(R.string.pair), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.tertiary)
                         },
                     )
                 }
@@ -600,44 +619,44 @@ private fun AddDeviceScreen(
                 val port = com.shazan.airbridge.net.LanHost.port
                 AbCard(onClick = { askAddress = true }) {
                     InfoRow(
-                        title = "Connect by address",
+                        title = stringResource(R.string.connect_by_address),
                         subtitle = when {
                             // An emulator's address only exists inside the computer it runs on: nobody can dial it.
-                            com.shazan.airbridge.net.EmulatorHost.isEmulator -> "Can't see it? Enter its address. This is an emulator: start pairing from here, other devices can't reach it."
-                            mine.isNotEmpty() && port > 0 -> "Can't see it? Enter its address. This phone is ${mine.first()}${if (port != 47632) ":$port" else ""}"
-                            else -> "Can't see it? Enter its address."
+                            com.shazan.airbridge.net.EmulatorHost.isEmulator -> stringResource(R.string.by_address_emulator)
+                            mine.isNotEmpty() && port > 0 -> stringResource(R.string.by_address_mine, mine.first() + if (port != 47632) ":$port" else "")
+                            else -> stringResource(R.string.by_address_sub)
                         },
                         leading = { PlatformAvatar("") },
-                        trailing = { Text("Enter", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.tertiary) },
+                        trailing = { Text(stringResource(R.string.enter), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.tertiary) },
                     )
                 }
             }
-            item { SectionHeader("Nearby phones") }
+            item { SectionHeader(stringResource(R.string.nearby_phones)) }
             if (!nearbyOk) item {
                 AbCard {
                     InfoRow(
-                        title = "Find nearby phones",
-                        subtitle = "Pair with another Android phone directly. No Wi-Fi network needed.",
+                        title = stringResource(R.string.find_nearby),
+                        subtitle = stringResource(R.string.find_nearby_sub),
                         leading = { PlatformAvatar("android") },
                     )
                     Box(Modifier.padding(start = Dimens.md, end = Dimens.md, bottom = Dimens.md)) {
-                        SecondaryButton("Allow nearby devices", icon = Icons.Outlined.NearMe, onClick = requestNearby)
+                        SecondaryButton(stringResource(R.string.allow_nearby), icon = Icons.Outlined.NearMe, onClick = requestNearby)
                     }
                 }
             } else if (androidList.isEmpty()) item {
-                SearchingCard(Icons.Outlined.NearMe, "Looking for phones…", "Open AirBridge on the other phone. Wi-Fi and Bluetooth must be on; no shared network is needed.")
+                SearchingCard(Icons.Outlined.NearMe, stringResource(R.string.looking_phones), stringResource(R.string.looking_phones_sub))
             }
             if (nearbyOk) items(androidList, key = { "nearby:" + it.endpointId }) { a ->
                 AbCard(onClick = {
                     AirBridgeService.start(ctx)
                     NearbyTransport.requestConnection(a.endpointId)
-                    toast(ctx, "Asking ${a.name}…")
+                    toast(ctx, ctx.getString(R.string.asking, a.name))
                 }) {
                     InfoRow(
                         title = a.name,
-                        subtitle = "Android · Nearby",
+                        subtitle = stringResource(R.string.android_nearby),
                         leading = { PlatformAvatar("android") },
-                        trailing = { Text("Pair", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.tertiary) },
+                        trailing = { Text(stringResource(R.string.pair), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.tertiary) },
                     )
                 }
             }
@@ -663,22 +682,22 @@ private fun ShowQrDialog(onDismiss: () -> Unit) {
     val addr = remember(link) { com.shazan.airbridge.net.LanHost.localAddresses().firstOrNull() }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Scan to pair") },
+        title = { Text(stringResource(R.string.scan_to_pair)) },
         text = {
             Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(Dimens.md)) {
                 val l = link
                 if (l == null) {
-                    Text("Connect this phone to Wi-Fi first: the other device reaches it over the network.",
+                    Text(stringResource(R.string.qr_need_wifi),
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 } else {
                     QrImage(l, 240.dp)
-                    Text("On the other phone: AirBridge › Add a device › Scan QR code.",
+                    Text(stringResource(R.string.qr_how),
                         style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
                     Text("${Identity.name} · ${addr ?: ""}", style = MaterialTheme.typography.labelLarge)
                 }
             }
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } },
+        confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.done)) } },
     )
 }
 
@@ -694,7 +713,7 @@ private fun QrImage(text: String, size: androidx.compose.ui.unit.Dp) {
         android.graphics.Bitmap.createBitmap(px, m.width, m.height, android.graphics.Bitmap.Config.ARGB_8888).asImageBitmap()
     }
     androidx.compose.foundation.Image(
-        bmp, contentDescription = "Pairing QR code",
+        bmp, contentDescription = stringResource(R.string.pairing_qr),
         modifier = Modifier.size(size).background(androidx.compose.ui.graphics.Color.White, MaterialTheme.shapes.medium).padding(Dimens.sm),
     )
 }
@@ -711,16 +730,16 @@ private fun AddressDialog(onDismiss: () -> Unit, onConnect: (host: String, port:
     }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Connect by address") },
+        title = { Text(stringResource(R.string.connect_by_address)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(Dimens.sm)) {
-                Text("The other device's IP address, as shown on its Add a device screen.",
+                Text(stringResource(R.string.address_hint),
                     style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 OutlinedTextField(value = text, onValueChange = { text = it }, singleLine = true, placeholder = { Text("192.168.1.20") })
             }
         },
-        confirmButton = { TextButton(enabled = parsed != null, onClick = { parsed?.let { onConnect(it.first, it.second) } }) { Text("Connect") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        confirmButton = { TextButton(enabled = parsed != null, onClick = { parsed?.let { onConnect(it.first, it.second) } }) { Text(stringResource(R.string.connect)) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
     )
 }
 
@@ -769,45 +788,51 @@ private fun DevicesScreen(
     forgetting?.let { p ->
         AlertDialog(
             onDismissRequest = { forgetting = null },
-            title = { Text("Forget ${p.name}?") },
-            text = { Text("It will be disconnected and removed from both devices. You'll need to pair again to reconnect.") },
-            confirmButton = { TextButton(onClick = { forgetting = null; onForget(p) }) { Text("Forget", color = AbTheme.status.danger) } },
-            dismissButton = { TextButton(onClick = { forgetting = null }) { Text("Cancel") } },
+            title = { Text(stringResource(R.string.forget_q, p.name)) },
+            text = { Text(stringResource(R.string.forget_body)) },
+            confirmButton = { TextButton(onClick = { forgetting = null; onForget(p) }) { Text(stringResource(R.string.forget), color = AbTheme.status.danger) } },
+            dismissButton = { TextButton(onClick = { forgetting = null }) { Text(stringResource(R.string.cancel)) } },
         )
     }
 
     AbScaffold(
-        title = "AirBridge",
-        actions = { IconButton(onClick = onOpenSettings) { Icon(Icons.Outlined.Settings, contentDescription = "Settings") } },
+        title = stringResource(R.string.app_brand),
+        actions = { IconButton(onClick = onOpenSettings) { Icon(Icons.Outlined.Settings, contentDescription = stringResource(R.string.settings)) } },
         bottomBar = {
-            Column(Modifier.navigationBarsPadding().padding(Dimens.md)) {
-                PrimaryButton("Add device", icon = Icons.Outlined.Add, onClick = onAddDevice)
+            val ctx = LocalContext.current
+            Row(Modifier.navigationBarsPadding().padding(Dimens.md), horizontalArrangement = Arrangement.spacedBy(Dimens.sm)) {
+                // AirWeb: send or receive with a device that doesn't have AirBridge, through its browser.
+                SecondaryButton(stringResource(R.string.airweb), icon = Icons.Outlined.QrCode2, modifier = Modifier.weight(1f),
+                    onClick = { ctx.startActivity(AirWebActivity.intent(ctx, emptyList())) })
+                PrimaryButton(stringResource(R.string.add_device), icon = Icons.Outlined.Add, modifier = Modifier.weight(1f), onClick = onAddDevice)
             }
         },
     ) {
         LazyColumn(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(Dimens.sm)) {
-            if (accessibilityOff && !setupDismissed && paired.isNotEmpty()) item(key = "a11y") {
+            // Only nag when a computer is paired: phone-to-phone file transfer never needs remote control
+            // (it is still in Settings for anyone who wants one phone to drive another).
+            if (accessibilityOff && !setupDismissed && paired.any { it.plat != "android" }) item(key = "a11y") {
                 RemoteControlSetupCard(
                     noun = RemoteControlSetup.controllerNoun(),
                     onOpen = {
                         try { ctx.startActivity(RemoteControlSetup.settingsIntent()) }
-                        catch (_: Exception) { toast(ctx, "Not available on this device") }
+                        catch (_: Exception) { toast(ctx, ctx.getString(R.string.not_available)) }
                     },
                     onDismiss = { RemoteControlSetup.dismissCard() },
                 )
             }
             item {
-                Text("This phone · $myName", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                Text(stringResource(R.string.this_phone_named, myName), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             val list = transfers.values.sortedBy { it.key }
             if (list.isNotEmpty()) {
-                item { SectionHeader("Transfers") }
+                item { SectionHeader(stringResource(R.string.transfers)) }
                 items(list, key = { "xfer:" + it.key }) { TransferCard(it) }
             }
-            item { SectionHeader("Devices") }
+            item { SectionHeader(stringResource(R.string.devices)) }
             if (paired.isEmpty()) item {
-                AbCard { EmptyState(Icons.Outlined.Devices, "No devices yet", "Pair your Mac, PC or another phone to share the clipboard and files.") }
+                AbCard { EmptyState(Icons.Outlined.Devices, stringResource(R.string.no_devices), stringResource(R.string.no_devices_sub)) }
             }
             items(paired, key = { it.id }) { peer ->
                 val st = status[peer.id] ?: PeerStatus.OFFLINE
@@ -849,13 +874,13 @@ private fun DeviceCard(
     var menu by remember { mutableStateOf(false) }
     val disconnected = status == PeerStatus.DISCONNECTED
     val (label, tone) = when {
-        controllingYou -> "Controlling you" to ChipTone.INFO
-        status == PeerStatus.CONNECTED -> "Connected" to ChipTone.SUCCESS
-        status == PeerStatus.CONNECTING -> "Connecting" to ChipTone.WARNING
-        status == PeerStatus.RECONNECTING -> "Reconnecting" to ChipTone.WARNING
-        disconnected && peer.disconnectedBy == DisconnectBy.PEER -> "Disconnected by ${peer.name}" to ChipTone.NEUTRAL
-        disconnected -> "Disconnected" to ChipTone.NEUTRAL
-        else -> "Offline" to ChipTone.NEUTRAL
+        controllingYou -> stringResource(R.string.st_controlling_you) to ChipTone.INFO
+        status == PeerStatus.CONNECTED -> stringResource(R.string.st_connected) to ChipTone.SUCCESS
+        status == PeerStatus.CONNECTING -> stringResource(R.string.st_connecting) to ChipTone.WARNING
+        status == PeerStatus.RECONNECTING -> stringResource(R.string.st_reconnecting) to ChipTone.WARNING
+        disconnected && peer.disconnectedBy == DisconnectBy.PEER -> stringResource(R.string.st_disconnected_by, peer.name) to ChipTone.NEUTRAL
+        disconnected -> stringResource(R.string.st_disconnected) to ChipTone.NEUTRAL
+        else -> stringResource(R.string.st_offline) to ChipTone.NEUTRAL
     }
     val desktop = peer.plat == "macos" || peer.plat == "windows" || peer.plat == "linux"
     val lan = peer.via == "lan"
@@ -876,35 +901,35 @@ private fun DeviceCard(
                     StatusChip(label, tone, modifier = Modifier.weight(1f, fill = false))
                     if (disconnected) {
                         Spacer(Modifier.width(Dimens.xs))
-                        TextButton(onClick = onConnect, modifier = Modifier.height(Dimens.touch)) { Text("Connect") }
+                        TextButton(onClick = onConnect, modifier = Modifier.height(Dimens.touch)) { Text(stringResource(R.string.connect)) }
                     }
                 }
             }
             Box {
-                IconButton(onClick = { menu = true }) { Icon(Icons.Outlined.MoreVert, contentDescription = "More options for ${peer.name}") }
+                IconButton(onClick = { menu = true }) { Icon(Icons.Outlined.MoreVert, contentDescription = stringResource(R.string.more_options_for, peer.name)) }
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                     if ((desktop || (peer.plat == "android" && com.shazan.airbridge.net.Protocol.CAP_TARGET in caps)) && status == PeerStatus.CONNECTED) DropdownMenuItem(
-                        text = { Text("Use as trackpad") },
+                        text = { Text(stringResource(R.string.use_as_trackpad)) },
                         onClick = { menu = false; onTrackpad(TrackpadActivity.Mode.Trackpad) },
                     )
                     if (canDisconnect) DropdownMenuItem(
-                        text = { Text("Disconnect") },
+                        text = { Text(stringResource(R.string.disconnect)) },
                         onClick = { menu = false; onDisconnect() },
                     )
                     if (canConnect) DropdownMenuItem(
-                        text = { Text("Connect") },
+                        text = { Text(stringResource(R.string.connect)) },
                         onClick = { menu = false; onConnect() },
                     )
                     DropdownMenuItem(
-                        text = { Text("Forget device", color = AbTheme.status.danger) },
+                        text = { Text(stringResource(R.string.forget_device), color = AbTheme.status.danger) },
                         onClick = { menu = false; onForget() },
                     )
                 }
             }
         }
         // A connected computer or phone: the ways to control it, one tap away. A phone is controllable
-        // once its AirBridge Universal Control service is on (it then advertises ctl_target); it can't
-        // share its screen, so it gets Trackpad and Keyboard only.
+        // once its AirBridge Universal Control service is on (it then advertises ctl_target); Screen mode
+        // needs it to advertise mirror_source as well (its user then allows each session there).
         val phone = peer.plat == "android"
         val drivable = desktop || (phone && com.shazan.airbridge.net.Protocol.CAP_TARGET in caps)
         if (status == PeerStatus.CONNECTED && !controllingYou && drivable) {
@@ -914,12 +939,12 @@ private fun DeviceCard(
             ) {
                 for (m in TrackpadActivity.Mode.entries) {
                     if (phone && m == TrackpadActivity.Mode.Screen && "mirror_source" !in caps) continue
-                    CardAction(m.label, m.icon, Modifier.weight(1f)) { onTrackpad(m) }
+                    CardAction(stringResource(m.labelRes), m.icon, Modifier.weight(1f)) { onTrackpad(m) }
                 }
             }
         } else if (status == PeerStatus.CONNECTED && phone && !controllingYou) {
             Text(
-                "To control ${peer.name} from here, turn on AirBridge Universal Control in its Accessibility settings.",
+                stringResource(R.string.to_control_phone, peer.name),
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(start = Dimens.md, end = Dimens.md, bottom = Dimens.md),
             )
@@ -940,7 +965,8 @@ private fun CardAction(label: String, icon: ImageVector, modifier: Modifier, onC
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
             Icon(icon, contentDescription = null, modifier = Modifier.size(Dimens.iconSm))
             Spacer(Modifier.height(2.dp))
-            Text(label, style = MaterialTheme.typography.labelMedium, maxLines = 1)
+            Text(label, style = MaterialTheme.typography.labelMedium, maxLines = 1,
+                autoSize = com.shazan.airbridge.ui.theme.fitOneLine(MaterialTheme.typography.labelMedium, 9f))
         }
     }
 }
@@ -959,14 +985,14 @@ private fun RemoteControlSetupCard(noun: String, onOpen: () -> Unit, onDismiss: 
                 modifier = Modifier.padding(top = 2.dp).size(Dimens.iconMd))
             Spacer(Modifier.width(Dimens.md))
             Column(Modifier.weight(1f).semantics(mergeDescendants = true) {}, verticalArrangement = Arrangement.spacedBy(Dimens.xs)) {
-                Text("$noun can't control this phone yet", style = MaterialTheme.typography.titleMedium)
-                Text("Turn on \"AirBridge Universal Control\" in Accessibility settings so the cursor can appear and your clicks reach this phone. It can't read your screen.",
+                Text(stringResource(R.string.cant_control_yet, noun), style = MaterialTheme.typography.titleMedium)
+                Text(stringResource(R.string.cant_control_body),
                     style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            IconButton(onClick = onDismiss) { Icon(Icons.Outlined.Close, contentDescription = "Dismiss") }
+            IconButton(onClick = onDismiss) { Icon(Icons.Outlined.Close, contentDescription = stringResource(R.string.dismiss)) }
         }
         Row(Modifier.fillMaxWidth().padding(Dimens.md), horizontalArrangement = Arrangement.End) {
-            PrimaryButton("Turn on", onClick = onOpen, icon = Icons.Outlined.Settings)
+            PrimaryButton(stringResource(R.string.turn_on), onClick = onOpen, icon = Icons.Outlined.Settings)
         }
     }
 }
@@ -975,20 +1001,21 @@ private fun RemoteControlSetupCard(noun: String, onOpen: () -> Unit, onDismiss: 
 private fun TransferCard(t: TransferUi) {
     AbCard {
         Column(Modifier.padding(Dimens.md), verticalArrangement = Arrangement.spacedBy(Dimens.sm)) {
-            Text((if (t.incoming) "Receiving from " else "Sending to ") + t.peerName, style = MaterialTheme.typography.titleSmall)
+            Text(if (t.incoming) stringResource(R.string.receiving_from, t.peerName) else stringResource(R.string.sending_to, t.peerName), style = MaterialTheme.typography.titleSmall)
             Text(t.fileName, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
             if (t.result == null) {
+                val pctLabel = stringResource(R.string.percent_label)
                 val p = if (t.bytesTotal > 0) (t.bytesDone.toFloat() / t.bytesTotal).coerceIn(0f, 1f) else 0f
                 LinearProgressIndicator(
                     progress = { p },
-                    modifier = Modifier.fillMaxWidth().semantics { contentDescription = "${(p * 100).toInt()} percent" },
+                    modifier = Modifier.fillMaxWidth().semantics { contentDescription = pctLabel.format((p * 100).toInt()) },
                     trackColor = MaterialTheme.colorScheme.surfaceVariant,
                 )
-                Text("${minOf(t.filesDone + 1, t.filesTotal)} of ${t.filesTotal} · ${(p * 100).toInt()}% · ${formatSpeed(t.bytesPerSec)}",
+                Text(stringResource(R.string.xfer_progress, minOf(t.filesDone + 1, t.filesTotal), t.filesTotal, (p * 100).toInt(), formatSpeed(t.bytesPerSec)),
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             } else {
-                val ok = t.result == "Sent" || t.result == "Received"
+                val ok = t.result == stringResource(R.string.xfer_sent) || t.result == stringResource(R.string.xfer_received)
                 val c = if (ok) AbTheme.status.success else AbTheme.status.danger
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(if (ok) Icons.Outlined.CheckCircle else Icons.Outlined.ErrorOutline, contentDescription = null, tint = c,
@@ -1041,7 +1068,7 @@ private fun CameraScannerScreen(onCancel: () -> Unit, onScanned: (String) -> Boo
                             providerFuture.get().bindToLifecycle(owner, CameraSelector.DEFAULT_BACK_CAMERA, preview, analysis)
                         }
                     } catch (_: Exception) {
-                        toast(c, "Camera unavailable")
+                        toast(c, c.getString(R.string.camera_unavailable))
                     }
                 }, ContextCompat.getMainExecutor(c))
                 view
@@ -1055,11 +1082,11 @@ private fun CameraScannerScreen(onCancel: () -> Unit, onScanned: (String) -> Boo
         )
         Surface(color = MaterialTheme.colorScheme.scrim, modifier = Modifier.fillMaxWidth().align(Alignment.TopCenter)) {
             Row(Modifier.statusBarsPadding().padding(Dimens.sm), verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onCancel) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
+                IconButton(onClick = onCancel) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back)) }
                 Spacer(Modifier.width(Dimens.sm))
                 Column {
-                    Text("Scan the pairing code", style = MaterialTheme.typography.titleMedium)
-                    Text("Shown by AirBridge on your computer when you add a device.", style = MaterialTheme.typography.bodySmall,
+                    Text(stringResource(R.string.scan_the_code), style = MaterialTheme.typography.titleMedium)
+                    Text(stringResource(R.string.scan_the_code_sub), style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
@@ -1088,43 +1115,47 @@ private fun SettingsScreen(onBack: () -> Unit, onOpenLinkDebug: () -> Unit) {
     val canWriteSettings = remember(resumeTick) { Settings.System.canWrite(ctx) }
     val dndAccess = remember(resumeTick) { ctx.getSystemService(NotificationManager::class.java)?.isNotificationPolicyAccessGranted == true }
     val notificationsOn = remember(resumeTick) { ctx.getSystemService(NotificationManager::class.java)?.areNotificationsEnabled() == true }
+    val hasOverlay = remember(resumeTick) { Settings.canDrawOverlays(ctx) }
+    // Back from the overlay settings with it granted: show the bubble now.
+    LaunchedEffect(hasOverlay) { if (hasOverlay && AirBridgeService.isRunning) AirBridgeService.start(ctx, AirBridgeService.ACTION_REFRESH_BUBBLE) }
 
     val (_, requestNearby) = rememberNearbyPermission { ok ->
         if (ok) {
             visible = true
             NearbyTransport.setVisible(true)
             AirBridgeService.start(ctx)
-        } else toast(ctx, "Nearby permissions are needed to pair with phones")
+        } else toast(ctx, ctx.getString(R.string.nearby_needed))
     }
 
     fun open(intent: Intent) = scope.launch {
-        try { ctx.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } catch (_: Exception) { toast(ctx, "Not available on this device") }
+        try { ctx.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } catch (_: Exception) { toast(ctx, ctx.getString(R.string.not_available)) }
     }
+    fun openOverlaySettings() = open(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${ctx.packageName}")))
 
     if (renaming) {
         var name by remember { mutableStateOf(Identity.customName ?: "") }
         AlertDialog(
             onDismissRequest = { renaming = false },
-            title = { Text("Phone name") },
+            title = { Text(stringResource(R.string.phone_name)) },
             text = {
                 OutlinedTextField(value = name, onValueChange = { name = it.take(64) }, singleLine = true,
-                    label = { Text("Shown on your other devices") }, placeholder = { Text(Identity.defaultName) })
+                    label = { Text(stringResource(R.string.shown_on_other)) }, placeholder = { Text(Identity.defaultName) })
             },
-            confirmButton = { TextButton(onClick = { Hub.renameSelf(name); renaming = false }) { Text("Save") } },
-            dismissButton = { TextButton(onClick = { renaming = false }) { Text("Cancel") } },
+            confirmButton = { TextButton(onClick = { Hub.renameSelf(name); renaming = false }) { Text(stringResource(R.string.save)) } },
+            dismissButton = { TextButton(onClick = { renaming = false }) { Text(stringResource(R.string.cancel)) } },
         )
     }
 
     // Long-press the title: hidden Wi-Fi Direct test screen (device tests S-W2/S-W3/S-W4).
-    AbScaffold(title = "Settings", onBack = onBack, onTitleLongPress = onOpenLinkDebug) {
+    AbScaffold(title = stringResource(R.string.settings), onBack = onBack, onTitleLongPress = onOpenLinkDebug) {
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-            SectionHeader("This phone")
+            SectionHeader(stringResource(R.string.this_phone))
             AbCard {
-                InfoRow(title = "Name", subtitle = myName, trailing = {
-                    IconButton(onClick = { renaming = true }) { Icon(Icons.Outlined.Edit, contentDescription = "Rename this phone") }
+                InfoRow(title = stringResource(R.string.name), subtitle = myName, trailing = {
+                    IconButton(onClick = { renaming = true }) { Icon(Icons.Outlined.Edit, contentDescription = stringResource(R.string.rename_phone)) }
                 })
                 RowDivider()
-                SwitchRow("Visible to nearby phones", "Lets other Android phones find and pair with this one", visible, { on ->
+                SwitchRow(stringResource(R.string.visible_nearby), stringResource(R.string.visible_nearby_sub), visible, { on ->
                     if (on) requestNearby()
                     else {
                         visible = false
@@ -1132,46 +1163,54 @@ private fun SettingsScreen(onBack: () -> Unit, onOpenLinkDebug: () -> Unit) {
                         AirBridgeService.stopIfIdle(ctx)
                     }
                 })
+                RowDivider()
+                InfoRow(title = stringResource(R.string.airweb), subtitle = stringResource(R.string.airweb_settings_sub), trailing = {
+                    TextButton(onClick = { ctx.startActivity(AirWebActivity.intent(ctx, emptyList())) }, modifier = Modifier.height(Dimens.touch)) { Text(stringResource(R.string.open)) }
+                })
             }
 
-            SectionHeader("Connection")
+            SectionHeader(stringResource(R.string.connection))
             AbCard {
-                SwitchRow("Reconnect automatically", "Connect to paired devices whenever they're reachable", autoConnect, {
+                SwitchRow(stringResource(R.string.reconnect_auto), stringResource(R.string.reconnect_auto_sub), autoConnect, {
                     autoConnect = it
                     prefs.edit().putBoolean(WsClient.PREF_AUTO_CONNECT, it).apply()
                     if (it) WsClient.retryAllNow(unpause = true)
                 })
             }
 
-            SectionHeader("Clipboard")
+            SectionHeader(stringResource(R.string.clipboard))
             AbCard {
                 SwitchRow(
-                    "Floating bubble",
-                    "Tap it to send your clipboard. Hidden while you use the trackpad or another device controls this phone.",
-                    bubble,
+                    stringResource(R.string.floating_bubble),
+                    if (hasOverlay) stringResource(R.string.bubble_sub)
+                    else stringResource(R.string.bubble_needs_overlay),
+                    bubble && hasOverlay,
                     {
                         bubble = it
                         prefs.edit().putBoolean(FloatingBubble.PREF_ENABLED, it).apply()
-                        if (AirBridgeService.isRunning) AirBridgeService.start(ctx, AirBridgeService.ACTION_REFRESH_BUBBLE)
+                        if (it && !hasOverlay) openOverlaySettings()
+                        else if (AirBridgeService.isRunning) AirBridgeService.start(ctx, AirBridgeService.ACTION_REFRESH_BUBBLE)
                     },
                 )
             }
             com.shazan.airbridge.ui.ClipboardAutoSyncCard()
 
-            SectionHeader("Remote control")
+            com.shazan.airbridge.ui.PhoneNotifsSection()
+
+            SectionHeader(stringResource(R.string.remote_control))
             AbCard {
                 com.shazan.airbridge.ui.RemoteControlServiceRows()
                 RowDivider()
-                SwitchRow("Invert left/right arrows", null, invertX, { invertX = it; prefs.edit().putBoolean("INVERT_X", it).apply() })
+                SwitchRow(stringResource(R.string.invert_x), null, invertX, { invertX = it; prefs.edit().putBoolean("INVERT_X", it).apply() })
                 RowDivider()
-                SwitchRow("Invert up/down arrows", null, invertY, { invertY = it; prefs.edit().putBoolean("INVERT_Y", it).apply() })
+                SwitchRow(stringResource(R.string.invert_y), null, invertY, { invertY = it; prefs.edit().putBoolean("INVERT_Y", it).apply() })
                 // Only where OemGestureSwitches has verified keys for this manufacturer.
                 if (com.shazan.airbridge.input.OsGestureGuard.switchAvailable) {
                     var osGesturesOff by remember { mutableStateOf(com.shazan.airbridge.input.OsGestureGuard.switchEnabled(prefs)) }
                     RowDivider()
                     SwitchRow(
-                        "Turn off Android's multi-finger gestures while using the trackpad",
-                        if (canWriteSettings) "Turned back on when you leave the trackpad" else "Needs “Modify system settings”",
+                        stringResource(R.string.os_gestures_off),
+                        if (canWriteSettings) stringResource(R.string.os_gestures_off_sub) else stringResource(R.string.needs_modify_settings),
                         osGesturesOff,
                         { on ->
                             osGesturesOff = on
@@ -1182,24 +1221,26 @@ private fun SettingsScreen(onBack: () -> Unit, onOpenLinkDebug: () -> Unit) {
                 }
             }
 
-            SectionHeader("System access")
+            SectionHeader(stringResource(R.string.system_access))
             AbCard {
-                AccessRow("Notifications", "Transfer progress and pairing requests", notificationsOn) {
+                AccessRow(stringResource(R.string.notifications), stringResource(R.string.notifications_sub), notificationsOn) {
                     open(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, ctx.packageName))
                 }
                 RowDivider()
-                AccessRow("Modify system settings", "Brightness keys from your computer", canWriteSettings) {
+                AccessRow(stringResource(R.string.overlay_perm), stringResource(R.string.overlay_perm_sub), hasOverlay) { openOverlaySettings() }
+                RowDivider()
+                AccessRow(stringResource(R.string.modify_settings), stringResource(R.string.modify_settings_sub), canWriteSettings) {
                     open(Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS, Uri.parse("package:${ctx.packageName}")))
                 }
                 RowDivider()
-                AccessRow("Do Not Disturb access", "Toggle Do Not Disturb from your computer", dndAccess) {
+                AccessRow(stringResource(R.string.dnd_access), stringResource(R.string.dnd_access_sub), dndAccess) {
                     open(Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS))
                 }
             }
 
-            SectionHeader("About")
+            SectionHeader(stringResource(R.string.about))
             AbCard {
-                InfoRow(title = "AirBridge ${BuildConfig.VERSION_NAME}", subtitle = "Protocol v2 · encrypted end to end",
+                InfoRow(title = stringResource(R.string.about_version, BuildConfig.VERSION_NAME), subtitle = stringResource(R.string.about_sub),
                     modifier = Modifier.pointerInput(Unit) { detectTapGestures(onLongPress = { onOpenLinkDebug() }) })
             }
             Spacer(Modifier.height(Dimens.xl))
@@ -1210,7 +1251,7 @@ private fun SettingsScreen(onBack: () -> Unit, onOpenLinkDebug: () -> Unit) {
 @Composable
 private fun AccessRow(title: String, subtitle: String, granted: Boolean, onOpen: () -> Unit) {
     InfoRow(title = title, subtitle = subtitle, trailing = {
-        if (granted) StatusChip("Allowed", ChipTone.SUCCESS)
-        else TextButton(onClick = onOpen, modifier = Modifier.height(Dimens.touch)) { Text("Allow") }
+        if (granted) StatusChip(stringResource(R.string.allowed), ChipTone.SUCCESS)
+        else TextButton(onClick = onOpen, modifier = Modifier.height(Dimens.touch)) { Text(stringResource(R.string.allow)) }
     })
 }

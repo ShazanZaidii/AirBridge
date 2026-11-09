@@ -47,10 +47,11 @@ data class PairProgress(
 )
 
 /** "Android phone", "Mac", "Linux computer"… for pairing prompts. */
-fun deviceKind(plat: String): String = when (plat) {
-    "android" -> "Android phone"; "ios" -> "iPhone or iPad"; "macos" -> "Mac"; "windows" -> "Windows PC"
-    "linux" -> "Linux computer"; else -> "Unknown device"
-}
+fun deviceKind(plat: String): String = Hub.app.getString(when (plat) {
+    "android" -> com.shazan.airbridge.R.string.kind_android; "ios" -> com.shazan.airbridge.R.string.plat_ios
+    "macos" -> com.shazan.airbridge.R.string.plat_mac; "windows" -> com.shazan.airbridge.R.string.plat_windows
+    "linux" -> com.shazan.airbridge.R.string.kind_linux; else -> com.shazan.airbridge.R.string.kind_unknown
+})
 
 private fun addressOf(s: Session): String = s.link.label.substringBefore(" (").substringBeforeLast(':')
 
@@ -196,6 +197,8 @@ object Hub : PeerBus.Transport {
         // ctl_target / type_target flipped during this handshake: its hello is already stale.
         if (s.advertisedDynamic.let { it != null && it != Protocol.dynamicCaps() }) CapsRefresh.poke()
         LinkManager.onSessionReady(s) // after the old session was retired: a held xfer_offer goes on [s]
+        com.shazan.airbridge.phone.PhoneRelay.onPeerReady(id) // §13: notification state, resync, current call
+        com.shazan.airbridge.phone.CallAudioInfo.onPeerReady(id) // §13.4: Bluetooth facts for call audio
     }
 
     fun onClosed(s: Session, outcome: Outcome) {
@@ -220,6 +223,9 @@ object Hub : PeerBus.Transport {
                 _events.tryEmit(NetEvent.PairResult(false, s.peerName, why))
             }
         }
+        if (wasReady && id != null) com.shazan.airbridge.mirror.PhoneMirror.onPeerGone(id)
+        if (wasReady && id != null) com.shazan.airbridge.phone.PhoneRelay.onPeerGone(id)
+        if (wasReady && id != null) com.shazan.airbridge.phone.CallAudioInfo.onPeerGone(id)
         if (wasReady) peersChanged() else recomputeStatus()
     }
 
@@ -227,6 +233,13 @@ object Hub : PeerBus.Transport {
 
     /** True while an interactive pairing is in flight (keeps the service alive before the first peer is stored). */
     fun isPairing(): Boolean = pairingSession?.isClosed == false
+
+    /**
+     * Any connection still open or being set up, paired or not: an incoming pairing that hasn't shown its
+     * code yet, a Nearby pairing (never [pairingSession]). Stopping the service closes every session, so it
+     * must not stop while this is true.
+     */
+    fun hasLiveSessions(): Boolean = sessions.any { !it.isClosed }
 
     /** A LAN pairing attempt was dialled; [s] becomes the one the pairing sheet follows. */
     fun beginPairing(s: Session, name: String, plat: String, mode: String) {
@@ -249,13 +262,13 @@ object Hub : PeerBus.Transport {
         }
         pairingSession = s
         val addr = addressOf(s)
-        _pairing.value = PairProgress(s.peerName.ifBlank { "Unnamed device" }, s.peerPlat, "confirm", PairStage.CONFIRM, s.confirmDigits,
+        _pairing.value = PairProgress(s.peerName.ifBlank { app.getString(com.shazan.airbridge.R.string.unnamed_device) }, s.peerPlat, "confirm", PairStage.CONFIRM, s.confirmDigits,
             address = addr, incoming = true)
-        val who = "${s.peerName.ifBlank { "Unnamed device" }} (${deviceKind(s.peerPlat)}, $addr)"
+        val who = app.getString(com.shazan.airbridge.R.string.hub_who, s.peerName.ifBlank { app.getString(com.shazan.airbridge.R.string.unnamed_device) }, deviceKind(s.peerPlat), addr)
         val n = androidx.core.app.NotificationCompat.Builder(app, Notifs.CH_PAIR)
             .setSmallIcon(com.shazan.airbridge.R.drawable.ic_stat_name)
-            .setContentTitle("$who wants to pair")
-            .setContentText("Only accept if it shows ${s.confirmDigits ?: "the same code"}. Tap to see the code.")
+            .setContentTitle(app.getString(com.shazan.airbridge.R.string.hub_wants_pair, who))
+            .setContentText(app.getString(com.shazan.airbridge.R.string.hub_only_accept, s.confirmDigits ?: app.getString(com.shazan.airbridge.R.string.hub_same_code)))
             .setPriority(androidx.core.app.NotificationCompat.PRIORITY_HIGH)
             .setCategory(androidx.core.app.NotificationCompat.CATEGORY_CALL)
             .setAutoCancel(true)
@@ -330,6 +343,14 @@ object Hub : PeerBus.Transport {
             t.startsWith("xfer_") -> s.xfer.onControl(t, m)
             // §10.1 link upgrades are network-half business, never routed to the input half.
             t.startsWith("link_") -> LinkManager.onMessage(s, t, m)
+            // §13 phone notifications and calls: network-half business too, never the input half.
+            t.startsWith("call_audio_") -> com.shazan.airbridge.phone.CallAudioInfo.onMessage(id, m)
+            t.startsWith("notif_") || t.startsWith("call_") -> com.shazan.airbridge.phone.PhoneRelay.onMessage(id, m)
+            // §8.9 Pro mirroring helper: report / open Wireless debugging. Network half, no input lease.
+            t == "adb_wifi" -> com.shazan.airbridge.promirror.AdbWifi.onMessage(s, m)
+            // §8.7 phone as source: works without the accessibility service (view-only), so it never
+            // depends on the input half being installed.
+            t.startsWith("mirror_") && com.shazan.airbridge.mirror.PhoneMirror.onControl(id, m) -> Unit
             else -> {
                 if (t in LEASE_INPUT && _controlledBy.value != id) _controlledBy.value = id
                 if (PeerBus.controlHandler == null) {
@@ -337,7 +358,7 @@ object Hub : PeerBus.Transport {
                     if (t == "ctl_enter") s.send(Protocol.withReason("ctl_leave", "unavailable"))
                     if (t in PeerBus.CONTROL_TYPES && !accessibilityToastShown) {
                         accessibilityToastShown = true
-                        toast("Turn on \"AirBridge Universal Control\" in Accessibility settings so your computer can control this phone", long = true)
+                        toast(app.getString(com.shazan.airbridge.R.string.hub_turn_on_control, app.getString(com.shazan.airbridge.R.string.svc_core_name)), long = true)
                     }
                 } else {
                     try { PeerBus.dispatchControl(id, m) } catch (e: Exception) { Log.w(TAG, "controlHandler", e) }

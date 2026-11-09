@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="pn_listener_name">এয়ারব্রিজ নোটিফিকেশন</string>
+    <string name="pn_section">বিজ্ঞপ্তি ও কল</string>
+
+    <string name="pn_notifs_title">ফোনের বিজ্ঞপ্তি কম্পিউটারে দেখান</string>
+    <string name="pn_notifs_sub">পেয়ার করা Mac বা PC থেকেই সেগুলি দেখুন, উত্তর দিন বা সরিয়ে দিন। সেগুলি এনক্রিপ্ট হয়ে শুধু আপনার নিজের ডিভাইসেই যায়।</string>
+    <string name="pn_access_off_title">বিজ্ঞপ্তির অ্যাক্সেস বন্ধ আছে</string>
+    <string name="pn_access_off_sub">সিস্টেম সেটিংসে “%1$s” চালু করুন। সুইচটি ধূসর থাকলে, আগে অ্যাপের তথ্য › ⋮ › সীমাবদ্ধ সেটিংসের অনুমতি দিন খুলুন, তারপর আবার চেষ্টা করুন।</string>
+    <string name="pn_app_info">অ্যাপের তথ্য</string>
+
+    <string name="pn_access_dialog_title">কম্পিউটারে ফোনের বিজ্ঞপ্তি</string>
+    <string name="pn_access_dialog_body">এয়ারব্রিজ এই ফোনে আসা বিজ্ঞপ্তি পড়ে আপনার পেয়ার করা কম্পিউটারে দেখাবে, যাতে আপনি সেখান থেকেই উত্তর দিতে বা সেগুলি সরিয়ে দিতে পারেন।\n\nসেগুলি এনক্রিপ্ট হয়ে শুধু আপনার নিজের পেয়ার করা ডিভাইসে যায়, কোথাও আপলোড হয় না। এই সুইচ বন্ধ থাকলে কিছুই পাঠানো হয় না।\n\nপরের স্ক্রিনে “%1$s” চালু করুন। সুইচটি ধূসর থাকলে ফিরে আসুন, অ্যাপের তথ্য › ⋮ › সীমাবদ্ধ সেটিংসের অনুমতি দিন খুলে আবার চেষ্টা করুন।</string>
+    <string name="pn_continue">চালিয়ে যান</string>
+
+    <string name="pn_apps_title">অ্যাপ</string>
+    <string name="pn_apps_all">সব অ্যাপ</string>
+    <plurals name="pn_apps_muted">
+        <item quantity="one">%1$dটি অ্যাপ লুকানো আছে</item>
+        <item quantity="other">%1$dটি অ্যাপ লুকানো আছে</item>
+    </plurals>
+    <string name="pn_apps_header">যেসব অ্যাপের সুইচ চালু আছে, সেগুলির বিজ্ঞপ্তি আপনার কম্পিউটারে পৌঁছায়। সম্প্রতি বিজ্ঞপ্তি পাঠানো অ্যাপগুলি সবার আগে থাকে।</string>
+    <string name="pn_apps_loading">অ্যাপ লোড হচ্ছে…</string>
+    <string name="pn_private_hint">লক স্ক্রিনে ব্যক্তিগত তথ্য লুকানো থাকলে, ফোন আনলক না করা পর্যন্ত বিজ্ঞপ্তি অপেক্ষা করে।</string>
+
+    <string name="pn_calls_title">কম্পিউটারে কল</string>
+    <string name="pn_calls_sub">কে কল করছেন দেখুন, তারপর কম্পিউটার থেকেই কল ধরুন, কেটে দিন বা শেষ করুন। Mac-এ আপনি সেখান থেকেই কথাও বলতে পারেন।</string>
+    <string name="pn_calls_dialog_body">কল দেখাতে এবং কল ধরতে বা শেষ করতে এয়ারব্রিজের ফোনের অনুমতি দরকার। পরিচিতির অনুমতি ঐচ্ছিক; এটি শুধু নম্বরের জায়গায় নাম দেখাতে কাজে লাগে।\n\nকলটি ফোনেই চলে: ফোনের স্পিকার, ইয়ারপিস বা Bluetooth হেডসেটে কথা বলুন। Android কোনও অ্যাপকে কলের আওয়াজ কম্পিউটারে নিয়ে যেতে দেয় না।\n\nকলের তথ্য এনক্রিপ্ট হয়ে শুধু আপনার নিজের পেয়ার করা ডিভাইসে যায়।</string>
+    <string name="pn_calls_limited_title">ফোনের অনুমতি বন্ধ আছে</string>
+    <string name="pn_calls_limited_sub">আপনার ফোন অ্যাপ যে কলগুলির বিজ্ঞপ্তি দেখায়, শুধু সেগুলিই কম্পিউটারে পৌঁছায়, আর কল ধরা হয়তো কাজ করবে না। অ্যাপের অনুমতিতে ফোনের অনুমতি দিন।</string>
+    <string name="pn_speaker_title">কম্পিউটার থেকে কল ধরলে স্পিকার চালু করুন</string>
+    <string name="pn_speaker_sub">যাতে ডেস্কে বসেই কথা বলতে পারেন। কিছু ফোনে এটা হয় না।</string>
+
+    <string name="promirror_notif_title">ওয়্যারলেস ডিবাগিং চালু করুন</string>
+    <string name="promirror_notif_text">Pro মিররিংয়ের জন্য ডেভেলপার বিকল্প খুলতে ট্যাপ করুন</string>
+</resources>

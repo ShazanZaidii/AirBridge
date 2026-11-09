@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- English source text. Translations live in values-<lang>/strings_common.xml. -->
+<resources>
+    <string name="plat_mac">Mac</string>
+    <string name="plat_windows">Windows PC</string>
+    <string name="plat_linux">Linux</string>
+    <string name="plat_android">Android</string>
+    <string name="plat_ios">iPhone or iPad</string>
+    <string name="plat_device">Device</string>
+    <string name="noun_mac">Mac</string>
+    <string name="noun_pc">PC</string>
+    <string name="noun_phone">phone</string>
+    <string name="noun_iphone">iPhone</string>
+    <string name="noun_computer">computer</string>
+    <string name="status_desc">Status: %1$s</string>
+    <string name="svc_core_name">AirBridge Universal Control</string>
+    <string name="svc_text_name">AirBridge Typing &amp; Clipboard</string>
+    <string name="tile_sync_clipboard">Sync clipboard</string>
+</resources>

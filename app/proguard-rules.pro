@@ -21,3 +21,11 @@
     public final void pushNow(java.lang.String);
     public static void pushNow(java.lang.String);
 }
+
+# ML Kit (and any Firebase-style component) builds its registrars from manifest meta-data by
+# reflection. R8 full mode drops their no-arg constructors, ML Kit then has no barcode component and
+# BarcodeScanning.getClient() crashes with a NullPointerException ("Scan QR code" in release builds).
+-keep class * implements com.google.firebase.components.ComponentRegistrar {
+    public <init>();
+    public java.util.List getComponents();
+}

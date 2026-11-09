@@ -31,9 +31,9 @@ class AirBridgeTileService : TileService() {
         val tile = qsTile ?: return
         val peers = Hub.peers()
         when (peers.size) {
-            0 -> { tile.label = "AirBridge"; tile.state = Tile.STATE_INACTIVE }
+            0 -> { tile.label = getString(R.string.app_brand); tile.state = Tile.STATE_INACTIVE }
             1 -> { tile.label = peers[0].name; tile.state = Tile.STATE_ACTIVE }
-            else -> { tile.label = "Sync ${peers.size} devices"; tile.state = Tile.STATE_ACTIVE }
+            else -> { tile.label = resources.getQuantityString(R.plurals.tile_sync_n, peers.size, peers.size); tile.state = Tile.STATE_ACTIVE }
         }
         tile.updateTile()
     }

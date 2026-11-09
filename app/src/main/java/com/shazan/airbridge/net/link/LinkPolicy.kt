@@ -28,19 +28,22 @@ object LinkPolicy {
     const val DEFAULT_PORT = 47632
 
     /** User-facing text for a §10.1 `link_fail` reason. */
-    fun failText(reason: String): String = when (reason) {
-        "no_go_support" -> "This PC can't host a Wi-Fi Direct link"
-        "hotspot_active" -> "Turn off Mobile Hotspot on the PC to use a direct link"
-        "radio_off" -> "Turn on Wi-Fi to use a direct link"
-        "join_failed" -> "Couldn't join the PC's direct Wi-Fi"
-        "no_ip" -> "The direct Wi-Fi link got no address"
-        "approval_denied" -> "The Wi-Fi connection request was declined"
-        "vpn" -> "A VPN is blocking the direct link"
-        "api_level" -> "This phone can't join Wi-Fi Direct links (Android 10 or later needed)"
-        "timeout" -> "The direct link took too long to set up"
-        "busy" -> "Another direct link is already being set up"
-        "user" -> "Direct link cancelled"
-        else -> "Direct link unavailable"
+    fun failText(reason: String): String = com.shazan.airbridge.net.Hub.app.getString(failRes(reason))
+
+    /** String resource for a §10.1 `link_fail` reason (pure, unit-testable). */
+    fun failRes(reason: String): Int = when (reason) {
+        "no_go_support" -> com.shazan.airbridge.R.string.lk_no_go
+        "hotspot_active" -> com.shazan.airbridge.R.string.lk_hotspot
+        "radio_off" -> com.shazan.airbridge.R.string.lk_radio_off
+        "join_failed" -> com.shazan.airbridge.R.string.lk_join_failed
+        "no_ip" -> com.shazan.airbridge.R.string.lk_no_ip
+        "approval_denied" -> com.shazan.airbridge.R.string.lk_denied
+        "vpn" -> com.shazan.airbridge.R.string.lk_vpn
+        "api_level" -> com.shazan.airbridge.R.string.lk_api
+        "timeout" -> com.shazan.airbridge.R.string.lk_timeout
+        "busy" -> com.shazan.airbridge.R.string.lk_busy
+        "user" -> com.shazan.airbridge.R.string.lk_user
+        else -> com.shazan.airbridge.R.string.lk_unavailable
     }
 
     /** Peer cap: can host a Wi-Fi Direct legacy group (Windows). */

@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="pn_listener_name">AirBridge Benachrichtigungen</string>
+    <string name="pn_section">Benachrichtigungen &amp; Anrufe</string>
+
+    <string name="pn_notifs_title">Smartphone-Benachrichtigungen auf deinen Computern anzeigen</string>
+    <string name="pn_notifs_sub">Sieh sie dir auf deinem gekoppelten Mac oder PC an, antworte darauf oder lösche sie. Sie gehen verschlüsselt nur an deine eigenen Geräte.</string>
+    <string name="pn_access_off_title">Benachrichtigungszugriff ist aus</string>
+    <string name="pn_access_off_sub">Aktiviere „%1$s“ in den Systemeinstellungen. Ist der Schalter ausgegraut, öffne zuerst App-Info › ⋮ › Eingeschränkte Einstellungen zulassen und versuche es dann noch einmal.</string>
+    <string name="pn_app_info">App-Info</string>
+
+    <string name="pn_access_dialog_title">Benachrichtigungen auf deinen Computern</string>
+    <string name="pn_access_dialog_body">AirBridge liest die Benachrichtigungen auf diesem Smartphone und zeigt sie auf deinen gekoppelten Computern an. So kannst du direkt dort antworten oder sie löschen.\n\nSie werden verschlüsselt nur an deine eigenen gekoppelten Geräte gesendet und nirgendwo hochgeladen. Solange dieser Schalter aus ist, wird nichts gesendet.\n\nAktiviere auf dem nächsten Bildschirm „%1$s“. Ist der Schalter ausgegraut, geh zurück, öffne App-Info › ⋮ › Eingeschränkte Einstellungen zulassen und versuche es noch einmal.</string>
+    <string name="pn_continue">Weiter</string>
+
+    <string name="pn_apps_title">Apps</string>
+    <string name="pn_apps_all">Alle Apps</string>
+    <plurals name="pn_apps_muted">
+        <item quantity="one">%1$d App ausgeblendet</item>
+        <item quantity="other">%1$d Apps ausgeblendet</item>
+    </plurals>
+    <string name="pn_apps_header">Benachrichtigungen von eingeschalteten Apps erscheinen auf deinen Computern. Apps, die sich zuletzt gemeldet haben, stehen oben.</string>
+    <string name="pn_apps_loading">Apps werden geladen…</string>
+    <string name="pn_private_hint">Wenn der Sperrbildschirm vertrauliche Inhalte ausblendet, warten Benachrichtigungen, bis du das Smartphone entsperrst.</string>
+
+    <string name="pn_calls_title">Anrufe auf deinem Computer</string>
+    <string name="pn_calls_sub">Sieh, wer anruft, und nimm den Anruf am Computer an, lehne ihn ab oder beende ihn. Auf einem Mac kannst du auch darüber telefonieren.</string>
+    <string name="pn_calls_dialog_body">Damit AirBridge Anrufe anzeigen, annehmen und beenden kann, braucht es die Berechtigung „Telefon“. „Kontakte“ ist optional und dient nur dazu, Namen statt Nummern anzuzeigen.\n\nDas Gespräch selbst bleibt auf deinem Smartphone: Sprich über den Lautsprecher, die Hörmuschel oder ein Bluetooth-Headset. Android erlaubt Apps nicht, den Ton eines Anrufs an einen Computer weiterzugeben.\n\nAnrufdetails werden verschlüsselt nur an deine eigenen gekoppelten Geräte gesendet.</string>
+    <string name="pn_calls_limited_title">Telefon-Berechtigung ist aus</string>
+    <string name="pn_calls_limited_sub">Nur Anrufe, die deine Telefon-App als Benachrichtigung zeigt, erreichen deinen Computer, und das Annehmen klappt eventuell nicht. Erlaube „Telefon“ in den App-Berechtigungen.</string>
+    <string name="pn_speaker_title">Lautsprecher an, wenn am Computer angenommen</string>
+    <string name="pn_speaker_sub">So kannst du direkt vom Schreibtisch aus sprechen. Manche Smartphones lassen das nicht zu.</string>
+
+    <string name="promirror_notif_title">Debugging über WLAN aktivieren</string>
+    <string name="promirror_notif_text">Tippe, um die Entwickleroptionen für die Pro-Spiegelung zu öffnen</string>
+</resources>

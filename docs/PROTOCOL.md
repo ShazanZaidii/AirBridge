@@ -152,8 +152,22 @@ Client                                   Host
     keys. Controllers may use it for UI hints only; they must keep sending `key` as usual and ignore caps they
     don't know.
   - `trackpad` – can act as a direct input device (phone trackpad/keyboard mode)
-  - `mirror_source` – can stream its screen (§8.7)
-  - `mirror_sink` – can display a streamed screen and send absolute input (§8.7)
+  - `mirror_source` – can stream its screen (§8.7). Android phones advertise it on API ≥ 29 with a hardware
+    H.264 encoder; the phone's user still allows every session (§8.7 "Phone as source")
+  - `mirror_sink` – can display a streamed screen and send absolute input (§8.7). Phones, and Macs (mirror window
+    for a phone); Windows only once its decoder exists
+  - `drag_files` – as a **target**, understands `drag_carry` / `drag_drop` / `drag_cancel` (§8.8): shows a drag
+    ghost next to its cursor and accepts the files that follow. Meaningful only together with `ctl_target` and
+    `xfer` (controllers only ever carry to a `ctl_target` peer they captured).
+  - `notif_source` / `notif_sink` – forwards its notifications / shows a phone's notifications and sends back
+    dismiss, reply and actions (§13). `call_source` / `call_sink` – the same for phone calls (§13.3). Android
+    advertises both `_source` caps (the user still turns each feature on; `notif_state` says whether it is on);
+    macOS and Windows advertise both `_sink` caps.
+  - `call_audio` / `call_audio_info` – a computer that carries call audio as the phone's Bluetooth hands-free unit
+    / a phone that reports its Bluetooth facts for that (§13.4). macOS advertises `call_audio`, Android
+    `call_audio_info`.
+  - `adb_wifi` – Android 11+ phone that answers `adb_wifi` (§8.9): reports and opens Wireless debugging for a
+    computer's Pro mirroring.
 - `nonce` – fresh per connection, used in auth/pair MACs.
 - `pk` – a fresh **ephemeral** NIST P-256 (secp256r1) public key, X9.63 uncompressed (`0x04‖X‖Y`, 65 bytes),
   generated per connection and never reused. It feeds the session keys (§3.6). Reject a `hello` without a
@@ -600,7 +614,7 @@ the design goal: encoder in real-time mode, no B-frames, decode straight to a su
 sink→source   {"t":"mirror_start","codecs":["hevc","h264"],"maxW":1600,"maxH":1000,"fps":60,"bitrate":8000000}
 source→sink   {"t":"mirror_info","codec":"h264","w":1512,"h":982,"fps":60,"display":{"w":3024,"h":1964}}
 sink→source   {"t":"mirror_key"}                // please send a keyframe now (after loss/decoder reset)
-sink→source   {"t":"mirror_ack","pts":123456}   // every 10 frames: flow control
+sink→source   {"t":"mirror_ack","pts":123456}   // every `ackEvery` frames (default 10): flow control
 either        {"t":"mirror_stop"}
 ```
 
@@ -614,6 +628,10 @@ bytes 10..    : Annex-B elementary stream (start-code prefixed NAL units) for th
 ```
 
 Rules:
+- `mirror_start` may carry `"ackEvery":N` (1–30, default 10): the sink acks every N frames. A sink that acks
+  every frame (`1`, the Mac mirror window) lets the source keep only ~6 frames (≈100 ms) in flight, and the
+  source caps its socket queue at ~256 KB: when the link is slower than the stream it skips frames instead of
+  queueing them, so the picture stays live.
 - Source: scale to fit `maxW×maxH` keeping aspect, `fps` ≤ requested, keyframe at most every 2 s and on
   `mirror_key`, parameter sets repeated with every keyframe, bitrate adaptive from `mirror_ack` lag; never
   queue more than 2 unacknowledged frames beyond the ack window (drop, don't buffer). Stop on `mirror_stop`,
@@ -628,6 +646,126 @@ Rules:
   Touch → `ptr_abs` (normalised to the mirrored display) + `ptr_click`/`ptr_btn`; two fingers → `ptr_scroll
   px:true`; the on-screen keyboard sends `key`. Mirror input uses the normal lease rules (§8.6).
 - A source needs the OS screen-recording permission; it advertises `mirror_source` only when granted.
+- A source only answers `mirror_start` from a peer whose `hello` listed `mirror_sink`. Every message below is
+  optional for peers that don't know it: unknown types are ignored (rule 1), so older sinks and sources keep working.
+
+#### Phone as source (computer or phone as sink)
+
+The same messages and frames run the other way: a Mac (mirror window) or another phone (Screen mode) is the
+`mirror_sink`, an Android phone the `mirror_source`. Differences:
+
+```json
+source→sink   {"t":"mirror_wait","reason":"consent"}             // asking the phone's user; show "Allow on your phone"
+source→sink   {"t":"mirror_info","codec":"h264","w":1080,"h":2400,"fps":60,
+               "display":{"w":1080,"h":2400,"corner":110}}       // corner = screen corner radius in display px (optional)
+source→sink   {"t":"mirror_state","control":true,"typing":false,"locked":false}
+source→sink   {"t":"mirror_stop","reason":"user"}                // reason optional: user | locked | ended | no ack |
+                                                                 //   replaced | denied | timeout | codec | encoder
+```
+
+- **Consent every session.** Android requires the user to allow screen capture each time. On `mirror_start` the
+  phone answers `mirror_wait` at once, then shows the system screen-capture dialog (directly when Android lets the
+  app start an activity, e.g. while Universal Control is on, otherwise through a heads-up notification "<sink>
+  wants to show this phone's screen · Tap to allow" with a "Not now" action). Allowed → `mirror_info` and frames.
+  Refused, "Not now", or no answer within 60 s → `{"t":"error","code":"mirror_permission","reason":"denied"|"timeout"}`
+  followed by `mirror_stop` (same `reason`). Sinks wait for this instead of their usual short `mirror_info` timeout
+  once `mirror_wait` arrived. A `mirror_start` from the same sink while streaming re-negotiates without a new prompt;
+  one from another sink stops the current stream (`mirror_stop reason=replaced`) and asks again.
+- **While streaming** the phone runs a foreground service with an ongoing "Showing your screen on <sink>"
+  notification and a Stop action (→ `mirror_stop reason=user`). Android's own projection end (status bar chip,
+  screen lock on versions that stop capture there) → `mirror_stop` with `locked` or `ended`.
+- **Encoding.** H.264 Constrained Baseline (no B-frames) by default; HEVC only when the sink lists `"hevc"` first and
+  the phone has a hardware HEVC encoder. Size fits `maxW×maxH` keeping the aspect, never upscaled, then shrunk until
+  the encoder accepts it. Keyframes every 2 s and on `mirror_key`, parameter sets in front of every keyframe, the
+  last frame repeated every 100 ms while the screen is static. Flow control as above: at most 12 frames beyond the
+  last `mirror_ack` (the encoder pauses rather than dropping), bitrate −25 % on > 150 ms ack lag, +10 % per 5 s while
+  healthy, stop after 3 s without acks.
+- **Rotation / resolution change**: a new `mirror_info` (new `w`/`h`/`display`), then a keyframe. Sinks reshape
+  their window to the new aspect.
+- **`mirror_state`** is sent after `mirror_info` and whenever a value changes: `control` = the phone can take input
+  (AirBridge Universal Control is on; otherwise the stream is view-only and the sink shows how to turn it on and
+  sends no input), `typing` = text reaches the focused field (Typing & Clipboard service on), `locked` = keyguard
+  up or screen off. A sink may also start from the `ctl_target`/`type_target` caps until the first `mirror_state`.
+- **Input** from the sink is ordinary §8.2/§8.3/§8.5 traffic under the implicit lease (§8.6): click → `ptr_abs` +
+  `ptr_btn` down, drag → `ptr_abs` moves (≤ 120/s), release → `ptr_abs` + `ptr_btn` up (the phone injects one
+  real-time stroke, so holds become long-presses); trackpad scroll → `ptr_scroll px:true` scaled by
+  phone px / window pt ÷ 1.6 (the phone's scroll gain) so content follows the fingers, mouse wheel → `px:false`;
+  right-click/Esc → Back (`action back` / `key` Esc), and `action home`/`recents` from the window's buttons or
+  shortcuts (Mac ⌘1/⌘2, Windows Ctrl+1/Ctrl+2). The phone hides its own virtual cursor for the peer it streams to
+  (the sink draws a local pointer). While a mirror window has focus, its computer does not capture its pointer into
+  the same phone through a screen edge.
+
+### 8.8 Drag and drop across devices ("carry")
+
+While a controller's pointer is captured by a target (§8.1), the user can carry files that they were dragging on
+the controller across the edge and drop them on the target, like Universal Control.
+
+```json
+controller→target {"t":"drag_carry","id":3,"names":["IMG_0001.jpg","notes.txt"],"kinds":["image","file"],"count":2,"totalBytes":3150000}
+controller→target {"t":"drag_drop","id":3}
+controller→target {"t":"drag_cancel","id":3}
+```
+
+- **Gate.** A controller sends these only to a peer whose `caps` contain `drag_files` (and `xfer`). With any other
+  peer a held button keeps blocking the capture exactly as before (§8.2): no ghost, nothing sent. Targets that don't
+  know the messages ignore them (design rule 1).
+- **Capture during a drag.** Normally a held button blocks capture (§8.2). A controller may capture during a
+  left-button drag **only** when it knows the drag carries files and the edge leads to a `drag_files` peer; the
+  push-through rule is otherwise unchanged. It then sends `ctl_enter`, then `drag_carry` at once (before `ctl_ack`).
+- `id` is chosen by the controller, unique within the session. `names` holds at most 3 display names (last path
+  component, folders by their own name), `kinds` the matching kind of each (`image`, `video`, `audio`, `folder`,
+  `file`), `count` the number of top-level items dragged (files + folders), `totalBytes` an estimate (folders may count
+  0). All fields but `id` are for display only.
+- **Pointer while carrying.** Motion is the usual `ptr_move`. The held button is **not** forwarded: no `ptr_btn`
+  for it, so the target never starts a drag or selection of its own. Other buttons, scroll and keys are forwarded
+  as usual.
+- **Drop.** On button release over the target the controller sends `drag_drop`, then sends the files to that peer
+  as a normal transfer (§6, `xfer_offer` right after; folders may be zipped by the sender, e.g. `Photos.zip`). The
+  capture continues: the cursor stays on the target. The controller ends its own local drag session so that nothing
+  is dropped on the controller (implementation detail, see below).
+- **Cancel.** `drag_cancel` when the carry ends without a drop: the cursor comes back to the controller with the
+  button still held (the local drag simply continues there), `ctl_leave` in either direction, `ctl_busy`, recall
+  hotkey, or the controller loses track of the button. Session loss cancels silently on both sides.
+- **Target.** Accepts `drag_*` only from the peer holding its explicit (`ctl_enter`) lease; others are ignored. On
+  `drag_carry` it shows a ghost (icon/thumbnail, the name or "3 items", a soft shadow) that follows its cursor, and
+  replaces any earlier ghost. On `drag_drop` it hides the ghost with a short settle animation and shows a brief
+  "Receiving <name> from <controller>"; the files arrive through §6 and are auto-accepted and saved as usual (§6.3).
+  It hides the ghost on `drag_cancel`, on `ctl_leave` (either direction), when the lease ends for any reason, and when
+  the holder's session ends.
+- **Implementation notes (non-normative).** macOS controller: the drag pasteboard (`NSPasteboard(name: .drag)`)
+  must have changed since the button went down; while charging the edge an invisible drop catcher window sits under
+  the cursor at the edge, so the system drop on release lands there and is accepted as a copy that does nothing.
+  Windows controller: an invisible, topmost OLE drop-target strip appears at the edge during a left-button drag;
+  only an OLE `DragEnter` with `CF_HDROP` files on it arms the carry, and the release lands on the same strip.
+
+### 8.9 Pro mirroring helper (Wireless debugging)
+
+"Pro mirroring" on a computer shows and controls an Android phone **without** §8.7: the computer talks to the
+phone's own Wireless debugging (adb over TLS, Android 11+) and runs the open-source scrcpy server on it. That needs
+no screen-capture consent, shows no recording chip and injects input as the shell user (no accessibility service).
+None of that traffic is AirBridge protocol. AirBridge only helps with setup, because many phones turn Wireless
+debugging off after a restart or a Wi-Fi change:
+
+```json
+computer→phone {"t":"adb_wifi","op":"status"}
+computer→phone {"t":"adb_wifi","op":"open"}
+phone→computer {"t":"adb_wifi_state","dev":true,"wifi":false,"sdk":35,"opened":"direct"}
+```
+
+- **Gate.** Send `adb_wifi` only to a peer whose `caps` contain `adb_wifi`; peers without it never see it. Unknown
+  `op` values are ignored.
+- **`status`** — answer with `adb_wifi_state` at once.
+- **`open`** — open Developer options at the Wireless debugging row (or About phone while Developer options are still
+  hidden), then answer. `opened`: `"direct"` = Settings is on screen; `"notification"` = Android doesn't let the app
+  open it from the background, so the phone posted a notification to tap.
+- **`adb_wifi_state`** — `dev`: Developer options are on. `wifi`: Wireless debugging is on; **omitted** when the
+  phone can't tell (the setting isn't public API). `sdk`: `Build.VERSION.SDK_INT`. `opened`: only in the answer to
+  `open`. Routed like a control message on the computer (input half); peers that don't know it ignore it (rule 1).
+- **Pairing and connection** use Android's own mechanisms: mDNS `_adb-tls-pairing._tcp` (only while "Pair device
+  with pairing code" is open) and `_adb-tls-connect._tcp` (while Wireless debugging is on), instance name
+  `adb-<serial>-<random>`; `adb pair host:port code`, then `adb connect host:port`. A computer matches the service to
+  its AirBridge peer by the saved serial, then by the peer's IP address. The scrcpy wire protocol is scrcpy's
+  (version-locked: client and server versions must match exactly).
 
 ---
 
@@ -758,10 +896,265 @@ The network half **implements** `send/broadcast/sendBinary/peers` and **calls** 
 input half **registers** the handlers and **calls** `send/broadcast/sendBinary`. Control-type messages routed
 to the input half are exactly: `ctl_enter`, `ctl_leave`, `ctl_ack`, `ctl_busy`, `ptr_move`, `ptr_scroll`, `ptr_btn`,
 `ptr_click`, `ptr_abs`, `key`, `key_state`, `action`, `mirror_start`, `mirror_info`, `mirror_key`,
-`mirror_ack`, `mirror_stop`, plus `error` messages whose `code` starts with `mirror_`. Inner binary frames of
+`mirror_ack`, `mirror_stop`, `drag_carry`, `drag_drop`, `drag_cancel`, plus `error` messages whose `code` starts with `mirror_`. Inner binary frames of
 kind `0x03` (video) are routed to the input half's binary handler; kind `0x01` (file chunks) stays in the
 network half. Encryption/decryption (§3.6) is entirely the
 network half's job — the input half only ever sees plaintext messages.
 
 (The example in §11 shows messages in the clear for readability; on the wire every message after `auth_ok`
 is inside a `0x02` envelope.)
+
+---
+
+## 13. Phone notifications and calls on the computer
+
+A phone (`notif_source`, `call_source`) shows its notifications and calls on paired computers (`notif_sink`,
+`call_sink`), which can dismiss, reply, press a notification's buttons, open it on the phone, and answer, decline
+or end calls. A source sends `notif_*` only to peers whose `caps` contain `notif_sink` and `call_state` only to peers
+with `call_sink`; a sink sends commands only to a peer that advertised the matching `_source` cap. Peers that
+don't know these types ignore them (design rule 1). Everything travels inside the §3.6 envelope, only between
+paired devices; nothing is relayed or uploaded anywhere.
+
+On the phone both features are **opt-in** and off by default ("Show phone notifications on your computers",
+"Calls on your computer" in Settings). Android needs the user to allow notification access for the first and the
+Phone permission (optional: Contacts for the caller's name and photo, Nearby devices for the proximity beacon,
+§13.5) for the second.
+
+### 13.1 Source → sink
+
+```json
+{"t":"notif_state","notifs":true,"calls":false}                      // after ready and whenever it changes
+{"t":"notif_state","notifs":false,"calls":false,"why":"off|no_access"}
+{"t":"notif_reset"}                                                  // forget every notification of this phone
+{"t":"notif_icon","pkg":"com.whatsapp","png":"<base64 PNG, 96×96>"}
+{"t":"notif_post","key":"9f2c…","pkg":"com.whatsapp","app":"WhatsApp","title":"Asha","text":"See you at 6",
+ "sub":"…","ts":1762070400000,"cat":"msg","conv":"Family",
+ "msgs":[{"from":"Asha","text":"Hi","ts":…},{"me":true,"text":"Hello","ts":…}],
+ "reply":true,"reply_label":"Reply","acts":[{"i":1,"label":"Mark as read"}],"alert":true}
+{"t":"notif_remove","key":"9f2c…"}
+{"t":"notif_result","key":"9f2c…","op":"dismiss|reply|action|open","ok":false,"reason":"gone|no_reply|no_action|off|failed"}
+```
+
+- `notif_state`: `notifs` = this phone forwards notifications now; `calls` = it reports calls. `why` (only with
+  `notifs:false`): `off` = turned off on the phone, `no_access` = turned on but notification access is not allowed
+  (the sink may say "Allow notification access for AirBridge on your phone"). A sink that receives `notifs:false`
+  removes everything it shows from that phone.
+- After every `ready`, the source sends `notif_state`, then `notif_reset` followed by the notifications currently on
+  the phone as `notif_post` with `alert:false` (a quiet resync: listed, no banner, no sound).
+- `key` is opaque, at most 64 characters, stable while the notification exists (Android: a hash of its key). A
+  `notif_post` with a known `key` replaces that notification.
+- `notif_icon` comes once per session per `pkg`, before that app's first `notif_post`. Sinks may cache it by `pkg`.
+- `notif_post` fields: `app` display name; `title` ≤ 200 chars, `text` ≤ 2000 (longer values end with `…`); `sub`
+  optional sub-text; `ts` when it was posted; `cat` one of `msg`, `email`, `call`, `alarm`, `event`, `social`,
+  `other`; `conv` group conversation title (optional); `msgs` the last ≤ 6 messages of a conversation, oldest first,
+  each with `from` (sender name) or `me:true` (the phone's user); `reply` = the notification takes a text reply
+  (`reply_label` = its button title); `acts` ≤ 3 other buttons, `i` = the index to send back; `alert` = show a banner
+  and play a sound (false for quiet updates and resyncs).
+- `notif_result` answers every command (§13.2) with its outcome, to the sink that sent it. `gone` = no such
+  notification any more, `no_reply` / `no_action` = it has no reply / no such button, `off` = forwarding is off.
+- What a source forwards (Android): no group summaries, no ongoing or foreground-service notifications, no media
+  controls, no silent (low/min importance) notifications except conversations, nothing from AirBridge itself or
+  the system UI, nothing from apps the user muted. While the phone is locked and the user chose to hide sensitive
+  content on the lock screen, nothing new is forwarded; it follows (quietly) when the phone is unlocked. Floods are
+  rate limited per app (newest version per `key` wins).
+
+### 13.2 Sink → source
+
+```json
+{"t":"notif_sub","notifs":true,"calls":true}       // the sink's own switches; default true when never sent
+{"t":"notif_dismiss","key":"9f2c…"}                // clear it on the phone
+{"t":"notif_reply","key":"9f2c…","text":"On my way"}   // ≤ 4000 chars
+{"t":"notif_action","key":"9f2c…","i":1}           // press acts[i]
+{"t":"notif_open","key":"9f2c…"}                   // open it on the phone (best effort)
+```
+
+- `notif_sub`: a sink whose user turned notifications (or calls) off sends `notifs:false` (`calls:false`); the source
+  then sends it nothing of that kind until `true` arrives (which triggers a resync). Sent after `ready` and on change.
+- `notif_dismiss` on success: the source sends `notif_remove` for that key to every sink (the requester included).
+- `notif_reply` (Android): the reply action's `RemoteInput` is filled with `text` and its `PendingIntent` is sent,
+  as a watch would. The app normally updates or removes the notification, which arrives as `notif_post` /
+  `notif_remove`.
+- `notif_open` starts the notification's content intent on the phone; Android may refuse to open an app from the
+  background, so `ok:true` only means the intent was sent.
+
+### 13.3 Calls
+
+```json
+S→K {"t":"call_state","id":"c3-mxk2a1","state":"ringing","name":"Asha","number":"+91 98765 43210",
+     "muted":false,"speaker":false,"can":["answer","decline"]}
+S→K {"t":"call_state","id":"c3-mxk2a1","state":"active","since":1762070412000,"muted":false,"speaker":true,
+     "can":["end","mute","speaker"]}
+S→K {"t":"call_state","id":"c3-mxk2a1","state":"ended","muted":false,"speaker":false,"can":[]}
+K→S {"t":"call_action","id":"c3-mxk2a1","op":"answer|decline|end|mute|unmute|speaker_on|speaker_off"}
+S→K {"t":"call_result","id":"c3-mxk2a1","op":"answer","ok":false,"reason":"no_call|no_permission|off|failed"}
+```
+
+- One `call_state` per change. `id` is chosen by the source, unique per call; `state` is `ringing`, `active`, `held`
+  or `ended` (sent once, then the call is forgotten). `name`/`number` are optional (as the phone's dialer shows the
+  caller). `since` = when the call was answered (Unix ms) for the duration. `can` = the actions the sink may offer.
+- A newly ready sink receives the current call (if any) right after `notif_state`.
+- A source refuses a `call_action` whose `id` is not the current call or whose `op` doesn't fit its state
+  (`no_call`): a late click never answers or ends a different call.
+- **Audio stays on the phone** (earpiece, speaker or Bluetooth headset). Android does not let apps carry cellular
+  call audio over the network, so sinks show the controls only and say so. Android may turn the phone's speaker on
+  when a call is answered from a computer (user setting). Mute and speaker are best effort; `call_state` reflects
+  what the phone reports.
+  A computer with `call_audio` can still carry the audio over Bluetooth (§13.4); that never goes over AirBridge.
+
+### 13.4 Call audio through the computer (Bluetooth hands-free)
+
+A Mac can be the phone's Bluetooth **Hands-Free unit** (HFP "HF"; the phone is the Audio Gateway), the way
+Phone Link and headsets do it: the user talks and listens on the computer's microphone and speakers. The audio
+travels over Bluetooth (SCO), never over AirBridge. The phone and the computer must be paired over Bluetooth
+classic first (the computer's "Talk from your Mac" setup guides this). Two small messages help the computer
+route the audio well:
+
+```json
+K→S {"t":"call_audio_hello","bt_name":"Shazan's MacBook Pro","bt_addr":"F0:18:98:11:22:33"}
+S→K {"t":"call_audio_state","bt":true,"bt_name":"Shazan's Mobile","headset":"Galaxy Buds2"}
+```
+
+- `call_audio_hello` (computer → phone, only to peers with `call_audio_info`): the computer's own Bluetooth name
+  and address, sent after `ready` and when they change. The phone uses them to leave the computer out when it
+  looks for headsets (while connected as a hands-free unit the computer shows up as one). Both fields optional.
+- `call_audio_state` (phone → computer, only to peers with `call_audio`): after `ready`, after every
+  `call_audio_hello`, and when Bluetooth or the phone's audio devices change (unchanged states are not resent).
+  `bt` = Bluetooth is on (absent if unknown); `bt_name` = the phone's Bluetooth name (absent without the
+  `BLUETOOTH_CONNECT` permission), used to find the phone among the computer's paired devices; `headset` = name
+  of another Bluetooth headset (HFP, LE Audio, hearing aid) the phone uses for calls, absent if none. Android
+  prefers its current communication device and otherwise reports any connected call headset, since new calls
+  go to it.
+- Routing on the computer (macOS): audio goes where the call is answered, and the user can move it either way
+  from the computer or from the phone's own dialer.
+  - **No link without a call.** While the phone has a call (ringing or active, from `call_state`), the computer is
+    set up (paired, Bluetooth and microphone allowed) and `headset` is absent, the computer brings up the
+    hands-free service level connection *without audio*, so the phone's dialer lists the computer as an audio
+    route. It is dropped when the call ends. If it can't be set up (out of range) the computer doesn't retry by
+    itself during that call. With `headset` present there is no link at all, and the computer says "Your phone
+    is using <headset>"; if `bt` is false it says Bluetooth is off on the phone.
+  - **Audio the phone opens by itself** is refused while the call rings (no in-band ringtone on the computer) and
+    during a 5-second grace window after the link comes up, after the call is answered on the phone, and after
+    the user moved audio back to the phone: Android routes calls to a headset that just connected (or to the
+    active headset on answer) on its own. Outside those times a phone-opened audio connection is taken as the
+    user picking the computer in the dialer, and the computer carries the call (its call window shows "Mac").
+    When the phone closes the audio (earpiece or speaker picked there) the computer shows the phone as the route
+    and keeps the audio-less link for the rest of the call.
+  - **Answered on the computer** or "Audio: Mac" picked there: the computer opens the audio itself.
+  - Risks of the heuristic: if Android retries its automatic routing after the grace window, the call comes to the
+    computer unasked (shown, one click to move back); a dialer pick inside the grace window is refused once.
+- The computer plays the call through the microphone and speakers picked for the call in its call window
+  (remembered for the next call when present); it never changes the system's default devices.
+- The hands-free audio is narrowband (CVSD, 8 kHz): macOS's hands-free unit does not offer wideband (mSBC).
+
+### 13.5 Caller identity, true mute/speaker state, audio devices, and where a call rings
+
+Caps: both sides add `call_ring` (alongside `call_source` / `call_sink`). A source sends `call_presence` and
+`call_beacon` only to sinks with `call_ring` that didn't turn calls off (`notif_sub`); a sink sends `call_ring` only to
+a source with `call_ring`. `call_photo` and the new `call_state` fields need no cap: older sinks ignore them.
+
+```json
+S→K {"t":"call_state","id":"c4-mxk2b0","state":"ringing","muted":false,"speaker":false,"can":["answer","decline"],
+     "name":"Asha Kapoor","number":"+91 98765 43210","label":"Mobile"}
+S→K {"t":"call_photo","id":"c4-mxk2b0","jpg":"<base64 JPEG, square, 128 px>"}
+S→K {"t":"call_presence","screen":true,"locked":false,"touch":true,"idle_ms":2500}
+S→K {"t":"call_beacon","on":true,"key":"<base64, 16 bytes>","uuid":"754338F5-9682-4D7A-9A60-84968B058DDE","period":900}
+S→K {"t":"call_beacon","on":false}
+K→S {"t":"call_ring","id":"c4-mxk2b0","phone":"silent|ring"}
+```
+
+**Who is calling.** `call_state` may carry `label` (≤ 40 chars): the number's type in the phone's contacts, localised
+on the phone ("Mobile", "Work", a custom label). `name` is the contact's display name when the user allowed Contacts,
+else the name the phone app shows; `number` is in international form with the country code, formatted for reading
+("+91 98765 43210"; Android: `formatNumberToE164` then `formatNumber`; short codes stay as they are). Sinks show the name prominently, else the number, else "Unknown Caller", and use the
+label only together with a name. `call_photo` is the contact's photo (or, without Contacts, the photo in the phone
+app's call notification): a square JPEG, base64 ≤ 60 000 chars, sent once per call and sink **before** the first
+`call_state` that names that `id` (and again, before the call, to a sink that connects mid-call). Sinks crop it round;
+without a photo they show the initials (or a person glyph) on a neutral grey disc. Android gets the ringing
+number from `ACTION_PHONE_STATE_CHANGED` (`EXTRA_INCOMING_NUMBER`, given only with the Call logs permission; the call
+history is never read) and looks it up in Contacts, so the first `call_state` already names the caller even on phones
+whose call screen posts no notification while ringing (vivo). When telephony reports a ringing call before anything
+names the caller, the source waits up to 800 ms for it before the first `call_state`.
+
+**Mute and speaker are the phone's real state.** While a call is active the source watches the microphone mute
+(Android: `ACTION_MICROPHONE_MUTE_CHANGED` + `isMicrophoneMute`) and the speaker (communication device on API 31+,
+`isSpeakerphoneOn` before; plus a 1 s poll as a fallback) and sends `call_state` whenever either changes — whether the
+change came from a sink or from the phone's own call screen. A sink's Mute / Speaker buttons send `call_action` and
+then show only what the next `call_state` reports (no optimistic toggling). When the sink itself carries the call
+audio (Bluetooth hands-free, §13.4), its Mute button mutes the computer's microphone instead. "Speaker on when
+answered from the computer" is skipped when the call audio went to a Bluetooth headset (possibly the computer).
+
+**Presence (`call_presence`).** What the phone knows about its user, sent after `ready`, whenever the screen turns on or
+off or the phone is unlocked, after a tap at most every 4 s, and right before the first `call_state` of a ringing call.
+`screen` = display on, `locked` = keyguard showing, `idle_ms` = ms since the user last unlocked or touched the phone
+(absent = not known), `touch` = the phone sees individual taps (Android: the optional accessibility service reports
+clicks and window changes; nothing is read), so `idle_ms` is precise. A screen turned on by the incoming call itself is
+not interaction (an unlock reported within 3 s after a ring woke a dark screen is ignored). The sink adds the time since
+the message arrived to `idle_ms`. The phone is **in use** when `screen && !locked` and, if `touch`, `idle_ms < 10 s`
+(without `touch`, a lit, unlocked screen counts as in use).
+
+**Proximity beacon (`call_beacon`).** While calls are on, a `call_ring` sink is connected and Bluetooth advertising is
+allowed, the phone advertises a non-connectable BLE beacon (Android: low-power mode, medium TX power): the advertisement
+holds the 128-bit service UUID above and the TX power level; the scan response holds service data for that UUID: an
+8-byte rotating id = the first 8 bytes of HMAC-SHA256(`key`, ASCII `airbridge-beacon` ‖ `epoch` as 8 bytes big-endian),
+`epoch` = ⌊unix seconds / `period`⌋. `key` is random per phone (16 bytes), created once and sent only inside the
+encrypted session; the advertisement is restarted with a new id at each epoch. `on:false` = not advertising (calls
+off, no permission or no BLE advertiser); the sink then stops looking for that phone. Sinks scan only while their ring
+setting is Smart, accept ids for epoch −1…+1 and estimate the distance from RSSI: the median of the last 6 s, smoothed
+(EMA 0.35), d = 10^((TX − 59 − RSSI) / 22) m (TX = advertised power, −7 dBm if absent); **near** below 1.0 m, **far**
+again above 1.6 m (hysteresis), **unknown** after 12 s without a packet (treated as far).
+Test vector: key = bytes 0x00…0x0f, unix ms 1762080300000, period 900 → epoch 1957867 → id `48dfa4903066889a`
+(docs/test-vectors/call-experience.jsonl).
+
+**Where it rings.** Each sink decides for itself when a call starts ringing (setting "Ring on this Mac":
+Smart / Always / Never; Always rings, Never shows the call silently). Whenever a sink rings it asks the phone to keep
+quiet: the user never hears both. Smart:
+
+| | sink rings | asks the phone to keep quiet |
+|---|---|---|
+| (a) user at the computer: last keyboard/mouse input < 10 s ago, screen awake and unlocked | yes | yes |
+| (d) phone in use (see Presence) | no | no |
+| (b) neither, phone **near** (or, with no proximity reading at all, input on the computer < 60 s ago) | yes | yes |
+| (c) neither, phone far, or no reading and the computer idle | no (banner only) | no |
+
+At the computer *and* using the phone: the more recent input wins. A phone without `touch` ("screen on and unlocked")
+is a weak sign and loses to any input on the computer within the last 60 s. While it rings the sink re-checks every
+second and on every `call_presence`: "at the computer" and "near" only ever switch on for that call, "using the phone"
+can take over at any time (picking the phone up quiets the computer). The sink **starts** ringing only within the
+first 3 s of the call; after that it can only stop (a ring that starts 8 s in feels broken).
+The ringing sink can be silenced for that call with a volume key (the call keeps showing). The
+call shows on every device and can be answered anywhere in every case. `call_ring` with `phone:"silent"` asks the
+source to keep its ringer quiet for that call. Android, with notification access: the listener requests
+`HINT_HOST_DISABLE_CALL_EFFECTS`, which stops both the ringtone and the vibration (as a watch does), and clears it when
+the call stops ringing. Without notification access it lowers the ring volume to 0 instead (most phones then still
+vibrate; a phone already on vibrate/silent is left alone) and restores it when the call stops ringing, unless the user
+changed the volume or ringer mode meanwhile. A
+`call_ring` for a call that is not ringing any more is ignored. `phone:"ring"` is valid and currently a no-op.
+
+**Call audio devices (`routes`).** While a call is active the source adds where it can play the call and which one it
+uses, and sends a new `call_state` whenever either changes — also when the user switches in the phone's own call screen:
+
+```json
+S→K {"t":"call_state","id":"c4-mxk2b0","state":"active",…,"can":["end","mute","speaker","route"],
+     "routes":[{"id":"phone:earpiece","kind":"earpiece"},{"id":"phone:speaker","kind":"speaker"},
+               {"id":"phone:bt:AA:BB:CC:DD:EE:01","kind":"bt","name":"Galaxy Buds2"},
+               {"id":"phone:bt:AA:BB:CC:DD:EE:02","kind":"bt","name":"Shazan's MacBook Pro","computer":true}],
+     "route":"phone:earpiece"}
+K→S {"t":"call_action","id":"c4-mxk2b0","op":"route","dev":"phone:bt:AA:BB:CC:DD:EE:01"}
+```
+
+- `routes` (≤ 12): `id` = `phone:<kind>` for built-in devices, `phone:<kind>:<address>` for headsets (≤ 80 chars);
+  `kind` = `earpiece`, `speaker`, `wired`, `usb`, `bt` (hands-free/SCO), `ble` (LE Audio), `hearing_aid`; `name` = the
+  headset's name (absent for the earpiece and speaker: sinks call the earpiece by the phone's name, the speaker
+  "Speaker"); `computer:true` = that headset is a connected computer's own hands-free link (§13.4) — sinks show it as
+  "This Mac", not as a phone route. `route` = the id in use (absent if unknown). Android: `availableCommunicationDevices`
+  and `communicationDevice` on API 31+ (checked every second during the call); before that earpiece, speaker and
+  whatever wired or Bluetooth headset is connected.
+- `call_action` `op:"route"` with `dev` = one of those ids moves the call there (`can` contains `route` while active or
+  held; a missing or unknown `dev` is malformed / `failed`). Android: the speaker goes through the phone app's own
+  Speaker notification button when it has one; otherwise, and for headsets, `setCommunicationDevice` — which then takes
+  priority over the phone app's own audio button until the call ends or another pick here. Choosing the earpiece first
+  releases anything AirBridge forced (back to the phone's own choice) and forces the earpiece only if a headset would
+  otherwise keep the call. Older sources (no `routes`, no `route` in `can`) only take `speaker_on` / `speaker_off`.
+- Moving the call onto the computer itself is not a phone route: the computer connects as the phone's hands-free unit
+  (§13.4). The phone's own call screen also lists the computer as a Bluetooth device, so the user can move the audio
+  there (or back) from the phone too; the next `call_state` reports it as the `computer:true` route.

@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">AirBridge</string>
+    <string name="app_name" translatable="false">AirBridge</string>
     <string name="accessibility_service_description">Lets a paired computer control this phone: shows a cursor when your mouse moves onto the phone, taps, drags, scrolls and performs system actions (home, back, recents, volume, media). This service cannot read what is on your screen. Typing from your computer uses the separate, optional \"AirBridge Typing &amp; Clipboard\" service.</string>
     <string name="text_service_description">Optional. Lets a paired computer type into the text field you are using (and use Enter, Backspace, Tab, arrows, copy, cut, paste and select all), and notices when you copy so the text can go to your computers automatically. To do this it can read the focused text field and the label of a button you tap (such as \"Copy\"), and it types like a keyboard. AirBridge does not store or upload screen content; only your clipboard goes to your own paired devices. Banking and UPI apps may warn about accessibility services that can read the screen: switch this off while paying. Remote control works without it.</string>
 </resources>

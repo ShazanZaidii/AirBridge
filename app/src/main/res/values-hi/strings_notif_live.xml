@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="ch_live">ट्रांसफ़र चल रहे हैं</string>
+    <string name="xn_file_of">फ़ाइल %1$d / %2$d</string>
+    <string name="xn_sec_left">%1$d सेकंड बाकी</string>
+    <string name="xn_min_left">%1$d मिनट बाकी</string>
+</resources>
