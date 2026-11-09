@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="drag_items">
+        <item quantity="one">%d అంశం</item>
+        <item quantity="other">%d అంశాలు</item>
+    </plurals>
+    <string name="drag_and_more">%1$s మరియు మరిన్ని</string>
+    <string name="drag_receiving_one">%2$s నుండి %1$s వస్తోంది</string>
+    <plurals name="drag_receiving_many">
+        <item quantity="one">%2$s నుండి %1$d అంశం వస్తోంది</item>
+        <item quantity="other">%2$s నుండి %1$d అంశాలు వస్తున్నాయి</item>
+    </plurals>
+    <string name="pm_channel_request">స్క్రీన్ షేర్ అభ్యర్థనలు</string>
+    <string name="pm_channel_ongoing">స్క్రీన్ షేర్</string>
+    <string name="pm_request_title">%1$s ఈ ఫోన్ స్క్రీన్‌ను చూపించాలనుకుంటోంది</string>
+    <string name="pm_request_text">అనుమతించడానికి ట్యాప్ చేయండి</string>
+    <string name="pm_request_decline">ఇప్పుడు కాదు</string>
+    <string name="pm_ongoing_title">మీ స్క్రీన్ %1$sలో కనిపిస్తోంది</string>
+    <string name="pm_ongoing_text">స్క్రీన్‌పై ఉన్నదంతా అక్కడ కనిపిస్తుంది</string>
+    <string name="pm_stop">ఆపివేయి</string>
+    <string name="pm_sink_allow">%1$sలో అనుమతించు ట్యాప్ చేయండి</string>
+    <string name="pm_sink_denied">%1$s స్క్రీన్ షేర్‌ను అనుమతించలేదు</string>
+    <string name="pm_sink_stopped">%1$s స్క్రీన్ షేర్ చేయడం ఆపివేసింది</string>
+    <string name="lk_fallback">%1$s. ప్రస్తుత కనెక్షన్ ద్వారా పంపుతోంది.</string>
+</resources>

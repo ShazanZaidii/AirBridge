@@ -22,8 +22,12 @@
          Its runtime prerequisite is satisfied by CHANGE_NETWORK_STATE / CHANGE_WIFI_STATE above. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <!-- Showing this phone's screen on a computer (PROTOCOL §8.7): only while the user allowed it this session. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Android 16 Live Updates: the transfer progress chip in the status bar / lock screen. -->
+    <uses-permission android:name="android.permission.POST_PROMOTED_NOTIFICATIONS" />
 
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
@@ -43,6 +47,24 @@
         android:name="android.permission.WRITE_SETTINGS"
         tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.ACCESS_NOTIFICATION_POLICY" />
+
+    <!-- Calls on your computer (PROTOCOL §13.3): asked only when the user turns that on in Settings.
+         Call state, answer/decline/end, and (optional) contact names for numbers the dialer shows raw. -->
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+    <uses-permission android:name="android.permission.ANSWER_PHONE_CALLS" />
+    <uses-permission android:name="android.permission.READ_CONTACTS" />
+    <!-- Calls on the computer: only the number of the call that is ringing now (Android gives it with this
+         permission only), so the computer shows who is calling from the first ring. The call history is never read. -->
+    <uses-permission android:name="android.permission.READ_CALL_LOG" />
+    <uses-feature android:name="android.hardware.telephony" android:required="false" />
+
+    <!-- App names and icons for forwarded notifications (Android 11+ package visibility): launcher apps only. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
 
     <!-- Nearby Connections (Android <-> Android) -->
     <uses-permission
@@ -69,6 +91,7 @@
         android:maxSdkVersion="32" />
 
     <application
+        android:localeConfig="@xml/locales_config"
         android:name=".AirBridgeApp"
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
@@ -125,17 +148,58 @@
             </intent-filter>
         </activity>
 
+        <!-- AirWeb: serves a web page so a device without the app can swap files (share sheet, Settings).
+             Opens inside whatever opened it (AirBridge, or the app you shared from), so Back returns there. -->
+        <activity
+            android:name=".AirWebActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
+            android:exported="false"
+            android:label="@string/airweb"
+            android:launchMode="singleTop"
+            android:theme="@style/Theme.AirBridge" />
+
+        <!-- Lets other apps open files received before Android 10 (saved as plain files). -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.files"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
+        <!-- Puts the transfer notification back if it is swiped away while the transfer still runs. -->
+        <receiver android:name=".net.TransferNotifs$Deleted" android:exported="false" />
+
         <service
             android:name=".AirBridgeService"
             android:exported="false"
             android:foregroundServiceType="connectedDevice"
             android:label="@string/app_name" />
 
+        <!-- Phone screen on a computer (PROTOCOL §8.7): the system consent dialog, then a mediaProjection FGS. -->
+        <activity
+            android:name=".mirror.MirrorConsentActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
+        <service
+            android:name=".mirror.MirrorService"
+            android:exported="false"
+            android:foregroundServiceType="mediaProjection" />
+
+        <receiver
+            android:name=".mirror.MirrorActionReceiver"
+            android:exported="false" />
+
         <service
             android:name=".AirBridgeTileService"
             android:exported="true"
             android:icon="@drawable/ic_launcher_foreground"
-            android:label="Sync clipboard"
+            android:label="@string/tile_sync_clipboard"
             android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
             <intent-filter>
                 <action android:name="android.service.quicksettings.action.QS_TILE" />
@@ -145,7 +209,7 @@
         <service
             android:name=".AirBridgeInputService"
             android:exported="true"
-            android:label="AirBridge Universal Control"
+            android:label="@string/svc_core_name"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
             <intent-filter>
                 <action android:name="android.accessibilityservice.AccessibilityService" />
@@ -159,7 +223,7 @@
         <service
             android:name=".AirBridgeTextService"
             android:exported="true"
-            android:label="AirBridge Typing &amp; Clipboard"
+            android:label="@string/svc_text_name"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
             <intent-filter>
                 <action android:name="android.accessibilityservice.AccessibilityService" />
@@ -167,6 +231,18 @@
             <meta-data
                 android:name="android.accessibilityservice"
                 android:resource="@xml/text_service_config" />
+        </service>
+
+        <!-- Phone notifications on your computers (PROTOCOL §13). Bound by the system only after the user
+             allows notification access; forwards nothing until the Settings switch is on. -->
+        <service
+            android:name=".phone.PhoneNotifListener"
+            android:exported="true"
+            android:label="@string/pn_listener_name"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
         </service>
 
         <!-- Only reacts to protected system broadcasts. -->

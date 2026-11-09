@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- English source text. Translations live in values-<lang>/strings_actions.xml. -->
+<resources>
+    <string name="sa_brightness_perm">Grant \'Modify system settings\' to AirBridge to change brightness</string>
+    <string name="sa_auto_brightness">Auto-brightness is on — AirBridge only adjusts manual brightness</string>
+    <string name="sa_no_assistant">No assistant app found</string>
+    <string name="sa_dnd_perm">Grant \'Do Not Disturb access\' to AirBridge in Android Settings</string>
+    <string name="sa_dnd_on">Do Not Disturb on</string>
+    <string name="sa_dnd_off">Do Not Disturb off</string>
+</resources>

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- English source text. Translations live in values-<lang>/strings_keys.xml. -->
+<resources>
+    <string name="tk_turn_on_typing">Turn on \'%1$s\' to type from your computer</string>
+    <string name="tk_tap_field">Tap a text field on the phone to type into it</string>
+</resources>

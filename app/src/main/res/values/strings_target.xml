@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- English source text. Translations live in values-<lang>/strings_target.xml. -->
+<resources>
+    <string name="this_phone_lc">this phone</string>
+    <string name="another_device">another device</string>
+</resources>

@@ -219,7 +219,7 @@ object ClipboardSync {
             if (reason == "auto") policy.onReadFailed() else policy.markPending()
             syncPending()
             Log.i(TAG, "$reason: focused read blocked → pending (tap the bubble to send)")
-            if (reason in FORCED) Hub.toast("Couldn't read the clipboard. Open AirBridge and try again.")
+            if (reason in FORCED) Hub.toast(Hub.app.getString(com.shazan.airbridge.R.string.cs_cant_read))
         }, policy.readTimeoutMs - WINDOW_FOCUS_TIMEOUT_MS)
     }
 
@@ -238,7 +238,7 @@ object ClipboardSync {
         }
         when {
             text != null -> pushText(text, reason)
-            reason != "copy" -> { policy.clearPending(); syncPending(); Hub.toast("Clipboard has no text") }
+            reason != "copy" -> { policy.clearPending(); syncPending(); Hub.toast(Hub.app.getString(com.shazan.airbridge.R.string.cs_no_text)) }
         }
     }
 
@@ -303,26 +303,26 @@ object ClipboardSync {
         val hash = Protocol.sha256Hex(text)
         if (!force && policy.isDuplicate(hash)) return 0
         if (text.toByteArray(Charsets.UTF_8).size > Protocol.MAX_CLIP_BYTES) {
-            if (force || reason == "copy" || reason == "auto") Hub.toast("Clipboard too large to sync (max 512 KB)")
+            if (force || reason == "copy" || reason == "auto") Hub.toast(Hub.app.getString(com.shazan.airbridge.R.string.cs_too_large))
             return 0
         }
         val targets = Hub.readySessions().filter { "clip" in it.peerCaps }
         if (targets.isEmpty()) {
-            if (force) Hub.toast("No devices connected")
+            if (force) Hub.toast(Hub.app.getString(com.shazan.airbridge.R.string.sh_no_devices))
             return 0
         }
         val msg = Protocol.clip(text)
         val n = targets.count { it.send(msg) }
         if (n > 0) { policy.onPushed(hash); syncPending() }
         Log.i(TAG, "sent ($reason) len=${text.length} hash=${hash.take(8)} to $n peer(s)")
-        if (force) Hub.toast(if (n == 1) "Copied to ${targets.first().peerName}" else "Copied to $n devices")
+        if (force) Hub.toast(if (n == 1) Hub.app.getString(com.shazan.airbridge.R.string.cs_copied_to, targets.first().peerName) else Hub.app.resources.getQuantityString(com.shazan.airbridge.R.plurals.cs_copied_n, n, n))
         return n
     }
 
     /** Share sheet: send text to one peer. */
     fun sendTextTo(peerId: String, text: String): Boolean {
         if (text.toByteArray(Charsets.UTF_8).size > Protocol.MAX_CLIP_BYTES) {
-            Hub.toast("Text too large to send (max 512 KB)"); return false
+            Hub.toast(Hub.app.getString(com.shazan.airbridge.R.string.cs_text_too_large)); return false
         }
         return Hub.readySession(peerId)?.send(Protocol.clip(text)) ?: false
     }
@@ -333,6 +333,9 @@ object ClipboardSync {
         if (text.toByteArray(Charsets.UTF_8).size > Protocol.MAX_CLIP_BYTES) return
         val hash = Protocol.sha256Hex(text)
         Hub.main.post {
+            // The same text again (just received, or what this phone sent itself): setting it again would only
+            // flash Android's "copied" popup and could feed a ping-pong between devices.
+            if (hash == policy.lastRemoteHash || hash == policy.lastSentHash) { Log.d(TAG, "remote: same text, not set again"); return@post }
             policy.onRemoteSet(now(), hash)
             try { cm.setPrimaryClip(ClipData.newPlainText(OWN_LABEL, text)) }
             catch (e: Exception) { Log.w(TAG, "setPrimaryClip", e) }

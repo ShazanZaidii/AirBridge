@@ -72,17 +72,23 @@ class TargetKeys(private val host: TargetController) {
         }
     }
 
-    fun onKey(hid: Int, down: Boolean, mods: Int, rep: Boolean, text: String?) {
+    /**
+     * One key from a computer. [mirror] = typed into a mirror window (PROTOCOL §8.7): the keyboard is then the
+     * phone's own, so none of the cursor-mode shortcuts below apply; Delete deletes, Tab tabs, Esc is Back.
+     * ⌘ / Ctrl combinations (copy, paste, select all) work either way.
+     */
+    fun onKey(hid: Int, down: Boolean, mods: Int, rep: Boolean, text: String?, mirror: Boolean = false) {
         val now = SystemClock.uptimeMillis()
-        if (down) {
+        if (mirror) soloKey = -1
+        else if (down) {
             if (hid in SOLO_KEYS) { if (!rep) { soloKey = hid; soloAt = now } }
             else if (!rep) soloKey = -1
         } else if (hid == soloKey) {
             soloKey = -1
-            // Ctrl is pressed and let go all the time while writing: while typing, only ⌘ / Win / Menu
-            // taps are shortcuts (they are never part of writing).
+            // Ctrl is pressed and let go all the time while writing: a Ctrl tap is a shortcut only when the text
+            // service can confirm nothing is being typed into. ⌘ / Win / Menu taps are never part of writing.
             val ctrl = hid == Hid.LCTRL || hid == Hid.RCTRL
-            if (now - soloAt <= SOLO_TAP_MS && !(ctrl && typing())) soloTap(hid)
+            if (now - soloAt <= SOLO_TAP_MS && !(ctrl && (!AirBridgeTextService.isRunning || typing()))) soloTap(hid)
         }
         if (!down) {
             pressed.remove(hid)
@@ -91,9 +97,10 @@ class TargetKeys(private val host: TargetController) {
         }
         pressed.add(hid)
         if (hid == Hid.APPLICATION) return
-        // v1 phone keys while nothing is being typed into (no focused text field):
-        // delete = recent apps, hold H = long-press at the cursor, hold D = press and drag.
-        if (mods and (Mods.CTRL or Mods.GUI or Mods.ALT) == 0 && !typing()) {
+        // v1 phone keys while nothing is being typed into: delete = recent apps, hold H = long-press at the cursor,
+        // hold D = press and drag. Only with the text service running and reporting no focused field: without it
+        // we can't tell, and hijacking H, D and Delete while someone writes is far worse than a missing shortcut.
+        if (!mirror && AirBridgeTextService.isRunning && mods and (Mods.CTRL or Mods.GUI or Mods.ALT) == 0 && !typing()) {
             when (hid) {
                 Hid.BACKSPACE, Hid.DELETE -> { if (!rep) svc.performGlobalAction(AccessibilityService.GLOBAL_ACTION_RECENTS); return }
                 Hid.H -> { if (!rep) host.longPress(host.x, host.y); return }
@@ -103,7 +110,7 @@ class TargetKeys(private val host: TargetController) {
         if (Hid.isModifier(hid) || hid == Hid.CAPS_LOCK) return // caps state is ignored on Android
 
         val cmd = mods and (Mods.CTRL or Mods.GUI) != 0
-        if (cmd || (hid == Hid.TAB && mods and Mods.ALT != 0)) {
+        if (cmd || (!mirror && hid == Hid.TAB && mods and Mods.ALT != 0)) {
             if (!rep) shortcut(hid, mods)
             return
         }
@@ -133,7 +140,7 @@ class TargetKeys(private val host: TargetController) {
         if (AirBridgeTextService.isRunning) { hintedNoText = false; return true }
         if (!hintedNoText) {
             hintedNoText = true
-            Toast.makeText(svc, "Turn on 'AirBridge Typing & Clipboard' to type from your computer", Toast.LENGTH_LONG).show()
+            Toast.makeText(svc, svc.getString(com.shazan.airbridge.R.string.tk_turn_on_typing, svc.getString(com.shazan.airbridge.R.string.svc_text_name)), Toast.LENGTH_LONG).show()
         }
         return false
     }
@@ -322,7 +329,7 @@ class TargetKeys(private val host: TargetController) {
     private fun warnNoField() {
         if (warnedNoField) return
         warnedNoField = true
-        Toast.makeText(svc, "Tap a text field on the phone to type into it", Toast.LENGTH_SHORT).show()
+        Toast.makeText(svc, svc.getString(com.shazan.airbridge.R.string.tk_tap_field), Toast.LENGTH_SHORT).show()
     }
 
     // ---------------------------------------------------------------- helpers

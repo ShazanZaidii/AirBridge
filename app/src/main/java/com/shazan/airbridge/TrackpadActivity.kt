@@ -83,6 +83,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.motionEventSpy
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -129,10 +130,10 @@ import kotlinx.coroutines.delay
  */
 class TrackpadActivity : ComponentActivity() {
 
-    enum class Mode(val label: String, val icon: ImageVector) {
-        Trackpad("Trackpad", Icons.Default.TouchApp),
-        Keyboard("Keyboard", Icons.Default.Keyboard),
-        Screen("Screen", Icons.AutoMirrored.Filled.ScreenShare),
+    enum class Mode(val labelRes: Int, val icon: ImageVector) {
+        Trackpad(R.string.tp_mode_trackpad, Icons.Default.TouchApp),
+        Keyboard(R.string.tp_mode_keyboard, Icons.Default.Keyboard),
+        Screen(R.string.tp_mode_screen, Icons.AutoMirrored.Filled.ScreenShare),
     }
 
     companion object {
@@ -357,7 +358,8 @@ class TrackpadActivity : ComponentActivity() {
             LaunchedEffect(mirrorPeer?.id, windowW, windowH, mirrorRun, resumeCount) {
                 if (mirrorPeer != null) mirror.start(
                     mirrorPeer.id, minOf(windowW, MirrorSink.MAX_W), minOf(windowH, MirrorSink.MAX_H),
-                    computerLabel = if (mirrorPeer.platform == "macos") "Mac" else "PC",
+                    computerLabel = when (mirrorPeer.platform) { "macos" -> "Mac"; "android" -> mirrorPeer.name; else -> "PC" },
+                    sourceIsPhone = mirrorPeer.platform == "android",
                 )
                 else mirror.stop()
             }
@@ -467,9 +469,9 @@ class TrackpadActivity : ComponentActivity() {
                     if (active == null && mode != Mode.Trackpad && !(mode == Mode.Keyboard && !landscape)) {
                         StatusBanner(
                             when {
-                                blocker != null -> "Being controlled by ${blocker.name}"
-                                wanted != null -> "Not connected to $wanted"
-                                else -> "No computer connected"
+                                blocker != null -> stringResource(R.string.tp_controlled_by, blocker.name)
+                                wanted != null -> stringResource(R.string.tp_not_connected_to, wanted)
+                                else -> stringResource(R.string.tp_no_computer)
                             },
                             Modifier.align(Alignment.TopCenter).padding(top = 8.dp),
                         )
@@ -512,10 +514,11 @@ class TrackpadActivity : ComponentActivity() {
         val view = LocalView.current
         val current by rememberUpdatedState(prefs)
         val pressure = remember { com.shazan.airbridge.input.PressureFeed() }
+        val padLabel = stringResource(R.string.tp_mode_trackpad)
         Box(
             modifier.clip(RoundedCornerShape(16.dp)).background(Tp.Surface)
                 .border(1.dp, Tp.SurfaceHigh, RoundedCornerShape(16.dp))
-                .semantics { contentDescription = "Trackpad" }
+                .semantics { contentDescription = padLabel }
                 // Keeps edge back/home swipes off the pad where Android allows it (≤ 200 dp per edge).
                 // It cannot stop OEM three-finger gestures; see OsGestureGuard.
                 .systemGestureExclusion()
@@ -532,25 +535,19 @@ class TrackpadActivity : ComponentActivity() {
         ) {
             if (active == null && blocker != null) {
                 Notice(
-                    "Being controlled by ${blocker.name}",
-                    "${blocker.name} is controlling this phone, so this phone can't control it back.",
-                    actionLabel = "Stop being controlled",
+                    stringResource(R.string.tp_controlled_by, blocker.name),
+                    stringResource(R.string.tp_controlled_body, blocker.name),
+                    actionLabel = stringResource(R.string.tp_stop_controlled),
                     onAction = { InputRouter.stopBeingControlled() },
                 )
             } else if (active == null && wanted != null) {
-                Notice("Not connected to $wanted", "Open AirBridge on $wanted and make sure both are on the same Wi-Fi. Input is sent only while it's connected.")
+                Notice(stringResource(R.string.tp_not_connected_to, wanted), stringResource(R.string.tp_not_connected_body, wanted))
             } else if (active == null) {
-                Notice("No computer connected", "Connect a computer from the AirBridge home screen.")
+                Notice(stringResource(R.string.tp_no_computer), stringResource(R.string.tp_no_computer_body))
             } else {
                 Text(
-                    if (active.platform == "android")
-                        "Tap to tap · hold, then move to drag · two fingers to scroll\n" +
-                            "Three to five fingers: swipe up for recent apps, down for notifications, sideways for the previous app, " +
-                            "pinch for all apps, spread for home"
-                    else
-                        "Tap to click · two-finger tap to right-click · hold, then move to drag · press firmly to force click\n" +
-                            "Two fingers: scroll, pinch to zoom · Three to five fingers: swipe up for Mission Control, " +
-                            "down for App Exposé, left / right for spaces · four or five: pinch for Launchpad, spread for the desktop",
+                    if (active.platform == "android") stringResource(R.string.tp_help_phone)
+                    else stringResource(R.string.tp_help_computer),
                     color = Tp.MutedForeground.copy(alpha = 0.6f),
                     fontSize = 13.sp, lineHeight = 19.sp, textAlign = TextAlign.Center,
                     modifier = Modifier.widthIn(max = 520.dp).padding(24.dp),
@@ -602,19 +599,19 @@ class TrackpadActivity : ComponentActivity() {
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f, fill = false)) {
                 Text(
-                    "Your phone took that touch for itself",
+                    stringResource(R.string.tp_os_took_touch),
                     color = Tp.Foreground, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, lineHeight = 18.sp,
                 )
                 Text(
-                    "AirBridge uses four and five fingers. If those are taken too, search Settings for “three-finger” and turn off the screenshot and split-screen gestures.",
+                    stringResource(R.string.tp_os_took_touch_body),
                     color = Tp.MutedForeground, fontSize = 12.sp, lineHeight = 16.sp,
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    BannerButton("Open settings", Tp.Accent, onOpenSettings)
-                    BannerButton("Don't show again", Tp.MutedForeground, onDontShowAgain)
+                    BannerButton(stringResource(R.string.tp_open_settings), Tp.Accent, onOpenSettings)
+                    BannerButton(stringResource(R.string.tp_dont_show), Tp.MutedForeground, onDontShowAgain)
                 }
             }
-            IconButton48(Icons.Default.Close, "Dismiss", onDismiss)
+            IconButton48(Icons.Default.Close, stringResource(R.string.dismiss), onDismiss)
         }
     }
 
@@ -654,7 +651,7 @@ class TrackpadActivity : ComponentActivity() {
         ) {
             Icon(Icons.Default.PanTool, contentDescription = null, tint = Tp.OnWarning, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(10.dp))
-            Text("Being used by $holder", color = Tp.OnWarning, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+            Text(stringResource(R.string.tp_used_by, holder), color = Tp.OnWarning, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
         }
     }
 
@@ -691,23 +688,23 @@ class TrackpadActivity : ComponentActivity() {
             ModeSwitcher(mode, compact, onMode, onToggleStats, onToggleGestureLog)
             Spacer(Modifier.weight(0.01f))
             if (mode != Mode.Keyboard) ToggleButton(
-                icon = Icons.Default.Compress, label = if (compact || mode == Mode.Screen) null else "Firm press",
-                on = firm, description = "Firm press for force click", onClick = onToggleFirm,
+                icon = Icons.Default.Compress, label = if (compact || mode == Mode.Screen) null else stringResource(R.string.tp_firm),
+                on = firm, description = stringResource(R.string.tp_firm_desc), onClick = onToggleFirm,
             )
             when (mode) {
                 Mode.Trackpad -> ToggleButton(
-                    icon = Icons.Default.SwapVert, label = if (compact) null else "Natural scroll",
-                    on = natural, description = "Natural scrolling", onClick = onToggleNatural,
+                    icon = Icons.Default.SwapVert, label = if (compact) null else stringResource(R.string.tp_natural),
+                    on = natural, description = stringResource(R.string.tp_natural_desc), onClick = onToggleNatural,
                 )
                 Mode.Screen -> ToggleButton(
                     icon = if (screenKeyboard) Icons.Default.KeyboardHide else Icons.Default.Keyboard,
                     label = null, on = screenKeyboard,
-                    description = if (screenKeyboard) "Hide keyboard" else "Show keyboard",
+                    description = if (screenKeyboard) stringResource(R.string.tp_hide_kb) else stringResource(R.string.tp_show_kb),
                     onClick = onToggleScreenKeyboard,
                 )
                 Mode.Keyboard -> Unit
             }
-            IconButton48(Icons.Default.Close, "Close", onClose)
+            IconButton48(Icons.Default.Close, stringResource(R.string.tp_close), onClose)
         }
     }
 
@@ -745,14 +742,15 @@ class TrackpadActivity : ComponentActivity() {
         modifier: Modifier,
     ) {
         var menu by remember { mutableStateOf(false) }
+        val chipDesc = stringResource(R.string.tp_chip_desc, active?.let { stringResource(R.string.tp_controlling, it.name) }
+            ?: wanted?.let { stringResource(R.string.tp_not_connected_to, it) } ?: stringResource(R.string.tp_no_computer))
         Box(modifier) {
             Row(
                 Modifier.height(Tp.TouchTarget).clip(RoundedCornerShape(Tp.Radius)).background(Tp.Surface)
                     // Always opens the picker: shows what can be controlled, even when there is one device.
                     .clickable(role = Role.DropdownList) { menu = true }
                     .semantics(mergeDescendants = true) {
-                        contentDescription = (active?.let { "Controlling ${it.name}" }
-                            ?: wanted?.let { "Not connected to $it" } ?: "No computer connected") + ". Tap to choose a device"
+                        contentDescription = chipDesc
                     }
                     .padding(horizontal = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -771,7 +769,7 @@ class TrackpadActivity : ComponentActivity() {
                 // Narrow (portrait phone): the icon and its status dot only; the name is in the menu.
                 if (!narrow) Spacer(Modifier.width(10.dp))
                 if (!narrow) Text(
-                    active?.name ?: wanted ?: "No device",
+                    active?.name ?: wanted ?: stringResource(R.string.tp_no_device),
                     color = if (active != null) Tp.Foreground else Tp.MutedForeground,
                     fontSize = 15.sp, fontWeight = FontWeight.Medium,
                     maxLines = 1, overflow = TextOverflow.Ellipsis,
@@ -783,7 +781,7 @@ class TrackpadActivity : ComponentActivity() {
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }, containerColor = Tp.Surface) {
                 if (choices.isEmpty()) DropdownMenuItem(
                     enabled = false,
-                    text = { Text("No paired computers or phones yet. Pair one from the AirBridge home screen.", color = Tp.MutedForeground) },
+                    text = { Text(stringResource(R.string.tp_none_paired), color = Tp.MutedForeground) },
                     onClick = {},
                 )
                 choices.forEach { c ->
@@ -799,16 +797,16 @@ class TrackpadActivity : ComponentActivity() {
                                 Text(
                                     when (c.state) {
                                         ChoiceState.READY -> platformLabel(c.plat)
-                                        ChoiceState.CONTROLLING_YOU -> "Controlling this phone"
-                                        ChoiceState.NEEDS_SERVICE -> "Turn on AirBridge Universal Control on it"
-                                        ChoiceState.OFFLINE -> "Not connected"
+                                        ChoiceState.CONTROLLING_YOU -> stringResource(R.string.tp_controlling_this)
+                                        ChoiceState.NEEDS_SERVICE -> stringResource(R.string.tp_needs_service)
+                                        ChoiceState.OFFLINE -> stringResource(R.string.tp_offline)
                                     },
                                     color = Tp.MutedForeground, fontSize = 12.sp,
                                 )
                             }
                         },
                         trailingIcon = if (c.id == active?.id) {
-                            { Icon(Icons.Default.Check, contentDescription = "Selected", tint = Tp.Accent) }
+                            { Icon(Icons.Default.Check, contentDescription = stringResource(R.string.tp_selected), tint = Tp.Accent) }
                         } else null,
                         onClick = { menu = false; peer?.let(onChoose) },
                         modifier = Modifier.height(Tp.BarHeight),
@@ -827,6 +825,7 @@ class TrackpadActivity : ComponentActivity() {
         ) {
             Mode.entries.forEach { m ->
                 val selected = m == mode
+                val modeLabel = stringResource(m.labelRes)
                 Row(
                     Modifier.fillMaxHeight().widthIn(min = Tp.TouchTarget)
                         .clip(RoundedCornerShape(Tp.Radius - 3.dp))
@@ -836,7 +835,7 @@ class TrackpadActivity : ComponentActivity() {
                             onClick = { onMode(m) },
                             onLongClick = when (m) { Mode.Screen -> onToggleStats; Mode.Trackpad -> onToggleGestureLog; else -> null },
                         )
-                        .semantics(mergeDescendants = true) { this.selected = selected; contentDescription = m.label }
+                        .semantics(mergeDescendants = true) { this.selected = selected; contentDescription = modeLabel }
                         .padding(horizontal = if (compact) 10.dp else 14.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.Center,
@@ -845,7 +844,7 @@ class TrackpadActivity : ComponentActivity() {
                     if (!compact) {
                         Spacer(Modifier.width(8.dp))
                         Text(
-                            m.label, fontSize = 14.sp,
+                            modeLabel, fontSize = 14.sp,
                             color = if (selected) Tp.Foreground else Tp.MutedForeground,
                             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
                         )
@@ -857,11 +856,12 @@ class TrackpadActivity : ComponentActivity() {
 
     @Composable
     private fun ToggleButton(icon: ImageVector, label: String?, on: Boolean, description: String, onClick: () -> Unit) {
+        val stateDesc = stringResource(R.string.tp_toggle_desc, description, stringResource(if (on) R.string.tp_on else R.string.tp_off))
         Row(
             Modifier.height(Tp.TouchTarget).widthIn(min = Tp.TouchTarget).clip(RoundedCornerShape(Tp.Radius))
                 .background(if (on) Tp.Accent.copy(alpha = 0.18f) else Tp.Surface)
                 .clickable(role = Role.Switch, onClick = onClick)
-                .semantics(mergeDescendants = true) { contentDescription = "$description, ${if (on) "on" else "off"}" }
+                .semantics(mergeDescendants = true) { contentDescription = stateDesc }
                 .padding(horizontal = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.Center,

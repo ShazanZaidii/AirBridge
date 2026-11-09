@@ -19,6 +19,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import com.shazan.airbridge.R
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -43,26 +45,26 @@ fun ClipboardAutoSyncCard() {
 
     fun open(intent: Intent) {
         try { ctx.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
-        catch (_: Exception) { Toast.makeText(ctx, "Not available on this device", Toast.LENGTH_SHORT).show() }
+        catch (_: Exception) { Toast.makeText(ctx, ctx.getString(R.string.not_available), Toast.LENGTH_SHORT).show() }
     }
 
     AbCard(Modifier.padding(top = Dimens.sm)) {
         SwitchRow(
-            "Send copies to my computers automatically",
-            "When you copy text while AirBridge runs in the background. Passwords and other text marked sensitive are never sent automatically.",
+            stringResource(R.string.clip_auto),
+            stringResource(R.string.clip_auto_sub),
             auto,
             { auto = it; ClipboardSync.autoEnabled = it },
         )
         if (auto && !hasOverlay) {
             RowDivider()
             InfoRow(
-                title = "Needs permission",
-                subtitle = "Automatic copy sync needs 'Display over other apps'",
+                title = stringResource(R.string.clip_needs_perm),
+                subtitle = stringResource(R.string.clip_needs_perm_sub),
                 trailing = {
                     TextButton(
                         onClick = { open(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${ctx.packageName}"))) },
                         modifier = Modifier.height(Dimens.touch),
-                    ) { Text("Allow") }
+                    ) { Text(stringResource(R.string.allow)) }
                 },
             )
         }
@@ -70,17 +72,14 @@ fun ClipboardAutoSyncCard() {
             RowDivider()
             Column(Modifier.padding(horizontal = Dimens.md, vertical = Dimens.sm)) {
                 Text(
-                    "If a copy can't be sent automatically, the bubble shows a dot. Tap it to send. " +
-                        "Some phones only let AirBridge notice copies while the optional 'Typing & clipboard' service is on. " +
-                        "If automatic sync does not work, allow 'Display pop-ups while running in the background' " +
-                        "for AirBridge in your phone's app permissions.",
+                    stringResource(R.string.clip_help),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 TextButton(
                     onClick = { open(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${ctx.packageName}"))) },
                     modifier = Modifier.height(Dimens.touch),
-                ) { Text("App permissions") }
+                ) { Text(stringResource(R.string.app_permissions)) }
             }
         }
     }

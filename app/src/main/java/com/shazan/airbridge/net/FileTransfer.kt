@@ -62,7 +62,7 @@ class FileTransfer(private val s: Session) {
     private val nextId = AtomicInteger(1)
     private val outgoing = ConcurrentHashMap<Int, Outgoing>()
     private val incoming = ConcurrentHashMap<Int, Incoming>()
-    private val peerName: String get() = s.peerName.ifBlank { "device" }
+    private val peerName: String get() = s.peerName.ifBlank { Hub.app.getString(com.shazan.airbridge.R.string.xf_device) }
 
     // ================= control =================
 
@@ -120,7 +120,7 @@ class FileTransfer(private val s: Session) {
             .putExtra("peer", s.peerId).putExtra("id", id).putExtra("incoming", isIncoming)
         val pi = PendingIntent.getService(ctx, id * 2 + (if (isIncoming) 1 else 0) + (s.peerId.hashCode() and 0xFFFF) * 4096, i,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-        return NotificationCompat.Action(0, "Cancel", pi)
+        return NotificationCompat.Action(0, Hub.app.getString(com.shazan.airbridge.R.string.cancel), pi)
     }
 
     // ================= sending =================
@@ -142,14 +142,14 @@ class FileTransfer(private val s: Session) {
         val srcs = try { uris.map { describe(it) } } catch (e: Exception) {
             Log.w(TAG, "describe failed: ${e.message}")
             Hub.putTransfer(TransferUi("${s.peerId}:out:prep${System.nanoTime()}", false, peerName, "", 0, uris.size, 0, 0, 0,
-                result = "Failed: couldn't read file (${e.message})"))
+                result = Hub.app.getString(com.shazan.airbridge.R.string.xf_failed_detail, Hub.app.getString(com.shazan.airbridge.R.string.xf_cant_read, e.message ?: ""))))
             return
         }
         val total = srcs.sumOf { it.size }
         val holdKey = "${s.peerId}:out:link"
         val target = try {
             LinkManager.prepareSend(s, total, fast) {
-                Hub.putTransfer(TransferUi(holdKey, false, peerName, "Setting up a direct Wi-Fi link…", 0, srcs.size, 0, total, 0))
+                Hub.putTransfer(TransferUi(holdKey, false, peerName, Hub.app.getString(com.shazan.airbridge.R.string.xf_wfd_setup), 0, srcs.size, 0, total, 0))
             }
         } catch (e: Exception) {
             Log.w(TAG, "link upgrade", e); s
@@ -196,7 +196,7 @@ class FileTransfer(private val s: Session) {
                 val acked = synchronized(o.lock) { o.acked }
                 val bps = if (now > started) acked * 1000 / (now - started) else 0
                 Hub.putTransfer(TransferUi(key, false, peerName, name, filesDone, srcs.size, acked, total, bps))
-                progressNotification(notifId, "Sending to $peerName", name, filesDone, srcs.size, acked, total, bps, cancelAction(id, false))
+                progressNotification(notifId, false, name, filesDone, srcs.size, acked, total, bps, cancelAction(id, false))
             }
             ui(0, srcs.firstOrNull()?.name ?: "", force = true)
 
@@ -205,10 +205,10 @@ class FileTransfer(private val s: Session) {
                 while (!o.accepted && o.rejected == null) {
                     checkAlive(o)
                     val left = deadline - System.currentTimeMillis()
-                    if (left <= 0) throw XferError("no answer from $peerName")
+                    if (left <= 0) throw XferError(Hub.app.getString(com.shazan.airbridge.R.string.xf_no_answer, peerName))
                     o.lock.wait(left.coerceAtMost(500))
                 }
-                o.rejected?.let { throw XferError(if (it == "disk") "$peerName has no space" else "rejected ($it)") }
+                o.rejected?.let { throw XferError(if (it == "disk") Hub.app.getString(com.shazan.airbridge.R.string.xf_no_space, peerName) else Hub.app.getString(com.shazan.airbridge.R.string.xf_rejected, it)) }
                 o.lastProgressAt = System.currentTimeMillis()
             }
 
@@ -222,13 +222,13 @@ class FileTransfer(private val s: Session) {
                     while (off < f.size) {
                         val want = minOf(chunkSize.toLong(), f.size - off).toInt()
                         val n = readFully(input, buf, want)
-                        if (n < want) throw XferError("${f.name} changed while sending")
+                        if (n < want) throw XferError(Hub.app.getString(com.shazan.airbridge.R.string.xf_changed, f.name))
                         synchronized(o.lock) {
                             while (true) {
                                 checkAlive(o)
                                 val windowOk = sent + n - o.acked <= o.window
                                 if (windowOk && s.link.queuedBytes() < QUEUE_HIGH_WATER) break
-                                if (System.currentTimeMillis() - o.lastProgressAt > STALL_MS) throw XferError("$peerName stopped responding")
+                                if (System.currentTimeMillis() - o.lastProgressAt > STALL_MS) throw XferError(Hub.app.getString(com.shazan.airbridge.R.string.xf_stopped, peerName))
                                 o.lock.wait(if (windowOk) 10 else 200)
                             }
                         }
@@ -243,27 +243,27 @@ class FileTransfer(private val s: Session) {
             val complete = synchronized(o.lock) {
                 while (o.complete == null) {
                     checkAlive(o)
-                    if (System.currentTimeMillis() - o.lastProgressAt > 60_000) throw XferError("no confirmation from $peerName")
+                    if (System.currentTimeMillis() - o.lastProgressAt > 60_000) throw XferError(Hub.app.getString(com.shazan.airbridge.R.string.xf_no_confirm, peerName))
                     o.lock.wait(500)
                 }
                 o.complete!!
             }
-            if (!complete.optBoolean("ok", true)) throw XferError("$peerName could not save the files")
-            val label = if (srcs.size == 1) srcs[0].name else "${srcs.size} files"
-            Hub.putTransfer(TransferUi(key, false, peerName, label, srcs.size, srcs.size, total, total, 0, result = "Sent"))
-            resultNotification(notifId, "Sent to $peerName", label, null)
+            if (!complete.optBoolean("ok", true)) throw XferError(Hub.app.getString(com.shazan.airbridge.R.string.xf_cant_save, peerName))
+            val label = if (srcs.size == 1) srcs[0].name else Hub.app.resources.getQuantityString(com.shazan.airbridge.R.plurals.sh_files, srcs.size, srcs.size)
+            Hub.putTransfer(TransferUi(key, false, peerName, label, srcs.size, srcs.size, total, total, 0, result = Hub.app.getString(com.shazan.airbridge.R.string.xfer_sent)))
+            resultNotification(notifId, Hub.app.getString(com.shazan.airbridge.R.string.sh_sent_to, peerName), label, null)
         } catch (e: Exception) {
             val why = when (e) {
-                is XferError -> e.message ?: "failed"
-                is IOException, is SecurityException -> "couldn't read file (${e.message})"
-                else -> { Log.e(TAG, "send failed", e); "failed" }
+                is XferError -> e.message ?: Hub.app.getString(com.shazan.airbridge.R.string.xf_failed_word)
+                is IOException, is SecurityException -> Hub.app.getString(com.shazan.airbridge.R.string.xf_cant_read, e.message ?: "")
+                else -> { Log.e(TAG, "send failed", e); Hub.app.getString(com.shazan.airbridge.R.string.xf_failed_word) }
             }
             Log.w(TAG, "send $id to $peerName failed: $why")
             val cancelledBy = synchronized(o.lock) { o.cancelled }
             if (cancelledBy == null && !s.isClosed) s.send(cancelMsg(id, "out", "error"))
-            val text = if (cancelledBy == "user") "Cancelled" else "Failed: $why"
+            val text = if (cancelledBy == "user") Hub.app.getString(com.shazan.airbridge.R.string.xfer_cancelled) else Hub.app.getString(com.shazan.airbridge.R.string.xf_failed_detail, why)
             Hub.putTransfer(TransferUi(key, false, peerName, srcs.firstOrNull()?.name ?: "", 0, srcs.size, 0, 0, 0, result = text))
-            resultNotification(notifId, "Send to $peerName failed", text, null)
+            resultNotification(notifId, Hub.app.getString(com.shazan.airbridge.R.string.xf_send_failed, peerName), text, null)
         } finally {
             outgoing.remove(id)
             TransferLocks.release()
@@ -275,7 +275,7 @@ class FileTransfer(private val s: Session) {
         o.cancelled?.let {
             throw XferError(when (it) { "user" -> "cancelled"; "error" -> "$peerName couldn't save the files"; else -> "cancelled ($it)" })
         }
-        if (s.isClosed) throw XferError("disconnected")
+        if (s.isClosed) throw XferError(Hub.app.getString(com.shazan.airbridge.R.string.st_disconnected))
     }
 
     private fun describe(uri: Uri): Src {
@@ -338,7 +338,7 @@ class FileTransfer(private val s: Session) {
         val free = try { StatFs(Environment.getExternalStorageDirectory().path).availableBytes } catch (_: Exception) { Long.MAX_VALUE }
         if (total > free - 64L * 1024 * 1024) {
             s.send(Protocol.withReason("xfer_reject", "disk").put("id", id))
-            Hub.toast("Not enough space to receive files from $peerName")
+            Hub.toast(Hub.app.getString(com.shazan.airbridge.R.string.xf_no_space_in, peerName))
             return
         }
         val inc = Incoming(id, metas, total)
@@ -368,6 +368,7 @@ class FileTransfer(private val s: Session) {
         // Names already in the destination folder, read once per transfer (not once per file) and kept current.
         private val taken: MutableSet<String> by lazy { Saver.existingNames(ctx).toMutableSet() }
         private val saved = ArrayList<String>()
+        private val savedFiles = ArrayList<ReceivedFiles.Item>()
         private val started = System.currentTimeMillis()
         private var lastUi = 0L
 
@@ -412,7 +413,7 @@ class FileTransfer(private val s: Session) {
                         CANCEL -> break
                         DONE -> {
                             // Ordered channel: every chunk precedes xfer_done, so anything missing now is lost.
-                            if (cur < files.size) throw XferError("transfer ended early")
+                            if (cur < files.size) throw XferError(Hub.app.getString(com.shazan.airbridge.R.string.xf_ended_early))
                             ok = true
                             finishAll() // §6.1: xfer_complete only after xfer_done with everything written
                             return
@@ -431,13 +432,13 @@ class FileTransfer(private val s: Session) {
                     target?.let { Saver.discard(ctx, it) } // partial file only; completed ones stay
                     target = null
                     val text = when (cancelled) {
-                        "user" -> "Cancelled"
-                        "disconnect" -> "Interrupted: $peerName disconnected"
-                        null, "error" -> "Failed"
-                        else -> "Cancelled by $peerName"
+                        "user" -> Hub.app.getString(com.shazan.airbridge.R.string.xfer_cancelled)
+                        "disconnect" -> Hub.app.getString(com.shazan.airbridge.R.string.xf_interrupted, peerName)
+                        null, "error" -> Hub.app.getString(com.shazan.airbridge.R.string.xfer_failed)
+                        else -> Hub.app.getString(com.shazan.airbridge.R.string.xf_cancelled_by, peerName)
                     }
                     Hub.putTransfer(TransferUi(key, true, peerName, files.getOrNull(cur)?.name ?: "", saved.size, files.size, written, total, 0, result = text))
-                    resultNotification(notifId, "Transfer from $peerName failed", text, null)
+                    resultNotification(notifId, Hub.app.getString(com.shazan.airbridge.R.string.xf_in_failed, peerName), text, null)
                 }
                 incoming.remove(id)
                 TransferLocks.release()
@@ -462,6 +463,7 @@ class FileTransfer(private val s: Session) {
             val t = target ?: return
             t.out.close()
             saved.add(Saver.publish(ctx, t))
+            Saver.shareUri(ctx, t)?.let { savedFiles.add(ReceivedFiles.Item(it, Saver.mimeFor(t.name, null))) }
             target = null
             cur++
             curWritten = 0
@@ -487,51 +489,33 @@ class FileTransfer(private val s: Session) {
             val bps = if (now > started) written * 1000 / (now - started) else 0
             val name = files.getOrNull(cur)?.name ?: ""
             Hub.putTransfer(TransferUi(key, true, peerName, name, saved.size, files.size, written, total, bps))
-            progressNotification(notifId, "Receiving from $peerName", name, saved.size, files.size, written, total, bps, cancelAction(id, true))
+            progressNotification(notifId, true, name, saved.size, files.size, written, total, bps, cancelAction(id, true))
         }
 
         private fun finishAll() {
             s.send(Protocol.msg("xfer_complete").put("id", id).put("ok", true).put("saved", JSONArray(saved)))
-            val label = if (saved.size == 1) saved[0] else "${saved.size} files"
-            Hub.putTransfer(TransferUi(key, true, peerName, label, saved.size, files.size, total, total, 0, result = "Received"))
-            val open = PendingIntent.getActivity(ctx, 0,
+            val label = if (saved.size == 1) saved[0] else Hub.app.resources.getQuantityString(com.shazan.airbridge.R.plurals.sh_files, saved.size, saved.size)
+            val received = ReceivedFiles(savedFiles.toList()).takeIf { it.items.isNotEmpty() }
+            Hub.putTransfer(TransferUi(key, true, peerName, label, saved.size, files.size, total, total, 0,
+                result = Hub.app.getString(com.shazan.airbridge.R.string.xfer_received), received = received))
+            val open = received?.pendingIntent(ctx) ?: PendingIntent.getActivity(ctx, 0,
                 Intent(DownloadManager.ACTION_VIEW_DOWNLOADS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-            resultNotification(notifId, "Received from $peerName", "$label · Downloads/${Saver.SUBDIR}", open)
+            resultNotification(notifId, Hub.app.getString(com.shazan.airbridge.R.string.xf_received_from, peerName), "$label · Downloads/${Saver.SUBDIR}", open)
         }
     }
 
     // ================= notifications =================
 
     private fun progressNotification(
-        id: Int, title: String, file: String, filesDone: Int, filesTotal: Int,
+        id: Int, incoming: Boolean, file: String, filesDone: Int, filesTotal: Int,
         done: Long, total: Long, bps: Long, action: NotificationCompat.Action,
     ) {
-        val pct = if (total > 0) (done * 100 / total).toInt() else 0
-        val n = NotificationCompat.Builder(ctx, Notifs.CH_XFER)
-            .setSmallIcon(R.drawable.ic_stat_name)
-            .setContentTitle(title)
-            .setContentText("$file · ${minOf(filesDone + 1, filesTotal)}/$filesTotal · ${formatSpeed(bps)}")
-            .setProgress(100, pct, total == 0L)
-            .setOngoing(true)
-            .setOnlyAlertOnce(true)
-            .setSilent(true)
-            .setContentIntent(Notifs.openAppIntent(ctx))
-            .addAction(action)
-            .build()
-        Notifs.notify(id, n)
+        TransferNotifs.progress(ctx, id, incoming, peerName, file, filesDone, filesTotal, done, total, bps, action)
     }
 
-    private fun resultNotification(id: Int, title: String, text: String, open: PendingIntent?) {
-        val n = NotificationCompat.Builder(ctx, Notifs.CH_RESULT)
-            .setSmallIcon(R.drawable.ic_stat_name)
-            .setContentTitle(title)
-            .setContentText(text)
-            .setAutoCancel(true)
-            .setContentIntent(open ?: Notifs.openAppIntent(ctx))
-            .build()
-        Notifs.notify(id, n)
-    }
+    private fun resultNotification(id: Int, title: String, text: String, open: PendingIntent?) =
+        TransferNotifs.finished(ctx, id, title, text, open)
 }
 
 fun formatSpeed(bps: Long): String = String.format(Locale.US, "%.1f MB/s", bps / (1024.0 * 1024.0))
@@ -576,7 +560,7 @@ internal object Saver {
         return "$base (${System.currentTimeMillis()})$ext"
     }
 
-    private fun mimeFor(name: String, offered: String?): String {
+    fun mimeFor(name: String, offered: String?): String {
         val ext = name.substringAfterLast('.', "").lowercase(Locale.ROOT)
         return MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext)
             ?: offered?.takeIf { it.contains('/') && ext.isEmpty() }
@@ -615,6 +599,12 @@ internal object Saver {
         val f = File(dir, name)
         if (f.canonicalFile.parentFile != dir.canonicalFile) throw IOException("bad path")
         return Target(FileOutputStream(f).buffered(256 * 1024), null, f, name)
+    }
+
+    /** A content URI other apps can open the saved file by (MediaStore on Android 10+, our FileProvider before). */
+    fun shareUri(ctx: Context, t: Target): Uri? = t.uri ?: t.file?.let { f ->
+        try { androidx.core.content.FileProvider.getUriForFile(ctx, "${ctx.packageName}.files", f) }
+        catch (e: Exception) { Log.w(TAG, "share uri", e); null }
     }
 
     /** Makes the file visible; returns its final name. */

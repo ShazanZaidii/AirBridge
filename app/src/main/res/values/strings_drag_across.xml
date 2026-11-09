@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- English source text for files carried over from another device's cursor (PROTOCOL.md §8.8). -->
+<resources>
+    <!-- Drag ghost title when several items are carried, e.g. "3 items" -->
+    <plurals name="drag_items">
+        <item quantity="one">%d item</item>
+        <item quantity="other">%d items</item>
+    </plurals>
+    <!-- Drag ghost subtitle for several items: the first item's name, e.g. "photo.jpg and more" -->
+    <string name="drag_and_more">%1$s and more</string>
+    <!-- Shown under the cursor after a drop: "Receiving photo.jpg from Shazan's Mac" -->
+    <string name="drag_receiving_one">Receiving %1$s from %2$s</string>
+    <!-- Shown under the cursor after a drop of several items: "Receiving 3 items from Shazan's Mac" -->
+    <plurals name="drag_receiving_many">
+        <item quantity="one">Receiving %1$d item from %2$s</item>
+        <item quantity="other">Receiving %1$d items from %2$s</item>
+    </plurals>
+</resources>

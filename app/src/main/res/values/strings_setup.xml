@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- English source text. Translations live in values-<lang>/strings_setup.xml. -->
+<resources>
+    <string name="your_mac">Your Mac</string>
+    <string name="your_pc">Your PC</string>
+    <string name="your_computer">Your computer</string>
+    <string name="your_other_phone">Your other phone</string>
+    <string name="setup_turn_on_short">Turn on \"%1$s\" in Accessibility settings</string>
+    <string name="setup_turn_on_long">Turn on \"%1$s\" in Accessibility settings so the cursor can appear and your clicks reach this phone.</string>
+</resources>

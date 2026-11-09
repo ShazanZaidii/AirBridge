@@ -224,7 +224,7 @@ object LinkManager {
         override fun log(line: String) = appendLog(line)
         override fun failed(peerId: String, reason: String, byPeer: Boolean, local: Boolean) {
             // Only for links this phone asked for (a held transfer falls back to the existing session).
-            if (local && reason != "no_session") Hub.toast("${LinkPolicy.failText(reason)}. Sending over the current connection.")
+            if (local && reason != "no_session") Hub.toast(Hub.app.getString(com.shazan.airbridge.R.string.lk_fallback, LinkPolicy.failText(reason)))
         }
     }
 }

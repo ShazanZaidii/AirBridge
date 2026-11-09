@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- English source text. Translations live in values-<lang>/strings_time.xml. -->
+<resources>
+    <string name="time_now">Now</string>
+    <plurals name="time_sec_ago">
+        <item quantity="one">%1$d sec ago</item>
+        <item quantity="other">%1$d sec ago</item>
+    </plurals>
+    <plurals name="time_min_ago">
+        <item quantity="one">%1$d min ago</item>
+        <item quantity="other">%1$d min ago</item>
+    </plurals>
+    <plurals name="time_hr_ago">
+        <item quantity="one">%1$d hr ago</item>
+        <item quantity="other">%1$d hr ago</item>
+    </plurals>
+</resources>

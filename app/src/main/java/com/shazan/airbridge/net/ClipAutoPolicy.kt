@@ -131,6 +131,8 @@ class ClipAutoPolicy(
     /** Text was sent to at least one peer (any reason). */
     fun onPushed(hash: String) {
         lastSentHash = hash
+        // This phone's own copy is the latest now: a later copy of the old received text is a real change.
+        if (lastRemoteHash != hash) lastRemoteHash = null
         pending = false
     }
 

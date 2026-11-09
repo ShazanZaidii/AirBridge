@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="drag_items">
+        <item quantity="one">%d élément</item>
+        <item quantity="other">%d éléments</item>
+        <item quantity="many">%d éléments</item>
+    </plurals>
+    <string name="drag_and_more">%1$s et plus</string>
+    <string name="drag_receiving_one">Réception de %1$s depuis %2$s</string>
+    <plurals name="drag_receiving_many">
+        <item quantity="one">Réception de %1$d élément depuis %2$s</item>
+        <item quantity="other">Réception de %1$d éléments depuis %2$s</item>
+        <item quantity="many">Réception de %1$d éléments depuis %2$s</item>
+    </plurals>
+    <string name="pm_channel_request">Demandes de partage d\'écran</string>
+    <string name="pm_channel_ongoing">Partage d\'écran</string>
+    <string name="pm_request_title">%1$s veut afficher l\'écran de ce téléphone</string>
+    <string name="pm_request_text">Touchez pour autoriser</string>
+    <string name="pm_request_decline">Pas maintenant</string>
+    <string name="pm_ongoing_title">Votre écran s\'affiche sur %1$s</string>
+    <string name="pm_ongoing_text">Tout ce qui est à l\'écran y est visible</string>
+    <string name="pm_stop">Arrêter</string>
+    <string name="pm_sink_allow">Touchez Autoriser sur %1$s</string>
+    <string name="pm_sink_denied">%1$s n\'a pas autorisé le partage d\'écran</string>
+    <string name="pm_sink_stopped">%1$s a arrêté de partager son écran</string>
+    <string name="lk_fallback">%1$s. Envoi via la connexion actuelle.</string>
+</resources>

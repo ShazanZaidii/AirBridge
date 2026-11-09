@@ -17,6 +17,8 @@ object Protocol {
     val APP_VERSION: String = BuildConfig.VERSION_NAME
     const val CAP_TARGET = "ctl_target"
     const val CAP_TYPE = "type_target"
+    /** §8.8: as a target we show a carried drag and take the files dropped on us. */
+    const val CAP_DRAG = "drag_files"
 
     /** Caps that follow the accessibility services at runtime; [CapsRefresh] keeps them current. */
     val DYNAMIC_CAPS: Set<String> = setOf(CAP_TARGET, CAP_TYPE)
@@ -53,13 +55,32 @@ object Protocol {
 
     /**
      * The caps that never change at runtime. `mirror_sink` (input half, §8.7) only if the device can
-     * decode H.264; `wfd_join` (§10.1) only on API ≥ 29 with Wi-Fi hardware.
+     * decode H.264; `mirror_source` (phone as source, §8.7) on API ≥ 29 with a hardware H.264 encoder (the
+     * user still allows every session on the phone); `wfd_join` (§10.1) only on API ≥ 29 with Wi-Fi hardware.
+     * `adb_wifi` (§8.9) on API ≥ 30. `drag_files` (§8.8) is static: it only matters while we hold a `ctl_target` lease, which already follows
+     * the accessibility service.
      */
     private val STATIC_CAPS: List<String> by lazy {
-        listOf("clip", "xfer", "trackpad") +
+        listOf("clip", "xfer", "trackpad", CAP_DRAG) +
+            // §13: this app can forward notifications and calls; the user still turns each on (notif_state).
+            listOf(com.shazan.airbridge.phone.NotifWire.CAP_NOTIF_SOURCE, com.shazan.airbridge.phone.NotifWire.CAP_CALL_SOURCE,
+                com.shazan.airbridge.phone.NotifWire.CAP_CALL_RING) +
             (if (hasH264Decoder()) listOf("mirror_sink") else emptyList()) +
-            (if (canJoinWfd()) listOf(com.shazan.airbridge.net.link.LinkPolicy.CAP_JOIN) else emptyList())
+            (if (canMirrorSource()) listOf("mirror_source") else emptyList()) +
+            (if (canJoinWfd()) listOf(com.shazan.airbridge.net.link.LinkPolicy.CAP_JOIN) else emptyList()) +
+            (if (canAdbWifi()) listOf(com.shazan.airbridge.promirror.AdbWifi.CAP) else emptyList()) +
+            // §13.4: we tell call-audio computers our Bluetooth name and which headset takes calls.
+            listOf(com.shazan.airbridge.phone.CallAudioInfo.CAP)
     }
+
+    /** §8.9: Android 11+ has Wireless debugging, which a computer's Pro mirroring uses. */
+    private fun canAdbWifi(): Boolean = try {
+        com.shazan.airbridge.promirror.AdbWifi.supported
+    } catch (_: Throwable) { false }
+
+    private fun canMirrorSource(): Boolean = try {
+        com.shazan.airbridge.mirror.PhoneMirror.supported
+    } catch (_: Throwable) { false }
 
     private fun canJoinWfd(): Boolean = try {
         com.shazan.airbridge.net.link.WfdJoiner.supported(Hub.app)
@@ -72,8 +93,11 @@ object Protocol {
     } catch (_: Throwable) { true } // can't tell: assume yes (every Android device ships one)
 
     const val HANDSHAKE_TIMEOUT_MS = 10_000L
-    /** Whole `confirm`/`qr` pairing must finish within this long after `pair_start` (§3.3). */
-    const val PAIR_TIMEOUT_MS = 60_000L
+    /**
+     * Whole `confirm`/`qr` pairing must finish within this long after `pair_start` (§3.3). Two minutes, not
+     * one: between two phones, two people have to read and compare the code.
+     */
+    const val PAIR_TIMEOUT_MS = 120_000L
     const val PING_IDLE_MS = 5_000L
     const val DEAD_MS = 15_000L
 

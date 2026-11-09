@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Sent to the computer when another Bluetooth headset takes the phone's call audio but has no name. The computer shows "Your phone is using a Bluetooth headset." -->
+    <string name="call_audio_a_headset" translatable="false">a Bluetooth headset</string>
+</resources>

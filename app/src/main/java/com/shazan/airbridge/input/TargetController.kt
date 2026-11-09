@@ -68,6 +68,9 @@ class TargetController(internal val service: AccessibilityService) {
 
     private val idleHide = Runnable { if (controllerId == null) cursor.fadeOut() }
 
+    /** §8.8 carried drag: the ghost that follows our cursor while a controller drags files over. */
+    private val carry = DragCarryTarget()
+
     /** §8.6 lease table: who may drive this phone right now. */
     private val lease = ControlLease()
     private var leaseBubbleOn = false
@@ -137,6 +140,7 @@ class TargetController(internal val service: AccessibilityService) {
 
     /** The holder is gone (session ended, silent for 10 s): hide everything, release everything. */
     private fun dropHolder(h: String) {
+        applyCarry(carry.onPeerGone(h))
         lease.onPeerGone(h)
         if (controllerId == h || controllerId == null) leaveLocal() else releaseAll()
         syncLeaseBubble()
@@ -207,6 +211,8 @@ class TargetController(internal val service: AccessibilityService) {
                 syncLeaseBubble()
                 return
             }
+            // §8.8: only from the explicit (ctl_enter) holder; never lease input themselves.
+            "drag_carry", "drag_drop", "drag_cancel" -> { onDrag(peerId, type, msg); return }
         }
         // ptr_* / key / action: lease rules (§8.6).
         when (val d = lease.onInput(peerId, SystemClock.uptimeMillis())) {
@@ -216,8 +222,8 @@ class TargetController(internal val service: AccessibilityService) {
                     followFade(num(msg, "dx"), num(msg, "dy"))
                 }
                 d.busyTo?.let { to ->
-                    val holderName = if (d.loop) com.shazan.airbridge.net.Identity.name.ifBlank { "this phone" }
-                    else lease.holder?.let { peerNames[it] ?: lookupName(it) } ?: "another device"
+                    val holderName = if (d.loop) com.shazan.airbridge.net.Identity.name.ifBlank { com.shazan.airbridge.net.Hub.app.getString(com.shazan.airbridge.R.string.this_phone_lc) }
+                    else lease.holder?.let { peerNames[it] ?: lookupName(it) } ?: com.shazan.airbridge.net.Hub.app.getString(com.shazan.airbridge.R.string.another_device)
                     PeerBus.send(to, JSONObject().put("t", "ctl_busy").put("holder", holderName))
                 }
                 return
@@ -237,8 +243,56 @@ class TargetController(internal val service: AccessibilityService) {
             "key" -> keys.onKey(
                 msg.optInt("hid", 0), msg.optBoolean("down", false), msg.optInt("mods", 0),
                 msg.optBoolean("rep", false), msg.optString("text", "").ifEmpty { null },
+                msg.optBoolean("mirror", false),
             )
             "action" -> actions.perform(msg.optString("name"))
+        }
+    }
+
+    // ---------------------------------------------------------------- carried drag (§8.8)
+
+    private fun onDrag(peerId: String, type: String, msg: JSONObject) {
+        val id = if (msg.has("id")) msg.optLong("id", -1L) else -1L
+        val effect = when (type) {
+            "drag_carry" -> {
+                val names = msg.optJSONArray("names").let { a -> (0 until (a?.length() ?: 0)).map { a!!.optString(it, "") } }
+                val kinds = msg.optJSONArray("kinds").let { a -> (0 until (a?.length() ?: 0)).map { a!!.optString(it, "") } }
+                val info = DragCarryTarget.info(
+                    peerId, id.takeIf { it >= 0 }, names, kinds,
+                    if (msg.has("count")) msg.optInt("count", 0) else null,
+                    if (msg.has("totalBytes")) msg.optLong("totalBytes", 0L) else null,
+                ) ?: return
+                carry.onCarry(peerId, controllerId, info)
+            }
+            "drag_drop" -> carry.onDrop(peerId, id)
+            else -> carry.onCancel(peerId, id)
+        }
+        applyCarry(effect)
+    }
+
+    private fun applyCarry(e: DragCarryTarget.Effect) {
+        val res = service.resources
+        when (e) {
+            is DragCarryTarget.Effect.Show -> {
+                val i = e.info
+                val size = if (i.totalBytes > 0) android.text.format.Formatter.formatShortFileSize(service, i.totalBytes) else ""
+                if (i.count <= 1) cursor.showGhost(i.firstName, size, i.kind, 1)
+                else cursor.showGhost(res.getQuantityString(com.shazan.airbridge.R.plurals.drag_items, i.count, i.count),
+                    size.ifEmpty { res.getString(com.shazan.airbridge.R.string.drag_and_more, i.firstName) }, i.kind, i.count)
+                Log.i(TAG, "carry ${i.id} from ${i.from}: ${i.count} item(s)")
+            }
+            is DragCarryTarget.Effect.Dropped -> {
+                val i = e.info
+                cursor.hideGhost(dropped = true)
+                val from = peerNames[i.from] ?: lookupName(i.from) ?: res.getString(com.shazan.airbridge.R.string.another_device)
+                val text = if (i.count <= 1 && i.firstName.isNotEmpty()) res.getString(com.shazan.airbridge.R.string.drag_receiving_one, i.firstName, from)
+                else res.getQuantityString(com.shazan.airbridge.R.plurals.drag_receiving_many, i.count, i.count, from)
+                // The files themselves come as a normal §6 transfer right behind this, auto-accepted.
+                if (cursor.visible) cursor.showNote(text) else com.shazan.airbridge.net.Hub.toast(text)
+                Log.i(TAG, "carry ${i.id} dropped by ${i.from}")
+            }
+            DragCarryTarget.Effect.Hide -> cursor.hideGhost(dropped = false)
+            DragCarryTarget.Effect.None -> {}
         }
     }
 
@@ -317,6 +371,7 @@ class TargetController(internal val service: AccessibilityService) {
             else JSONObject().put("t", "ctl_leave")
             PeerBus.send(prev, msg)
         }
+        applyCarry(carry.onLeave(null)) // a new controller: any earlier carry is over
         releaseAll()
         main.removeCallbacks(idleHide)
         val edge = if (edgeIn in setOf("left", "right", "top", "bottom")) edgeIn else "left"
@@ -344,6 +399,7 @@ class TargetController(internal val service: AccessibilityService) {
         val c = controllerId ?: return
         val edge = entryEdge ?: "left"
         val rel = relAlong(edge)
+        applyCarry(carry.onLeave(c))
         PeerBus.send(c, leaveMsg(edge, rel))
         lease.clear()
         lease.onHandBack(c, SystemClock.uptimeMillis())
@@ -372,6 +428,7 @@ class TargetController(internal val service: AccessibilityService) {
     }
 
     private fun leaveLocal() {
+        applyCarry(carry.onLeave(null))
         releaseAll()
         cursor.hide()
         fadingFrom = null
@@ -401,6 +458,12 @@ class TargetController(internal val service: AccessibilityService) {
 
     /** Pointer input from a peer that is not the edge controller = trackpad/direct mode (§8.1). */
     private fun touch(peerId: String) {
+        if (controllerId == null && com.shazan.airbridge.mirror.PhoneMirror.isStreamingTo(peerId)) {
+            // That computer shows this screen in a window and draws its own pointer there; a second
+            // cursor inside the picture would only lag behind it.
+            if (cursor.visible) cursor.hide()
+            return
+        }
         if (controllerId == null) {
             if (!cursor.visible || cursor.fadingOut) cursor.showAt(x, y, fade = true)
             main.removeCallbacks(idleHide)

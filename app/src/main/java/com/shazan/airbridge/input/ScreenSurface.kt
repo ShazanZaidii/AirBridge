@@ -72,16 +72,16 @@ fun MirrorScreen(
 
     BoxWithConstraints(modifier.background(Tp.Background)) {
         if (peerName == null) {
-            Notice("No computer connected", "Connect a computer from the AirBridge home screen.")
+            Notice(androidx.compose.ui.res.stringResource(com.shazan.airbridge.R.string.tp_no_computer), androidx.compose.ui.res.stringResource(com.shazan.airbridge.R.string.tp_no_computer_body))
             return@BoxWithConstraints
         }
         if (!supported) {
             if (platform == "android") Notice(
-                "Phones can't share their screen yet",
-                "Screen mode works with a Mac or PC. Use Trackpad or Keyboard to control $peerName.",
+                androidx.compose.ui.res.stringResource(com.shazan.airbridge.R.string.sc_phone_no_share),
+                androidx.compose.ui.res.stringResource(com.shazan.airbridge.R.string.sc_phone_no_share_body, peerName),
             ) else Notice(
-                "$peerName can't share its screen",
-                "Update AirBridge on the computer and allow Screen Recording in its system settings.",
+                androidx.compose.ui.res.stringResource(com.shazan.airbridge.R.string.sc_cant_share, peerName),
+                androidx.compose.ui.res.stringResource(com.shazan.airbridge.R.string.sc_cant_share_body),
             )
             return@BoxWithConstraints
         }
@@ -129,10 +129,10 @@ fun MirrorScreen(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 CircularProgressIndicator(color = Tp.Accent, strokeWidth = 3.dp, modifier = Modifier.size(32.dp))
-                Text("Connecting to $peerName's screen…", color = Tp.MutedForeground, fontSize = 14.sp)
+                Text(status.message ?: androidx.compose.ui.res.stringResource(com.shazan.airbridge.R.string.sc_connecting, peerName), color = Tp.MutedForeground, fontSize = 14.sp)
             }
             MirrorSink.Phase.Stopped, MirrorSink.Phase.Failed -> Notice(
-                status.message ?: "Screen sharing stopped", null, actionLabel = "Try again", onAction = onRetry,
+                status.message ?: androidx.compose.ui.res.stringResource(com.shazan.airbridge.R.string.sc_stopped), null, actionLabel = androidx.compose.ui.res.stringResource(com.shazan.airbridge.R.string.aw_try_again), onAction = onRetry,
             )
             MirrorSink.Phase.Streaming -> Unit
         }

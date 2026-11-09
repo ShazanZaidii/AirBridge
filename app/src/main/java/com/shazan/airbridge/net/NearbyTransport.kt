@@ -190,7 +190,14 @@ object NearbyTransport {
 
     // ---- UI actions ----
 
+    @Volatile private var requestedAt = 0L
+
+    /** A Nearby connection is being requested, waiting for the users to confirm, or open. */
+    fun isBusy(): Boolean =
+        endpoints.isNotEmpty() || _pending.value.isNotEmpty() || System.currentTimeMillis() - requestedAt < 30_000
+
     fun requestConnection(endpointId: String) {
+        requestedAt = System.currentTimeMillis()
         val opts = ConnectionOptions.Builder().setConnectionType(ConnectionType.DISRUPTIVE).build()
         client.requestConnection(endpointName(), endpointId, lifecycle, opts)
             .addOnFailureListener { e ->
@@ -262,7 +269,7 @@ object NearbyTransport {
             if (uiRefs == 0) showRequestNotification(name)
             Hub.scheduler.schedule({
                 if (_pending.value.any { it.endpointId == endpointId }) confirm(endpointId, false)
-            }, 60, TimeUnit.SECONDS)
+            }, Protocol.PAIR_TIMEOUT_MS, TimeUnit.MILLISECONDS)
         }
 
         override fun onConnectionResult(endpointId: String, result: ConnectionResolution) {
@@ -353,11 +360,11 @@ object NearbyTransport {
     private fun showRequestNotification(name: String) {
         val n = NotificationCompat.Builder(Hub.app, Notifs.CH_PAIR)
             .setSmallIcon(R.drawable.ic_stat_name)
-            .setContentTitle("Pairing request")
-            .setContentText("$name wants to connect via Nearby. Tap to confirm the code.")
+            .setContentTitle(Hub.app.getString(com.shazan.airbridge.R.string.nb_request))
+            .setContentText(Hub.app.getString(com.shazan.airbridge.R.string.nb_request_body, name))
             .setContentIntent(Notifs.openAppIntent(Hub.app))
             .setAutoCancel(true)
-            .setTimeoutAfter(60_000)
+            .setTimeoutAfter(Protocol.PAIR_TIMEOUT_MS)
             .build()
         Notifs.notify(Notifs.ID_NEARBY_REQUEST, n)
     }
