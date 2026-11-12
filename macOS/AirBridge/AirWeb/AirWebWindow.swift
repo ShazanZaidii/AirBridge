@@ -1,13 +1,14 @@
 import AppKit
+import Combine
 import SwiftUI
 
 /// The AirWeb window. Opening it starts the one AirWeb session. Closing the window leaves AirWeb running (same link,
 /// same server): sharing more files later joins it. Stop ends it, and so does two hours with nobody connected.
-@MainActor final class AirWebWindow: NSObject, NSWindowDelegate {
+@MainActor final class AirWebWindow: NSObject, NSWindowDelegate, ObservableObject {
     static let shared = AirWebWindow()
 
     private var window: NSWindow?
-    private(set) var session: AirWebSession?
+    @Published private(set) var session: AirWebSession?
 
     /// Shows AirWeb offering `urls` (may be empty: receive only). If it is already open the files are added.
     /// `batches`: share-extension staging folders to delete when the session ends.
