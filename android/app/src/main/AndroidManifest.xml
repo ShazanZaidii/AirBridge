@@ -158,6 +158,13 @@
             android:launchMode="singleTop"
             android:theme="@style/Theme.AirBridge" />
 
+        <!-- Keeps the one AirWeb session alive after its screen is closed (Back no longer ends it). -->
+        <service
+            android:name=".AirWebService"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice"
+            android:label="@string/airweb" />
+
         <!-- Lets other apps open files received before Android 10 (saved as plain files). -->
         <provider
             android:name="androidx.core.content.FileProvider"

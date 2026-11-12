@@ -435,4 +435,35 @@
         <item quantity="one">%d डिव्हाइस जोडले आहे</item>
         <item quantity="other">%d डिव्हाइस जोडलेली आहेत</item>
     </plurals>
+    <string name="language">भाषा</string>
+    <string name="language_system">फोन प्रमाणे</string>
+    <string name="change">बदला</string>
+    <string name="connect_from_other">%1$s या फोनशी जोडतो. तिथे AirBridge उघडून Connect दाबा.</string>
+    <string name="qr_none_found">त्या चित्रात QR कोड सापडला नाही</string>
+    <string name="qr_capture">कॅप्चर</string>
+    <string name="qr_choose_photo">फोटो निवडा</string>
+    <string name="qr_torch">टॉर्च</string>
+    <string name="qr_open">उघडा</string>
+    <string name="qr_copy">कॉपी</string>
+    <string name="qr_scan_again">पुन्हा स्कॅन करा</string>
+    <string name="qr_airweb_title">AirWeb लिंक</string>
+    <string name="qr_airweb_sub">%1$s वरील ब्राउझरमध्ये फाइल्सची देवाणघेवाण करण्याचे पान. हा पेअरिंग कोड नाही. ब्राउझरमध्ये उघडायचे?</string>
+    <string name="qr_web_title">वेब लिंक, AirBridge कोड नाही</string>
+    <string name="qr_wifi_title">Wi-Fi कोड, AirBridge कोड नाही</string>
+    <string name="qr_old_title">वेगळा AirBridge कोड</string>
+    <string name="qr_old_sub">हा पेअरिंग कोड या आवृत्तीला समजत नाही. दोन्ही डिव्हाइसवर AirBridge अपडेट करा.</string>
+    <string name="qr_other_title">AirBridge कोड नाही</string>
+    <string name="aw_new_link">नवीन लिंक</string>
+    <string name="aw_new_link_q">नवीन लिंक बनवायची?</string>
+    <string name="aw_new_link_body">जुनी लिंक आणि QR कोड नवीन लोकांसाठी बंद होईल. आधीच उघडलेल्या पानांवर नवीन लिंकचा संदेश दिसेल.</string>
+    <string name="aw_keeps_running">या स्क्रीनमधून बाहेर पडल्यावरही AirWeb चालू राहते. ते इथून किंवा त्याच्या नोटिफिकेशनमधून थांबवा.</string>
+    <string name="aw_need_short">छोटी लिंक हवी?</string>
+    <string name="aw_short_left">आणखी %1$s चालेल. तेच Wi-Fi हवे.</string>
+    <string name="aw_short_expired">ही छोटी लिंक संपली आहे.</string>
+    <string name="aw_short_new">नवीन छोटी लिंक घ्या</string>
+    <string name="aw_short_copy">छोटी लिंक कॉपी करा</string>
+    <string name="aw_short_note">हे दुसऱ्या संगणकाच्या ब्राउझरमध्ये टाइप करा. वरची पूर्ण लिंकच विश्वासार्ह आहे.</string>
+    <string name="aw_notif_title">AirWeb चालू आहे</string>
+    <string name="aw_notif_waiting">ब्राउझरची प्रतीक्षा</string>
+    <string name="aw_running">AirWeb चालू आहे</string>
 </resources>

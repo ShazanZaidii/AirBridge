@@ -226,7 +226,23 @@ object NearbyTransport {
         }
     }
 
+    /** The user disconnected [peerId]: drop its Nearby connection (the pause is stored by the caller). */
+    fun dropEndpoints(peerId: String) {
+        endpoints.values.filter { it.link?.session?.peerId == peerId || it.peerIdHint == peerId }.forEach {
+            try { client.disconnectFromEndpoint(it.id) } catch (_: Exception) {}
+        }
+        backoff.remove(peerId)
+    }
+
+    /** The user tapped Connect: ask the device again if it is in range right now. */
+    fun reconnect(peerId: String) {
+        backoff.remove(peerId)
+        refresh()
+        _found.value.firstOrNull { it.peerId == peerId }?.let { requestConnection(it.endpointId) }
+    }
+
     fun statusOf(peerId: String): PeerStatus = when {
+        PairStore.userPause(peerId) != null -> PeerStatus.DISCONNECTED
         endpoints.values.any { it.link?.session?.peerId == peerId || it.peerIdHint == peerId } -> PeerStatus.CONNECTING
         discovering && _found.value.any { it.peerId == peerId } -> PeerStatus.RECONNECTING
         else -> PeerStatus.OFFLINE
@@ -249,6 +265,7 @@ object NearbyTransport {
 
     private fun maybeAutoConnect(endpointId: String, hint: String?) {
         if (hint == null || !serviceActive || PairStore.get(hint)?.via != "nearby") return
+        if (PairStore.userPause(hint) != null) return // the user disconnected it: no redial until Connect
         if (Hub.readySession(hint) != null || endpoints.values.any { it.peerIdHint == hint }) return
         // Tie-break so two paired phones don't dial each other at the same time.
         if (Identity.id < hint) requestConnection(endpointId)
@@ -349,7 +366,7 @@ object NearbyTransport {
 
     /** Re-request a paired peer later if it is still discoverable (backoff 2 s → 30 s). */
     private fun scheduleRetry(peer: String) {
-        if (!serviceActive || PairStore.get(peer)?.via != "nearby") return
+        if (!serviceActive || PairStore.get(peer)?.via != "nearby" || PairStore.userPause(peer) != null) return
         val delay = backoff[peer] ?: 2000L
         backoff[peer] = (delay * 2).coerceAtMost(30_000L)
         Hub.scheduler.schedule({
