@@ -444,4 +444,34 @@
         <item quantity="one">%d appareil connecté</item>
         <item quantity="other">%d appareils connectés</item>
     </plurals>
+    <string name="language">Langue</string>
+    <string name="language_system">Comme le téléphone</string>
+    <string name="change">Modifier</string>
+    <string name="connect_from_other">%1$s se connecte à ce téléphone. Ouvrez AirBridge là-bas et touchez Connecter.</string>
+    <string name="qr_none_found">Aucun code QR dans cette image</string>
+    <string name="qr_capture">Capturer</string>
+    <string name="qr_choose_photo">Choisir une photo</string>
+    <string name="qr_torch">Lampe</string>
+    <string name="qr_open">Ouvrir</string>
+    <string name="qr_copy">Copier</string>
+    <string name="qr_scan_again">Rescanner</string>
+    <string name="qr_airweb_title">Un lien AirWeb</string>
+    <string name="qr_airweb_sub">Une page sur %1$s pour échanger des fichiers dans un navigateur. Ce n\'est pas un code d\'appairage. L\'ouvrir dans le navigateur ?</string>
+    <string name="qr_web_title">Un lien web, pas un code AirBridge</string>
+    <string name="qr_wifi_title">Un code Wi-Fi, pas un code AirBridge</string>
+    <string name="qr_old_title">Un autre code AirBridge</string>
+    <string name="qr_old_sub">Cette version ne comprend pas ce code. Mettez AirBridge à jour sur les deux appareils.</string>
+    <string name="qr_other_title">Pas un code AirBridge</string>
+    <string name="aw_new_link">Nouveau lien</string>
+    <string name="aw_new_link_q">Créer un nouveau lien ?</string>
+    <string name="aw_new_link_body">L\'ancien lien et le code QR ne marchent plus pour les nouveaux venus. Les pages déjà ouvertes afficheront un message avec le nouveau lien.</string>
+    <string name="aw_keeps_running">AirWeb reste actif quand vous quittez cet écran. Arrêtez-le ici ou depuis sa notification.</string>
+    <string name="aw_need_short">Besoin d\'un lien court ?</string>
+    <string name="aw_short_left">Valable encore %1$s. Même Wi-Fi requis.</string>
+    <string name="aw_short_expired">Ce lien court a expiré.</string>
+    <string name="aw_short_new">Nouveau lien court</string>
+    <string name="aw_short_copy">Copier le lien court</string>
+    <string name="aw_short_note">Saisissez-le dans le navigateur de l\'autre ordinateur. Le lien complet ci-dessus reste celui à privilégier.</string>
+    <string name="aw_notif_title">AirWeb est actif</string>
+    <string name="aw_notif_waiting">En attente d\'un navigateur</string>
 </resources>

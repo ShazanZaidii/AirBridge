@@ -4,6 +4,9 @@ plugins {
 }
 
 android {
+    // The in-app language picker must be able to reach every language, so a Play bundle must not split them away.
+    bundle { language { enableSplit = false } }
+
     namespace = "com.shazan.airbridge"
     compileSdk {
         version = release(36) {
