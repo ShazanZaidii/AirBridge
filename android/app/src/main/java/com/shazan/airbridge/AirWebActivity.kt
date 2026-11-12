@@ -214,15 +214,18 @@ data class ReceivedFile(
  */
 object AirWebSession {
     @Volatile private var model: AirWebModel? = null
+    private val _current = MutableStateFlow<AirWebModel?>(null)
+    /** The running session, or null while AirWeb is off: the main screen shows "AirWeb is running" from this. */
+    val current: StateFlow<AirWebModel?> = _current
 
     /** The session, started if there is none yet. Always the same one until it is [end]ed. */
-    @Synchronized fun get(ctx: Context): AirWebModel = model ?: AirWebModel(ctx.applicationContext).also { model = it }
+    @Synchronized fun get(ctx: Context): AirWebModel = model ?: AirWebModel(ctx.applicationContext).also { model = it; _current.value = it }
 
     /** The session if one exists (never creates one). */
     fun peek(): AirWebModel? = model
 
     /** Stops the server and forgets the session; the next [get] makes a fresh one with a new link. */
-    @Synchronized fun end() { model?.shutdown(); model = null }
+    @Synchronized fun end() { model?.shutdown(); model = null; _current.value = null }
 }
 
 /**
@@ -593,6 +596,25 @@ private fun AirWebScreen(model: AirWebModel, onClose: () -> Unit, onStop: () -> 
                 }
             }
             item(key = "end") { Spacer(Modifier.height(Dimens.md)) }
+        }
+    }
+}
+
+/**
+ * "AirWeb is running" on the main screen, above the devices: AirWeb keeps going after its screen closes, so it can be
+ * opened or stopped from here as well as from its notification.
+ */
+@Composable
+fun AirWebRunningCard(model: AirWebModel) {
+    val ctx = LocalContext.current
+    val peers by model.peers.collectAsState()
+    AbCard {
+        InfoRow(
+            title = stringResource(R.string.aw_running),
+            subtitle = if (peers.isEmpty()) stringResource(R.string.aw_connected_none) else pluralStringResource(R.plurals.aw_connected, peers.size, peers.size),
+        ) {
+            TextButton(onClick = { ctx.startActivity(AirWebActivity.intent(ctx, emptyList())) }) { Text(stringResource(R.string.qr_open)) }
+            TextButton(onClick = { AirWebService.stop(ctx) }) { Text(stringResource(R.string.aw_stop)) }
         }
     }
 }
