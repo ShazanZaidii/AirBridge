@@ -48,7 +48,7 @@ import UniformTypeIdentifiers
     @Published private(set) var qr: CGImage?
     @Published private(set) var notice: String?
 
-    let token: String
+    var token: String { server.token }
     private let bridge: AirWebBridge
     private let server: AirWebServer
     private var nextId = 1
@@ -62,7 +62,6 @@ import UniformTypeIdentifiers
 
     init() {
         let t = AirWebServer.newToken(), b = AirWebBridge()
-        token = t
         bridge = b
         server = AirWebServer(token: t, host: b)
     }
@@ -157,6 +156,16 @@ import UniformTypeIdentifiers
     }
 
     func remove(_ id: Int) { offered.removeAll { $0.id == id } }
+
+    /// A new link on purpose; pages open on the old one are told where to go.
+    func newLink() { server.rotate(); updateLink() }
+
+    /// A short, typeable link for a computer that can't scan the code, and how long it still works.
+    func shortLink() -> (url: String, secondsLeft: Int64)? {
+        guard let a = address, port != 0 else { return nil }
+        let s = server.issueShort()
+        return ("\(a):\(port)/j/\(s.code)", s.secondsLeft)
+    }
 
     /// Stops sharing an uploaded file with the other browsers (it stays in Downloads on this Mac).
     func stopSharing(_ id: Int) {

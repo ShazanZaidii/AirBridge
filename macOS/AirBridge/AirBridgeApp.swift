@@ -153,6 +153,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
                     try? "http://127.0.0.1:\(sess.port)/?t=\(sess.token)".write(toFile: out, atomically: true, encoding: .utf8)
                 }
             }
+            // airbridge://debug/airweb_newlink?out=/path — a new link on purpose; writes the new local link to that file.
+            if url.path == "/airweb_newlink", let sess = AirWebWindow.shared.session {
+                sess.newLink()
+                if let out = q.first(where: { $0.name == "out" })?.value {
+                    try? "http://127.0.0.1:\(sess.port)/?t=\(sess.token)".write(toFile: out, atomically: true, encoding: .utf8)
+                }
+            }
+            // airbridge://debug/airweb_close — closes only the window (AirWeb keeps running).
+            if url.path == "/airweb_close" { AirWebWindow.shared.debugCloseWindow() }
             // airbridge://debug/airweb_stop — closes AirWeb.
             if url.path == "/airweb_stop" { AirWebWindow.shared.stop() }
             // airbridge://debug/pro_setup?to=ID — the Pro Mirroring setup window.
@@ -401,10 +410,12 @@ struct MenuView: View {
     @State private var showMirrorPick = false
     @State private var showHosts = false
     @State private var showSettings = false
-    @State private var newName = ""
     @AppStorage(DropSettings.dockEnabledKey) private var dockEnabled = true
     @AppStorage(DropSettings.autoHideKey) private var autoHideCards = false
     @ObservedObject private var phoneNotifs = PhoneNotifCenter.shared
+    @ObservedObject private var airWeb = AirWebWindow.shared
+    @State private var renaming = false
+    @State private var draftName = ""
     @AppStorage(PhoneNotifSettings.showNotifsKey) private var showPhoneNotifs = true
     @AppStorage(PhoneNotifSettings.showCallsKey) private var showPhoneCalls = true
     @AppStorage(PhoneNotifSettings.soundsKey) private var phoneSounds = true
@@ -412,6 +423,10 @@ struct MenuView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             header
+
+            renameRow
+
+            if let session = airWeb.session { AirWebRunningRow(session: session) }
 
             ActiveCallsMenuSection()
 
@@ -557,7 +572,6 @@ struct MenuView: View {
     /// Everything that's set once and rarely touched again.
     private var settingsList: some View {
         VStack(alignment: .leading, spacing: 0) {
-            settingsSection
             dropSettingsSection
             phoneSettingsSection
             if !model.screenCaptureAllowed {
@@ -577,10 +591,7 @@ struct MenuView: View {
 
     private var header: some View {
         HStack(alignment: .firstTextBaseline) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("AirBridge").font(.headline)
-                Text(model.deviceName).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-            }
+            Text("AirBridge").font(.headline)
             Spacer()
             if let ip = model.localIP, let port = model.port {
                 Label("\(ip):\(String(port))", systemImage: "wifi")
@@ -592,6 +603,55 @@ struct MenuView: View {
                 Label("Starting…", systemImage: "hourglass").font(.caption2).foregroundStyle(.secondary)
             }
         }
+    }
+
+    /// This Mac's name as other devices see it: the whole row is the button, a pencil says so.
+    @ViewBuilder private var renameRow: some View {
+        if renaming {
+            HStack(spacing: Theme.sm) {
+                TextField("Name", text: $draftName)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit(commitRename)
+                Button("Save", action: commitRename)
+                    .controlSize(.small)
+                    .disabled(draftName.trimmingCharacters(in: .whitespaces).isEmpty)
+                Button("Cancel") { renaming = false }
+                    .controlSize(.small)
+            }
+        } else {
+            Button {
+                draftName = model.deviceName
+                renaming = true
+            } label: {
+                HStack(spacing: 10) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Color.primary.opacity(0.07))
+                        Image(systemName: "laptopcomputer").font(.system(size: 12.5, weight: .medium)).foregroundStyle(.secondary)
+                    }
+                    .frame(width: 26, height: 26)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(model.deviceName).font(.callout).lineLimit(1)
+                        Text("How your other devices see this Mac").font(.caption2).foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 8)
+                    Image(systemName: "pencil").font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(RoundedRectangle(cornerRadius: Theme.radius).fill(Color.primary.opacity(0.05)))
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Rename this Mac")
+            .accessibilityLabel("This Mac is called \(model.deviceName). Rename")
+        }
+    }
+
+    private func commitRename() {
+        let n = draftName.trimmingCharacters(in: .whitespaces)
+        if !n.isEmpty, n != model.deviceName { PeerManager.shared.rename(to: n) }
+        renaming = false
     }
 
     private func controlBanner(_ text: String) -> some View {
@@ -743,35 +803,6 @@ struct MenuView: View {
             }
         }
         .padding(.vertical, Theme.xs)
-    }
-
-    private var settingsSection: some View {
-        let changed = !newName.trimmingCharacters(in: .whitespaces).isEmpty && newName != model.deviceName
-        return HStack(spacing: 10) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Color.primary.opacity(0.07))
-                Image(systemName: "laptopcomputer").font(.system(size: 12.5, weight: .medium)).foregroundStyle(.secondary)
-            }
-            .frame(width: 26, height: 26)
-            VStack(alignment: .leading, spacing: 1) {
-                TextField("Name", text: $newName)
-                    .textFieldStyle(.plain)
-                    .font(.callout)
-                    .onAppear { newName = model.deviceName }
-                    .onSubmit { if changed { PeerManager.shared.rename(to: newName) } }
-                Text("How your other devices see this Mac").font(.caption2).foregroundStyle(.secondary)
-            }
-            Spacer(minLength: 8)
-            if changed {
-                Button("Save") { PeerManager.shared.rename(to: newName) }
-                    .controlSize(.small)
-                    .transition(.scale.combined(with: .opacity))
-            }
-        }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 6)
-        .animation(.spring(response: 0.3, dampingFraction: 0.75), value: changed)
-        .padding(.top, Theme.xs)
     }
 
     private var dropSettingsSection: some View {
@@ -1150,5 +1181,29 @@ struct ClipboardFiltersView: View {
         if let encoded = try? JSONEncoder().encode(filters) {
             filtersData = encoded
         }
+    }
+}
+
+
+/// AirWeb keeps running when its window is closed: say so on the main menu, and let it be stopped from there too.
+struct AirWebRunningRow: View {
+    @ObservedObject var session: AirWebSession
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "qrcode.viewfinder").font(.system(size: 14)).foregroundStyle(.secondary).frame(width: 26)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("AirWeb is running").font(.callout)
+                Text(session.peers.isEmpty ? "No one connected yet" : "\(session.peers.count) connected")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 8)
+            Button("Open") { AirWebWindow.shared.show() }.controlSize(.small)
+            Button("Stop") { AirWebWindow.shared.stop() }.controlSize(.small)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(RoundedRectangle(cornerRadius: Theme.radius).fill(Color.primary.opacity(0.05)))
+        .accessibilityElement(children: .contain)
     }
 }

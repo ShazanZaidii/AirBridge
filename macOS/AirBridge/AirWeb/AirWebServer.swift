@@ -44,6 +44,8 @@ nonisolated struct AirWebLimits: Sendable {
     var maxPeers = 256
     /// Files in the pool; uploads beyond this are refused.
     var maxPool = 1000
+    /// Browsers whose "already downloaded" list is remembered (the least recently seen are forgotten).
+    var maxDownloadLogs = 512
 }
 
 /// What the server needs from its owner. Called from connection threads.
@@ -77,10 +79,13 @@ nonisolated protocol AirWebHost: AnyObject, Sendable {
 /// everyone else who is connected.
 ///
 ///  - `GET /` the page
-///  - `GET /api/state?c=&w=&v=` JSON: device name, free space, poll interval, who is connected, the pool (omitted,
-///    with `"same":true`, when `v` is the pool's current version)
-///  - `GET|HEAD /d/<id>[/<name>]` download one pool file
+///  - `GET /api/state?c=&w=&v=&g=` JSON: device name, free space, poll interval, who is connected, the pool (omitted,
+///    with `"same":true`, when `v` is the pool's current version) and what this browser has already downloaded in full
+///    (`got`, sent only when it differs from the `gn` the browser last saw as `g`)
+///  - `GET|HEAD /d/<id>[/<name>]?c=` download one pool file
+///  - `GET|HEAD /z?ids=1-40,1000001&c=` the listed pool files (all of them without `ids`) as one streamed ZIP
 ///  - `POST /u?n=<file name>&c=&w=` upload one file into the pool, raw body, Content-Length required
+///  - `POST /api/short` a six-character short code for the link (10 minutes); `GET /j/<code>` redirects to the real link
 ///  - `GET /qr.svg` the QR code of this page's own link, so any connected browser can show it to invite more people
 ///
 /// Every request needs the session token (`?t=…`, 128 random bits) or the answer is 403. Built to stay up with 50+
@@ -119,7 +124,11 @@ nonisolated final class AirWebServer: @unchecked Sendable {
         var lastSeen: Int64
     }
 
-    let token: String
+    private var currentToken: String
+    /// Tokens that were replaced, so a page that is still open on one is told where the link went.
+    private var retired: [String] = []
+    /// The session token of the current link; [rotate] replaces it.
+    var token: String { lock.withLock { currentToken } }
     let limits: AirWebLimits
     private weak var host: AirWebHost?
 
@@ -138,17 +147,38 @@ nonisolated final class AirWebServer: @unchecked Sendable {
     private var reservedBytes: Int64 = 0
     private var peerMap: [String: PeerRec] = [:]
     private var lastPeerKey = ""
+    /// Which pool files each browser has received in full (least recently used last), and which it is receiving now.
+    private var gotBy: [String: Set<Int>] = [:]
+    private var gotOrder: [String] = []
+    private var activeBy: [String: [Int: Int]] = [:]
     private var sweeper: DispatchSourceTimer?
     private let slots: DispatchSemaphore
 
     init(token: String, host: AirWebHost, limits: AirWebLimits = AirWebLimits()) {
-        self.token = token
+        self.currentToken = token
         self.host = host
         self.limits = limits
         slots = DispatchSemaphore(value: limits.maxTransfers)
     }
 
     var port: UInt16 { lock.withLock { boundPort } }
+
+    /// Gives the session a new link: the old one stops working for new visitors, but a page already open on it is told
+    /// (in its next poll) to move to the new one, and a refresh of it lands on the new page.
+    @discardableResult func rotate() -> String {
+        let t = Self.newToken()
+        lock.withLock {
+            retired.append(currentToken)
+            if retired.count > 8 { retired.removeFirst(retired.count - 8) }
+            currentToken = t
+        }
+        return t
+    }
+
+    private func isRetired(_ given: String?) -> Bool {
+        let list = lock.withLock { retired }
+        return list.contains { AirWebHTTP.tokenMatches(given, $0) }
+    }
     var isRunning: Bool { lock.withLock { listenFd >= 0 } }
     /// Downloads and uploads in progress right now.
     var activeTransfers: Int { lock.withLock { transfers } }
@@ -206,6 +236,7 @@ nonisolated final class AirWebServer: @unchecked Sendable {
         sweeper = nil
         peerMap.removeAll()
         lastPeerKey = ""
+        gotBy.removeAll(); gotOrder.removeAll(); activeBy.removeAll()
         for fd in open { shutdown(fd, SHUT_RDWR) }
     }
 
@@ -372,6 +403,42 @@ nonisolated final class AirWebServer: @unchecked Sendable {
         if let snap { host?.peersChanged(snap) }
     }
 
+    // MARK: What each browser has downloaded
+
+    private func markGot(_ c: String?, _ id: Int) {
+        guard let c else { return }
+        lock.withLock {
+            gotBy[c, default: []].insert(id)
+            if let i = gotOrder.firstIndex(of: c) { gotOrder.remove(at: i) }
+            gotOrder.append(c)
+            while gotOrder.count > limits.maxDownloadLogs { gotBy[gotOrder.removeFirst()] = nil }
+        }
+    }
+
+    private func markActive(_ c: String?, _ id: Int, _ delta: Int) {
+        guard let c else { return }
+        lock.withLock {
+            let n = (activeBy[c]?[id] ?? 0) + delta
+            if n <= 0 {
+                activeBy[c]?[id] = nil
+                if activeBy[c]?.isEmpty == true { activeBy[c] = nil }
+            } else {
+                activeBy[c, default: [:]][id] = n
+            }
+        }
+    }
+
+    /// What `c` has received in full and is receiving now, for the files still in the pool.
+    private func log(for c: String, _ pool: [AirWebFile]) -> (got: [Int], act: [Int]) {
+        let ids = Set(pool.map(\.id))
+        return lock.withLock {
+            if var g = gotBy[c] { g.formIntersection(ids); gotBy[c] = g }
+            let got = (gotBy[c] ?? []).sorted()
+            let act = (activeBy[c]?.keys.filter { ids.contains($0) } ?? []).sorted()
+            return (got, act)
+        }
+    }
+
     // MARK: Transfer slots (the waiting room)
 
     /// A transfer slot, waiting for one if need be; false when the room is full, time ran out or the server stopped.
@@ -422,7 +489,12 @@ nonisolated final class AirWebServer: @unchecked Sendable {
             }
             input.deadline = 0
             Self.setTimeouts(fd, receive: limits.idleSeconds, send: limits.idleSeconds)
+            // The one way in without the token: a short code that a connected page asked for (see AirWebShortLink).
+            if req.path.hasPrefix("/j/") && (req.method == "GET" || req.method == "HEAD") {
+                try shortJump(fd, req); return
+            }
             guard AirWebHTTP.tokenMatches(req.query["t"], token) else {
+                if isRetired(req.query["t"]) { try moved(fd, req); return }
                 if req.path == "/" && req.method == "GET" { try html(fd, 403, "Forbidden", AirWebHTTP.expiredPage) }
                 else { try simple(fd, 403, "Forbidden") }
                 return
@@ -435,6 +507,10 @@ nonisolated final class AirWebServer: @unchecked Sendable {
             case "/api/state":
                 guard req.method == "GET" else { try simple(fd, 405, "Method Not Allowed"); return }
                 try state(fd, req, host)
+            case "/api/short":
+                guard req.method == "POST" else { try simple(fd, 405, "Method Not Allowed"); return }
+                let s = shortLink.issue()
+                try json(fd, 200, "OK", "{\"code\":\"\(s.code)\",\"ttl\":\(s.secondsLeft)}")
             case "/qr.svg":
                 guard req.method == "GET" else { try simple(fd, 405, "Method Not Allowed"); return }
                 try qr(fd, req, host)
@@ -444,6 +520,9 @@ nonisolated final class AirWebServer: @unchecked Sendable {
             case let p where p.hasPrefix("/d/"):
                 guard req.method == "GET" || req.method == "HEAD" else { try simple(fd, 405, "Method Not Allowed"); return }
                 try download(fd, req, host)
+            case "/z":
+                guard req.method == "GET" || req.method == "HEAD" else { try simple(fd, 405, "Method Not Allowed"); return }
+                try zip(fd, req, host)
             default:
                 try simple(fd, 404, "Not Found")
             }
@@ -453,6 +532,42 @@ nonisolated final class AirWebServer: @unchecked Sendable {
     private func simple(_ fd: Int32, _ code: Int, _ reason: String) throws {
         let body = Array("\(code) \(reason)\n".utf8)
         try Self.sendAll(fd, Array(AirWebHTTP.head(code, reason, "text/plain; charset=utf-8", Int64(body.count)).utf8) + body)
+    }
+
+    private let shortLink = AirWebShortLink()
+
+    /// A request with a replaced token: the state poll is told the new link, a page load is sent there.
+    private func moved(_ fd: Int32, _ req: AirWebHTTP.Request) throws {
+        let to = "/?t=\(token)"
+        if req.path == "/api/state" && req.method == "GET" {
+            try json(fd, 200, "OK", "{\"moved\":\(AirWebHTTP.jsonString(to))}")
+        } else if req.path == "/" && (req.method == "GET" || req.method == "HEAD") {
+            let body = Array("This link was replaced. Opening the new one…\n".utf8)
+            let head = AirWebHTTP.head(302, "Found", "text/plain; charset=utf-8", Int64(body.count), extra: "Location: \(to)\r\n")
+            try Self.sendAll(fd, Array(head.utf8) + (req.method == "HEAD" ? [] : body))
+        } else {
+            try simple(fd, 403, "Forbidden")
+        }
+    }
+
+    /// The host window's own "Need a short link?": the live short code (made now if none) and the seconds it has left.
+    func issueShort() -> (code: String, secondsLeft: Int64) { shortLink.issue() }
+
+    /// `GET /j/<code>`: on a match, sends the browser on to the real link; otherwise a plain explanation.
+    private func shortJump(_ fd: Int32, _ req: AirWebHTTP.Request) throws {
+        var given = String(req.path.dropFirst(3))
+        while given.hasSuffix("/") { given.removeLast() }
+        switch shortLink.check(given) {
+        case .match:
+            let body = Array("Opening AirWeb…\n".utf8)
+            let head = AirWebHTTP.head(302, "Found", "text/plain; charset=utf-8", Int64(body.count), extra: "Location: /?t=\(token)\r\n")
+            try Self.sendAll(fd, Array(head.utf8) + (req.method == "HEAD" ? [] : body))
+        case .miss:
+            try html(fd, 404, "Not Found", AirWebHTTP.shortMissPage("This short link has expired or isn't right",
+                "On a device that is already connected, open the Invite section and ask for a new short link."))
+        case .locked:
+            try html(fd, 429, "Too Many Requests", AirWebHTTP.shortMissPage("Too many wrong tries", "Wait a minute, then type the short link again."))
+        }
     }
 
     private func busy(_ fd: Int32) throws {
@@ -479,10 +594,12 @@ nonisolated final class AirWebServer: @unchecked Sendable {
         let pool = host.offered()
         let sig = AirWebHTTP.signature(pool)
         let same = req.query["v"] == sig
+        // What this browser has received in full (and is receiving now), so the page can grey those files out.
+        let (got, act) = c.map { log(for: $0, pool) } ?? ([], [])
         let now = Int64(Date().timeIntervalSince1970 * 1000)
         var s = "{\"name\":\(AirWebHTTP.jsonString(host.deviceName())),\"free\":\(host.freeSpace()),\"now\":\(now)"
         // The page polls this often: slower the more browsers there are, so 50 of them stay cheap.
-        s += ",\"poll\":\(min(max(2_000 + 100 * peers.count, 2_000), 8_000)),\"v\":\"\(sig)\",\"count\":\(peers.count),\"peers\":["
+        s += ",\"poll\":\(min(max(2_000 + 100 * peers.count, 2_000), 8_000)),\"v\":\"\(sig)\",\"gn\":\(got.count),\"act\":[\(act.map(String.init).joined(separator: ","))],\"count\":\(peers.count),\"peers\":["
         // With a big crowd only some names are listed; the asking page is always among them (it marks itself "you").
         var shown = Array(peers.prefix(Self.maxPeersListed))
         if let mine = peers.first(where: { $0.id == c }), !shown.contains(where: { $0.id == c }) {
@@ -491,6 +608,7 @@ nonisolated final class AirWebServer: @unchecked Sendable {
         s += shown.map { "{\"id\":\(AirWebHTTP.jsonString($0.id)),\"name\":\(AirWebHTTP.jsonString($0.label))}" }
             .joined(separator: ",")
         s += "]"
+        if c != nil && req.query["g"] != String(got.count) { s += ",\"got\":[\(got.map(String.init).joined(separator: ","))]" }
         if same {
             s += ",\"same\":true"
         } else {
@@ -529,7 +647,9 @@ nonisolated final class AirWebServer: @unchecked Sendable {
         }
         guard acquireSlot() else { try busy(fd); return }
         lock.withLock { transfers += 1 }
-        defer { lock.withLock { transfers -= 1 }; releaseSlot() }
+        let client = AirWebHTTP.cleanClientId(req.query["c"])
+        markActive(client, f.id, 1)
+        defer { markActive(client, f.id, -1); lock.withLock { transfers -= 1 }; releaseSlot() }
         let file = Darwin.open(f.url.path, O_RDONLY | O_CLOEXEC)
         if file < 0 { try simple(fd, 410, "Gone"); return }
         defer { close(file) }
@@ -546,7 +666,38 @@ nonisolated final class AirWebServer: @unchecked Sendable {
             try buf.withUnsafeBytes { try Self.sendAll(fd, $0.baseAddress!, k) }
             sent += Int64(k)
         }
-        if f.size < 0 || sent == f.size { host.downloaded(f) }
+        if f.size < 0 || sent == f.size { markGot(client, f.id); host.downloaded(f) }
+    }
+
+    /// Several pool files as one ZIP, streamed (see `AirWebZip`); each file counts as downloaded once it is through.
+    private func zip(_ fd: Int32, _ req: AirWebHTTP.Request, _ host: AirWebHost) throws {
+        let client = AirWebHTTP.cleanClientId(req.query["c"])
+        let pool = host.offered()
+        let wanted = AirWebHTTP.parseIds(req.query["ids"], limit: limits.maxPool * 4)
+        let chosen: [AirWebFile]
+        if let wanted {
+            let byId = Dictionary(pool.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+            chosen = wanted.compactMap { byId[$0] }
+        } else {
+            chosen = pool
+        }
+        // Only what can be read right now: the archive's length is announced up front.
+        let files = chosen.filter { access($0.url.path, R_OK) == 0 }
+        if chosen.isEmpty { try simple(fd, 404, "Not Found"); return }
+        if files.isEmpty { try simple(fd, 410, "Gone"); return }
+        let now = Int64(Date().timeIntervalSince1970 * 1000)
+        let archive = AirWebZip(files.map { AirWebZip.Entry(name: $0.name, size: $0.size, timeMs: $0.added > 0 ? $0.added : now, path: $0.url.path) })
+        let extra = "Content-Disposition: \(AirWebHTTP.contentDisposition("AirWeb-\(files.count)-files.zip"))\r\n"
+        let head = Array(AirWebHTTP.head(200, "OK", "application/zip", archive.length >= 0 ? archive.length : nil, extra: extra).utf8)
+        if req.method == "HEAD" { try Self.sendAll(fd, head); return }
+        guard acquireSlot() else { try busy(fd); return }
+        lock.withLock { transfers += 1 }
+        defer { lock.withLock { transfers -= 1 }; releaseSlot() }
+        try Self.sendAll(fd, head)
+        try archive.write(send: { p, n in try Self.sendAll(fd, p, n) }, entryDone: { i in
+            markGot(client, files[i].id)
+            host.downloaded(files[i])
+        })
     }
 
     private func upload(_ fd: Int32, _ input: SocketReader, _ req: AirWebHTTP.Request, _ host: AirWebHost) throws {
@@ -845,6 +996,29 @@ nonisolated enum AirWebHTTP {
         return String(h, radix: 16)
     }
 
+    /// `1-40,1000001,1000003-1000010` → the ids in that order (no repeats), or nil when `raw` is absent or blank (meaning
+    /// "everything"). Anything malformed is skipped; at most `limit` ids come back.
+    static func parseIds(_ raw: String?, limit: Int) -> [Int]? {
+        guard let raw, !raw.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
+        var out: [Int] = []
+        var seen = Set<Int>()
+        for part in raw.split(separator: ",") {
+            let t = part.trimmingCharacters(in: .whitespaces)
+            if t.isEmpty || out.count >= limit { continue }
+            let bounds = t.split(separator: "-", maxSplits: 1, omittingEmptySubsequences: false)
+            guard let a = Int(bounds[0]), a >= 0 else { continue }
+            var b = a
+            if bounds.count == 2 { guard let hi = Int(bounds[1]) else { continue }; b = hi }
+            if b < a { continue }
+            var id = a
+            while id <= b && out.count < limit {
+                if seen.insert(id).inserted { out.append(id) }
+                id += 1
+            }
+        }
+        return out
+    }
+
     /// `matrix` (rows of modules, true = dark) as an SVG with the 4-module quiet zone scanners need, black on white.
     static func qrSvg(_ matrix: [[Bool]]) -> String {
         let n = matrix.count, q = 4
@@ -945,6 +1119,14 @@ nonisolated enum AirWebHTTP {
         }
         return out + "\""
     }
+
+    static func shortMissPage(_ title: String, _ detail: String) -> String { """
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1"><title>AirWeb</title>
+<style>body{font-family:-apple-system,system-ui,"Segoe UI",Roboto,sans-serif;background:#f4f4f3;color:#1b1b1b;margin:0;padding:24px;line-height:1.5}
+@media (prefers-color-scheme:dark){body{background:#161616;color:#ececec}}main{max-width:32rem;margin:10vh auto}</style></head>
+<body><main><h1 style="font-size:1.4rem">\(escapeHtml(title))</h1><p>\(escapeHtml(detail))</p></main></body></html>
+""" }
 
     static let expiredPage = """
 <!doctype html><html lang="en"><head><meta charset="utf-8">
