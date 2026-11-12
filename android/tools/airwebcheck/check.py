@@ -166,8 +166,74 @@ def main():
         st, _ = state(b, "Safari on iPhone")
         check(st == 200, "and the server is fine once they close")
 
+    print("download all / a selection as one zip (200 files)")
+    import io, zipfile
+    from concurrent.futures import ThreadPoolExecutor
+    sent = {}
+    def put(i):
+        data = os.urandom(random.choice([0, 1, 500, 5000, 20000]))
+        name = f"airweb-check-{run}-b{i}.bin"
+        st, _ = upload(f"bulkup{i % 6}{run}", "Chrome on Windows", name, data)
+        return name, data, st
+    t0 = time.time()
+    with ThreadPoolExecutor(8) as ex:
+        for name, payload, st in ex.map(put, range(200)):
+            sent[name] = (payload, st)
+    check(all(st == 200 for _, st in sent.values()), f"200 files uploaded ({time.time() - t0:.1f} s)")
+    _, sp = state(b)
+    byname = {f["name"]: f["id"] for f in sp.get("files", []) if f["name"].startswith(f"airweb-check-{run}-b")}
+    check(len(byname) == 200, f"all 200 are in the pool ({len(byname)})")
+
+    def ranges(ids):
+        ids = sorted(ids); out = []; i = 0
+        while i < len(ids):
+            j = i
+            while j + 1 < len(ids) and ids[j + 1] == ids[j] + 1: j += 1
+            out.append(f"{ids[i]}-{ids[j]}" if j > i else str(ids[i])); i = j + 1
+        return ",".join(out)
+
+    zc = f"zipper01{run}"
+    allids = list(byname.values())
+    t0 = time.time()
+    st, h, body = request("GET", f"/z?ids={urllib.parse.quote(ranges(allids))}&c={zc}", timeout=120)
+    dt = time.time() - t0
+    check(st == 200 and h.get("content-type", "").startswith("application/zip"), f"/z answers a zip ({len(body)//1024} KB in {dt:.1f} s)")
+    # The phone and the Mac announce the exact size (a real progress bar); the Windows host streams without one.
+    check(h.get("content-length") in (str(len(body)), None), "its Content-Length is the real length (or absent: size not announced)")
+    try:
+        zf = zipfile.ZipFile(io.BytesIO(body))
+        bad = zf.testzip()
+        names = zf.namelist()
+        check(bad is None and len(names) == 200 and len(set(names)) == 200, f"Python's unzip: 200 unique entries, CRCs fine ({bad})")
+        same = sum(1 for nm, (pl, _) in sent.items() if nm in names and zf.read(nm) == pl)
+        check(same == 200, f"every file's content matches what was uploaded ({same}/200)")
+    except zipfile.BadZipFile as e:
+        check(False, f"not a valid zip: {e}")
+    st, hh, nb = request("HEAD", f"/z?ids={urllib.parse.quote(ranges(allids))}&c={zc}")
+    check(st == 200 and hh.get("content-length") == h.get("content-length") and not nb, "HEAD announces the same length with no body")
+
+    scattered = allids[::3]
+    st, h2, body2 = request("GET", f"/z?ids={urllib.parse.quote(ranges(scattered))}&c={zc}", timeout=120)
+    n2 = zipfile.ZipFile(io.BytesIO(body2)).namelist() if st == 200 else []
+    check(st == 200 and len(n2) == len(scattered), f"a scattered selection of {len(scattered)} files zips just those ({len(n2)})")
+    st, _, _ = request("GET", "/z?ids=987654321-987654399")
+    check(st == 404, "ids that don't exist answer 404")
+
+    print("already downloaded, per browser")
+    _, sz = state(zc)
+    check(sorted(sz.get("got", [])) == sorted(allids) or set(allids) <= set(sz.get("got", [])), f"after the zip this browser has all 200 as downloaded ({len(sz.get('got', []))})")
+    _, so = state(f"other{run}x")
+    check(not set(allids) & set(so.get("got", [])), "another browser has none of them as downloaded")
+    st, _, _ = request("GET", f"/d/{allids[0]}/x?c=other{run}x")
+    _, so = state(f"other{run}x")
+    check(so.get("got") == [allids[0]], "one file downloaded alone is marked for that browser only")
+    _, again = state(zc, v=None)
+    gn = again.get("gn")
+    st, _, nb = request("GET", f"/api/state?c={zc}&g={gn}")
+    check(b'"got"' not in nb, "the list isn't resent when the browser already has that count")
+
     print(f"a crowd: {browsers} browsers polling, 8 uploading, 8 downloading")
-    pool = [x for x in state(b)[1].get("files", []) if x["name"].startswith(f"airweb-check-{run}")]
+    pool = [x for x in state(b)[1].get("files", []) if x["name"] == f"airweb-check-{run}.bin"]
     dl_id = pool[0]["id"] if pool else None
     lat, bad, busy = [], [], [0]
     done = threading.Barrier(1)
@@ -201,11 +267,12 @@ def main():
             with lock: bad.append(f"upload {i} -> {st}")
 
     def downloader(i):
+        st = got = None
         for attempt in range(25):
             st, _, got = request("GET", f"/d/{dl_id}")
             if st == 200 and len(got) == len(data): return
             time.sleep(0.4)
-        with lock: bad.append(f"download {i}")
+        with lock: bad.append(f"download {i} (file {dl_id}) -> {st}, {len(got or b'')} bytes")
 
     ts = [threading.Thread(target=browser, args=(i,)) for i in range(browsers)]
     ts += [threading.Thread(target=uploader, args=(i,)) for i in range(8)]
@@ -224,6 +291,36 @@ def main():
     check(sf.get("count", 0) >= browsers, f"{sf.get('count')} devices listed as connected")
     st, _ = state(b)
     check(st == 200, f"the server still answers after {time.time() - t0:.0f} s of crowd")
+
+    print("the short link")
+    st, _, _ = request("GET", "/api/short")
+    check(st == 405, "asking for one needs POST")
+    st, _, body = request("POST", "/api/short")
+    code = json.loads(body).get("code", "") if st == 200 else ""
+    check(st == 200 and len(code) == 6 and code.isalnum() and code == code.upper(), f"a six-character code is issued ({code!r})")
+    st2, _, body2 = request("POST", "/api/short")
+    check(st2 == 200 and json.loads(body2).get("code") == code, "asking again gives the same live code")
+
+    def short(path):
+        try:
+            c = http.client.HTTPConnection(HOST, PORT, timeout=10)  # no token: that is the point
+            c.request("GET", path, headers={"Connection": "close"}); r = c.getresponse(); b = r.read(); loc = r.getheader("Location"); c.close()
+            return r.status, loc, b
+        except (OSError, http.client.HTTPException):
+            return -1, None, b""
+    st, loc, _ = short("/j/" + code.lower())
+    check(st == 302 and loc == "/?t=" + TOKEN, f"the code (any case) redirects to the real link without a token ({st})")
+    st, loc, body = short("/j/AAAAAA" if code != "AAAAAA" else "/j/BBBBBB")
+    check(st == 404 and loc is None and TOKEN.encode() not in body, f"a wrong code gets a plain 404 that doesn't leak the token ({st})")
+    locked = 0
+    for i in range(14):
+        st, _, _ = short("/j/ZZZZ%02d" % i)
+        if st == 429: locked += 1
+    check(locked > 0, f"repeated wrong codes are locked out ({locked} of 14 refused)")
+    st, _, _ = short("/j/" + code)
+    check(st == 429, "while locked out even the right code is refused")
+    st, _, _ = request("GET", "/")
+    check(st == 200, "the real link keeps working meanwhile")
 
     print()
     print("ALL OK" if not FAILS else f"{len(FAILS)} FAILED")

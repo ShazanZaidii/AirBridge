@@ -173,7 +173,7 @@ class AirWebServerTest {
         val now = Regex("\"now\":(\\d+),").find(json)!!.groupValues[1].toLong()
         assertTrue(now >= before - 5_000 && now <= System.currentTimeMillis())
         val v = Regex("\"v\":\"([0-9a-f]+)\"").find(json)!!.groupValues[1]
-        assertEquals("{\"name\":\"Dad's \\u003cPhone>\",\"free\":12345,\"now\":$now,\"poll\":2000,\"v\":\"$v\",\"count\":0,\"peers\":[]," +
+        assertEquals("{\"name\":\"Dad's \\u003cPhone>\",\"free\":12345,\"now\":$now,\"poll\":2000,\"v\":\"$v\",\"gn\":0,\"act\":[],\"count\":0,\"peers\":[]," +
             "\"files\":[{\"id\":1,\"name\":\"a \\\"quoted\\\" name.txt\",\"size\":5,\"added\":0}]}", json)
     }
 

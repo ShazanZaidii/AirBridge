@@ -435,4 +435,34 @@
         <item quantity="one">%d சாதனம் இணைந்துள்ளது</item>
         <item quantity="other">%d சாதனங்கள் இணைந்துள்ளன</item>
     </plurals>
+    <string name="language">மொழி</string>
+    <string name="language_system">தொலைபேசியின் மொழி</string>
+    <string name="change">மாற்று</string>
+    <string name="connect_from_other">%1$s இந்த ஃபோனுடன் இணைகிறது. அங்கே AirBridge திறந்து Connect அழுத்தவும்.</string>
+    <string name="qr_none_found">அந்தப் படத்தில் QR குறியீடு இல்லை</string>
+    <string name="qr_capture">படம் எடு</string>
+    <string name="qr_choose_photo">படத்தைத் தேர்ந்தெடுங்கள்</string>
+    <string name="qr_torch">டார்ச்</string>
+    <string name="qr_open">திற</string>
+    <string name="qr_copy">நகல்</string>
+    <string name="qr_scan_again">மீண்டும் ஸ்கேன்</string>
+    <string name="qr_airweb_title">AirWeb இணைப்பு</string>
+    <string name="qr_airweb_sub">%1$s இல் உலாவியில் கோப்புகளைப் பகிரும் பக்கம். இது இணைப்புக் குறியீடு அல்ல. உலாவியில் திறக்கவா?</string>
+    <string name="qr_web_title">இணைய முகவரி, AirBridge குறியீடு அல்ல</string>
+    <string name="qr_wifi_title">Wi-Fi குறியீடு, AirBridge குறியீடு அல்ல</string>
+    <string name="qr_old_title">வேறு AirBridge குறியீடு</string>
+    <string name="qr_old_sub">இந்தப் பதிப்புக்கு இந்தக் குறியீடு புரியாது. இரண்டு சாதனங்களிலும் AirBridge ஐப் புதுப்பிக்கவும்.</string>
+    <string name="qr_other_title">AirBridge குறியீடு அல்ல</string>
+    <string name="aw_new_link">புதிய இணைப்பு</string>
+    <string name="aw_new_link_q">புதிய இணைப்பை உருவாக்கவா?</string>
+    <string name="aw_new_link_body">பழைய இணைப்பும் QR குறியீடும் புதியவர்களுக்கு வேலை செய்யாது. ஏற்கனவே திறந்த பக்கங்களில் புதிய இணைப்பு செய்தி தோன்றும்.</string>
+    <string name="aw_keeps_running">இந்தத் திரையை விட்டுச் சென்றாலும் AirWeb தொடர்ந்து இயங்கும். இங்கே அல்லது அதன் அறிவிப்பிலிருந்து நிறுத்தவும்.</string>
+    <string name="aw_need_short">குறுகிய இணைப்பு வேண்டுமா?</string>
+    <string name="aw_short_left">இன்னும் %1$s செயல்படும். அதே Wi-Fi தேவை.</string>
+    <string name="aw_short_expired">இந்தக் குறுகிய இணைப்பு காலாவதியானது.</string>
+    <string name="aw_short_new">புதிய குறுகிய இணைப்பு</string>
+    <string name="aw_short_copy">குறுகிய இணைப்பை நகலெடு</string>
+    <string name="aw_short_note">இதை மற்ற கணினியின் உலாவியில் தட்டச்சு செய்யவும். மேலுள்ள முழு இணைப்பே நம்பகமானது.</string>
+    <string name="aw_notif_title">AirWeb இயங்குகிறது</string>
+    <string name="aw_notif_waiting">உலாவிக்காகக் காத்திருக்கிறது</string>
 </resources>

@@ -435,4 +435,34 @@
         <item quantity="one">%d ડિવાઇસ જોડાયેલ છે</item>
         <item quantity="other">%d ડિવાઇસ જોડાયેલા છે</item>
     </plurals>
+    <string name="language">ભાષા</string>
+    <string name="language_system">ફોન મુજબ</string>
+    <string name="change">બદલો</string>
+    <string name="connect_from_other">%1$s આ ફોન સાથે જોડાય છે. ત્યાં AirBridge ખોલીને Connect દબાવો.</string>
+    <string name="qr_none_found">તે ચિત્રમાં QR કોડ મળ્યો નથી</string>
+    <string name="qr_capture">કેપ્ચર</string>
+    <string name="qr_choose_photo">ફોટો પસંદ કરો</string>
+    <string name="qr_torch">ટોર્ચ</string>
+    <string name="qr_open">ખોલો</string>
+    <string name="qr_copy">કૉપિ</string>
+    <string name="qr_scan_again">ફરી સ્કૅન કરો</string>
+    <string name="qr_airweb_title">AirWeb લિંક</string>
+    <string name="qr_airweb_sub">%1$s પર બ્રાઉઝરમાં ફાઇલો બદલવાનું પેજ. આ પેરિંગ કોડ નથી. બ્રાઉઝરમાં ખોલવું?</string>
+    <string name="qr_web_title">વેબ લિંક, AirBridge કોડ નથી</string>
+    <string name="qr_wifi_title">Wi-Fi કોડ, AirBridge કોડ નથી</string>
+    <string name="qr_old_title">અલગ AirBridge કોડ</string>
+    <string name="qr_old_sub">આ પેરિંગ કોડ આ આવૃત્તિ સમજતી નથી. બંને ડિવાઇસ પર AirBridge અપડેટ કરો.</string>
+    <string name="qr_other_title">AirBridge કોડ નથી</string>
+    <string name="aw_new_link">નવી લિંક</string>
+    <string name="aw_new_link_q">નવી લિંક બનાવવી?</string>
+    <string name="aw_new_link_body">જૂની લિંક અને QR કોડ નવા લોકો માટે બંધ થશે. જે પેજ ખુલ્લા છે તેમાં નવી લિંકનો સંદેશ દેખાશે.</string>
+    <string name="aw_keeps_running">આ સ્ક્રીન છોડ્યા પછી પણ AirWeb ચાલુ રહે છે. અહીંથી અથવા તેની નોટિફિકેશનથી બંધ કરો.</string>
+    <string name="aw_need_short">ટૂંકી લિંક જોઈએ?</string>
+    <string name="aw_short_left">હજુ %1$s ચાલશે. એ જ Wi-Fi જોઈએ.</string>
+    <string name="aw_short_expired">આ ટૂંકી લિંક પૂરી થઈ ગઈ.</string>
+    <string name="aw_short_new">નવી ટૂંકી લિંક લો</string>
+    <string name="aw_short_copy">ટૂંકી લિંક કૉપિ કરો</string>
+    <string name="aw_short_note">આને બીજા કમ્પ્યુટરના બ્રાઉઝરમાં ટાઇપ કરો. ઉપરની પૂરી લિંક જ ભરોસાપાત્ર છે.</string>
+    <string name="aw_notif_title">AirWeb ચાલુ છે</string>
+    <string name="aw_notif_waiting">બ્રાઉઝરની રાહ</string>
 </resources>
