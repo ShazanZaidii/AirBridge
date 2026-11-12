@@ -435,4 +435,34 @@
         <item quantity="one">%d పరికరం కనెక్ట్ అయింది</item>
         <item quantity="other">%d పరికరాలు కనెక్ట్ అయ్యాయి</item>
     </plurals>
+    <string name="language">భాష</string>
+    <string name="language_system">ఫోన్ ప్రకారం</string>
+    <string name="change">మార్చు</string>
+    <string name="connect_from_other">%1$s ఈ ఫోన్‌కు కనెక్ట్ అవుతుంది. అక్కడ AirBridge తెరిచి Connect నొక్కండి.</string>
+    <string name="qr_none_found">ఆ చిత్రంలో QR కోడ్ కనిపించలేదు</string>
+    <string name="qr_capture">క్యాప్చర్</string>
+    <string name="qr_choose_photo">ఫోటో ఎంచుకోండి</string>
+    <string name="qr_torch">టార్చ్</string>
+    <string name="qr_open">తెరవండి</string>
+    <string name="qr_copy">కాపీ</string>
+    <string name="qr_scan_again">మళ్లీ స్కాన్</string>
+    <string name="qr_airweb_title">AirWeb లింక్</string>
+    <string name="qr_airweb_sub">%1$s లో బ్రౌజర్‌లో ఫైళ్లు మార్చుకునే పేజీ. ఇది పెయిరింగ్ కోడ్ కాదు. బ్రౌజర్‌లో తెరవాలా?</string>
+    <string name="qr_web_title">వెబ్ లింక్, AirBridge కోడ్ కాదు</string>
+    <string name="qr_wifi_title">Wi-Fi కోడ్, AirBridge కోడ్ కాదు</string>
+    <string name="qr_old_title">వేరే AirBridge కోడ్</string>
+    <string name="qr_old_sub">ఈ వెర్షన్‌కు ఈ పెయిరింగ్ కోడ్ అర్థం కాదు. రెండు పరికరాల్లో AirBridge అప్‌డేట్ చేయండి.</string>
+    <string name="qr_other_title">AirBridge కోడ్ కాదు</string>
+    <string name="aw_new_link">కొత్త లింక్</string>
+    <string name="aw_new_link_q">కొత్త లింక్ చేయాలా?</string>
+    <string name="aw_new_link_body">పాత లింక్, QR కోడ్ కొత్తవారికి పని చేయవు. ఇప్పటికే తెరిచిన పేజీల్లో కొత్త లింక్ సందేశం కనిపిస్తుంది.</string>
+    <string name="aw_keeps_running">ఈ స్క్రీన్ వదిలినా AirWeb నడుస్తూనే ఉంటుంది. ఇక్కడ లేదా దాని నోటిఫికేషన్ నుండి ఆపండి.</string>
+    <string name="aw_need_short">చిన్న లింక్ కావాలా?</string>
+    <string name="aw_short_left">ఇంకా %1$s పనిచేస్తుంది. అదే Wi-Fi కావాలి.</string>
+    <string name="aw_short_expired">ఈ చిన్న లింక్ గడువు ముగిసింది.</string>
+    <string name="aw_short_new">కొత్త చిన్న లింక్</string>
+    <string name="aw_short_copy">చిన్న లింక్ కాపీ</string>
+    <string name="aw_short_note">దీన్ని ఇతర కంప్యూటర్ బ్రౌజర్‌లో టైప్ చేయండి. పైన ఉన్న పూర్తి లింక్కే నమ్మదగినది.</string>
+    <string name="aw_notif_title">AirWeb ఆన్‌లో ఉంది</string>
+    <string name="aw_notif_waiting">బ్రౌజర్ కోసం వేచి ఉంది</string>
 </resources>

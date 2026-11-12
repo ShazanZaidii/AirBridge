@@ -435,4 +435,34 @@
         <item quantity="one">%d डिवाइस जुड़ा है</item>
         <item quantity="other">%d डिवाइस जुड़े हैं</item>
     </plurals>
+    <string name="language">भाषा</string>
+    <string name="language_system">फ़ोन जैसी</string>
+    <string name="change">बदलें</string>
+    <string name="connect_from_other">%1$s इस फ़ोन से जुड़ता है। वहाँ AirBridge खोलकर Connect भी दबाएँ।</string>
+    <string name="qr_none_found">उस तस्वीर में कोई QR कोड नहीं मिला</string>
+    <string name="qr_capture">कैप्चर</string>
+    <string name="qr_choose_photo">फ़ोटो चुनें</string>
+    <string name="qr_torch">टॉर्च</string>
+    <string name="qr_open">खोलें</string>
+    <string name="qr_copy">कॉपी</string>
+    <string name="qr_scan_again">फिर स्कैन करें</string>
+    <string name="qr_airweb_title">AirWeb लिंक</string>
+    <string name="qr_airweb_sub">%1$s पर ब्राउज़र में फ़ाइलें बदलने का पेज। यह पेयरिंग कोड नहीं है। ब्राउज़र में खोलें?</string>
+    <string name="qr_web_title">वेब लिंक, AirBridge कोड नहीं</string>
+    <string name="qr_wifi_title">Wi-Fi कोड, AirBridge कोड नहीं</string>
+    <string name="qr_old_title">अलग तरह का AirBridge कोड</string>
+    <string name="qr_old_sub">यह पेयरिंग कोड इस संस्करण को समझ नहीं आता। दोनों डिवाइस पर AirBridge अपडेट करें।</string>
+    <string name="qr_other_title">AirBridge कोड नहीं है</string>
+    <string name="aw_new_link">नया लिंक</string>
+    <string name="aw_new_link_q">नया लिंक बनाएँ?</string>
+    <string name="aw_new_link_body">पुराना लिंक और QR कोड नए लोगों के लिए बंद हो जाएगा। जो पेज पहले से खुले हैं उन पर नए लिंक का संदेश दिखेगा।</string>
+    <string name="aw_keeps_running">इस स्क्रीन से बाहर जाने पर भी AirWeb चलता रहता है। इसे यहाँ से या इसकी नोटिफ़िकेशन से रोकें।</string>
+    <string name="aw_need_short">छोटा लिंक चाहिए?</string>
+    <string name="aw_short_left">%1$s और चलेगा। वही Wi-Fi चाहिए।</string>
+    <string name="aw_short_expired">यह छोटा लिंक समाप्त हो गया है।</string>
+    <string name="aw_short_new">नया छोटा लिंक लें</string>
+    <string name="aw_short_copy">छोटा लिंक कॉपी करें</string>
+    <string name="aw_short_note">इसे दूसरे कंप्यूटर के ब्राउज़र में टाइप करें। ऊपर वाला पूरा लिंक ही भरोसेमंद है।</string>
+    <string name="aw_notif_title">AirWeb चालू है</string>
+    <string name="aw_notif_waiting">ब्राउज़र का इंतज़ार</string>
 </resources>

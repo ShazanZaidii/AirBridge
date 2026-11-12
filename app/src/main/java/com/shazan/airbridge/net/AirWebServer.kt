@@ -34,14 +34,38 @@ import java.util.concurrent.atomic.AtomicLong
  *
  * Routes (all need `t`; `c` = the page's random client id, `w` = its device label, both optional):
  *  - `GET /` the page
- *  - `GET /api/state?c=&w=&v=` JSON: host name, free space, poll interval, who is connected, the pool
- *    (omitted, with `"same":true`, when `v` is the pool's current version)
- *  - `GET|HEAD /d/<id>[/<name>]` download one pool file
+ *  - `GET /api/state?c=&w=&v=&g=` JSON: host name, free space, poll interval, who is connected, the pool
+ *    (omitted, with `"same":true`, when `v` is the pool's current version) and what this browser has already
+ *    downloaded in full (`got`, sent only when it differs from the `gn` the browser last saw as `g`)
+ *  - `POST /api/short` a six-character short code for the link (10 minutes); `GET /j/<code>` redirects to the real link
+ *  - `GET|HEAD /d/<id>[/<name>]?c=` download one pool file
+ *  - `GET|HEAD /z?ids=1-40,1000001&c=` the listed pool files (all of them without `ids`) as one streamed ZIP
  *  - `POST /u?n=<file name>&c=&w=` upload one file into the pool, raw body, Content-Length required
  *  - `GET /qr.svg` the QR code of this page's own link (built from the `Host` header the browser used), so any
  *    connected browser can show it to bring in more people
  */
-class AirWebServer(val token: String, private val host: Host, private val limits: Limits = Limits()) {
+class AirWebServer(initialToken: String, private val host: Host, private val limits: Limits = Limits()) {
+
+    /** The session token of the current link. [rotate] replaces it; the old ones then answer "moved" (see below). */
+    @Volatile var token: String = initialToken
+        private set
+    /** Tokens that were replaced, so a page that is still open on one is told where the link went. */
+    private val retired = java.util.Collections.synchronizedList(ArrayList<String>())
+
+    /**
+     * Gives the session a new link: the old one stops working for new visitors, but a page already open on it is
+     * told (in its next poll) to move to the new one, and a refresh of it lands on the new page. Returns the new token.
+     */
+    fun rotate(newToken: String = newToken()): String {
+        synchronized(retired) {
+            retired.add(token)
+            while (retired.size > MAX_RETIRED) retired.removeAt(0)
+        }
+        token = newToken
+        return newToken
+    }
+
+    private fun isRetired(given: String?) = synchronized(retired) { retired.any { AirWebHttp.tokenMatches(given, it) } }
 
     /**
      * [added]: when it was offered (epoch ms), for "1 min ago" on the page. [by]: who put it in the pool (a device
@@ -83,6 +107,8 @@ class AirWebServer(val token: String, private val host: Host, private val limits
         fun onDownloaded(file: WebFile) {}
         /** The set of connected browsers changed. Called on a server thread: return quickly. */
         fun onPeersChanged(peers: List<Peer>) {}
+        /** Other addresses this host can be reached at (Wi-Fi, hotspot…), so a page can offer them if this one goes away. */
+        fun addresses(): List<String> = emptyList()
     }
 
     /** Every limit in one place; tests shrink them. */
@@ -107,6 +133,8 @@ class AirWebServer(val token: String, private val host: Host, private val limits
         val maxPeers: Int = 256,
         /** Files in the pool; uploads beyond this are refused. */
         val maxPool: Int = 1000,
+        /** Browsers whose "already downloaded" list is remembered (the least recently seen are forgotten). */
+        val maxDownloadLogs: Int = 512,
     )
 
     companion object {
@@ -117,6 +145,7 @@ class AirWebServer(val token: String, private val host: Host, private val limits
         private const val PROGRESS_EVERY = 256L * 1024
         private const val HEAD_STEP_MS = 5_000
         private const val MAX_PEERS_LISTED = 24
+        private const val MAX_RETIRED = 8
         private val rng = SecureRandom()
 
         /** 16 random bytes as 22 base64url characters. */
@@ -152,6 +181,26 @@ class AirWebServer(val token: String, private val host: Host, private val limits
     private var workers: java.util.concurrent.ThreadPoolExecutor? = null
     private var sweeper: java.util.concurrent.ScheduledExecutorService? = null
     private var rejecter: java.util.concurrent.ThreadPoolExecutor? = null
+
+    /** Which pool files each browser has received in full, and which it is receiving right now. */
+    private val logLock = Any()
+    private val gotBy = object : LinkedHashMap<String, MutableSet<Int>>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, MutableSet<Int>>?) = size > limits.maxDownloadLogs
+    }
+    private val activeBy = HashMap<String, HashMap<Int, Int>>()
+
+    private fun markGot(c: String?, id: Int) {
+        if (c != null) synchronized(logLock) { gotBy.getOrPut(c) { HashSet() }.add(id) }
+    }
+
+    private fun markActive(c: String?, id: Int, delta: Int) {
+        if (c == null) return
+        synchronized(logLock) {
+            val m = activeBy.getOrPut(c) { HashMap() }
+            val n = (m[id] ?: 0) + delta
+            if (n <= 0) { m.remove(id); if (m.isEmpty()) activeBy.remove(c) } else m[id] = n
+        }
+    }
 
     private val peerLock = Any()
     private val peerMap = LinkedHashMap<String, PeerRec>()
@@ -205,6 +254,7 @@ class AirWebServer(val token: String, private val host: Host, private val limits
         open.forEach { try { it.sock.close() } catch (_: IOException) {} }
         workers?.shutdown(); workers = null
         synchronized(peerLock) { peerMap.clear(); lastPeerKey = "" }
+        synchronized(logLock) { gotBy.clear(); activeBy.clear() }
     }
 
     private fun acceptLoop(ss: ServerSocket) {
@@ -362,7 +412,10 @@ class AirWebServer(val token: String, private val host: Host, private val limits
             sock.soTimeout = limits.idleMs
             conn.touch()
             if (req == null) { simple(out, 400, "Bad Request"); return }
+            // The one way in without the token: a short code that a connected page asked for (see AirWebShortLink).
+            if (req.path.startsWith("/j/") && (req.method == "GET" || req.method == "HEAD")) { shortJump(out, req); return }
             if (!AirWebHttp.tokenMatches(req.query["t"], token)) {
+                if (isRetired(req.query["t"])) { moved(out, req); return }
                 if (req.path == "/" && req.method == "GET") html(out, 403, "Forbidden", AirWebHttp.expiredPage())
                 else simple(out, 403, "Forbidden")
                 return
@@ -374,8 +427,16 @@ class AirWebServer(val token: String, private val host: Host, private val limits
                 }
                 req.path == "/api/state" -> if (req.method == "GET") state(out, req) else simple(out, 405, "Method Not Allowed")
                 req.path == "/qr.svg" -> if (req.method == "GET") qr(out, req) else simple(out, 405, "Method Not Allowed")
+                req.path == "/api/short" -> if (req.method == "POST") {
+                    val s = shortLink.issue()
+                    json(out, 200, "OK", "{\"code\":\"${s.code}\",\"ttl\":${s.secondsLeft}}")
+                } else simple(out, 405, "Method Not Allowed")
                 req.path.startsWith("/d/") -> when (req.method) {
                     "GET", "HEAD" -> download(conn, out, req)
+                    else -> simple(out, 405, "Method Not Allowed")
+                }
+                req.path == "/z" -> when (req.method) {
+                    "GET", "HEAD" -> zip(conn, out, req)
                     else -> simple(out, 405, "Method Not Allowed")
                 }
                 req.path == "/u" -> if (req.method == "POST") upload(conn, input, out, req) else simple(out, 405, "Method Not Allowed")
@@ -386,6 +447,41 @@ class AirWebServer(val token: String, private val host: Host, private val limits
             // Client went away, timed out, or storage failed; nothing more to answer. Never let it escape:
             // an uncaught exception on this thread would end the app.
         }
+    }
+
+    private val shortLink = AirWebShortLink()
+
+    /** The host screen's own "Need a short link?": the live short code (made now if none) and the seconds it has left. */
+    fun issueShort(): AirWebShortLink.Issued = shortLink.issue()
+
+    /** A request with a replaced token: the state poll is told the new link, a page load is sent there. */
+    private fun moved(out: OutputStream, req: AirWebHttp.Request) {
+        val to = "/?t=$token"
+        when {
+            req.path == "/api/state" && req.method == "GET" -> json(out, 200, "OK", "{\"moved\":${AirWebHttp.jsonString(to)}}")
+            req.path == "/" && (req.method == "GET" || req.method == "HEAD") -> {
+                val body = "This link was replaced. Opening the new one…\n".toByteArray()
+                out.write(AirWebHttp.head(302, "Found", "text/plain; charset=utf-8", body.size.toLong(), "Location: $to\r\n").toByteArray())
+                if (req.method != "HEAD") out.write(body)
+            }
+            else -> simple(out, 403, "Forbidden")
+        }
+        out.flush()
+    }
+
+    /** `GET /j/<code>`: on a match, sends the browser on to the real link; otherwise a plain explanation. */
+    private fun shortJump(out: OutputStream, req: AirWebHttp.Request) {
+        val given = req.path.removePrefix("/j/").trimEnd('/')
+        when (shortLink.check(given)) {
+            AirWebShortLink.Outcome.MATCH -> {
+                val body = "Opening AirWeb…\n".toByteArray()
+                out.write(AirWebHttp.head(302, "Found", "text/plain; charset=utf-8", body.size.toLong(), "Location: /?t=$token\r\n").toByteArray())
+                if (req.method != "HEAD") out.write(body)
+            }
+            AirWebShortLink.Outcome.MISS -> html(out, 404, "Not Found", AirWebHttp.shortMissPage("This short link has expired or isn't right", "On a device that is already connected, open the Invite section and ask for a new short link."))
+            AirWebShortLink.Outcome.LOCKED -> html(out, 429, "Too Many Requests", AirWebHttp.shortMissPage("Too many wrong tries", "Wait a minute, then type the short link again."))
+        }
+        out.flush()
     }
 
     private fun busy(out: OutputStream) {
@@ -412,6 +508,12 @@ class AirWebServer(val token: String, private val host: Host, private val limits
         out.write(b)
     }
 
+    /** Full links on every other address of the host, for a page to offer if its own address stops answering. */
+    private fun alternates(): List<String> = try {
+        val p = port
+        if (p == 0) emptyList() else host.addresses().take(4).map { url(it, p, token) }
+    } catch (_: Throwable) { emptyList() }
+
     private fun state(out: OutputStream, req: AirWebHttp.Request) {
         val c = AirWebHttp.cleanClientId(req.query["c"])
         touch(c, req.query["w"])
@@ -419,6 +521,14 @@ class AirWebServer(val token: String, private val host: Host, private val limits
         val pool = host.offered()
         val sig = AirWebHttp.signature(pool)
         val same = req.query["v"] == sig
+        // What this browser has received in full (and is receiving now), so the page can grey those files out.
+        val got: List<Int>
+        val act: List<Int>
+        if (c == null) { got = emptyList(); act = emptyList() } else synchronized(logLock) {
+            val ids = pool.mapTo(HashSet()) { it.id }
+            got = gotBy[c]?.also { it.retainAll(ids) }?.sorted().orEmpty()
+            act = activeBy[c]?.keys?.filter { it in ids }?.sorted().orEmpty()
+        }
         val sb = StringBuilder(256 + if (same) 0 else pool.size * 120)
         sb.append("{\"name\":").append(AirWebHttp.jsonString(host.deviceName()))
             .append(",\"free\":").append(host.freeSpace())
@@ -427,6 +537,8 @@ class AirWebServer(val token: String, private val host: Host, private val limits
             // The page polls this often: slower the more browsers there are, so 50 of them stay cheap.
             .append(",\"poll\":").append((2_000 + 100 * peers.size).coerceIn(2_000, 8_000))
             .append(",\"v\":\"").append(sig).append('"')
+            .append(",\"gn\":").append(got.size)
+            .append(",\"act\":[").append(act.joinToString(",")).append(']')
             .append(",\"count\":").append(peers.size)
             .append(",\"peers\":[")
         // With a big crowd only some names are listed; the asking page is always among them (it marks itself "you").
@@ -439,6 +551,9 @@ class AirWebServer(val token: String, private val host: Host, private val limits
             sb.append("{\"id\":").append(AirWebHttp.jsonString(p.id)).append(",\"name\":").append(AirWebHttp.jsonString(p.label)).append('}')
         }
         sb.append(']')
+        // Other addresses of this host (only when it has more than one), for a page that stops getting answers here.
+        alternates().takeIf { it.isNotEmpty() }?.let { alts -> sb.append(",\"alts\":[").append(alts.joinToString(",") { AirWebHttp.jsonString(it) }).append(']') }
+        if (c != null && req.query["g"] != got.size.toString()) sb.append(",\"got\":[").append(got.joinToString(",")).append(']')
         if (same) sb.append(",\"same\":true")
         else {
             sb.append(",\"files\":[")
@@ -477,6 +592,8 @@ class AirWebServer(val token: String, private val host: Host, private val limits
             return
         }
         if (!acquireSlot(conn)) { busy(out); return }
+        val client = AirWebHttp.cleanClientId(req.query["c"])
+        markActive(client, f.id, 1)
         try {
             val stream: InputStream? = try { host.open(f) } catch (_: Exception) { null }
             if (stream == null) { simple(out, 410, "Gone"); return } // the sharing app took its grant back
@@ -497,8 +614,47 @@ class AirWebServer(val token: String, private val host: Host, private val limits
                     conn.touch()
                 }
                 out.flush()
-                if (f.size < 0 || sent == f.size) try { host.onDownloaded(f) } catch (_: Throwable) {}
+                if (f.size < 0 || sent == f.size) { markGot(client, f.id); try { host.onDownloaded(f) } catch (_: Throwable) {} }
             }
+        } finally {
+            markActive(client, f.id, -1)
+            slots.release()
+        }
+    }
+
+    /** Several pool files as one ZIP, streamed (see [AirWebZip]); each file counts as downloaded once it is through. */
+    private fun zip(conn: Conn, out: OutputStream, req: AirWebHttp.Request) {
+        val client = AirWebHttp.cleanClientId(req.query["c"])
+        val pool = host.offered()
+        val wanted = AirWebHttp.parseIds(req.query["ids"], limits.maxPool * 4)
+        val byId = pool.associateBy { it.id }
+        val chosen = if (wanted == null) pool else wanted.mapNotNull { byId[it] }
+        // Only what can be read right now: the archive's length is announced up front.
+        val files = chosen.filter { f -> try { host.open(f)?.also { it.close() } != null } catch (_: Exception) { false } }
+        if (chosen.isEmpty()) { simple(out, 404, "Not Found"); return }
+        if (files.isEmpty()) { simple(out, 410, "Gone"); return }
+        val now = System.currentTimeMillis()
+        val archive = AirWebZip(files.map { f ->
+            AirWebZip.Entry(f.name, f.size, if (f.added > 0) f.added else now) { try { host.open(f) } catch (_: Exception) { null } }
+        })
+        val extra = "Content-Disposition: ${AirWebHttp.contentDisposition("AirWeb-${files.size}-files.zip")}\r\n"
+        if (req.method == "HEAD") {
+            out.write(AirWebHttp.head(200, "OK", "application/zip", archive.length.takeIf { it >= 0 }, extra).toByteArray())
+            return
+        }
+        if (!acquireSlot(conn)) { busy(out); return }
+        try {
+            out.write(AirWebHttp.head(200, "OK", "application/zip", archive.length.takeIf { it >= 0 }, extra).toByteArray())
+            // Every 64 KB written counts as progress, so a big file in the archive isn't mistaken for a stalled socket.
+            val touching = object : OutputStream() {
+                override fun write(b: Int) { out.write(b) }
+                override fun write(b: ByteArray, off: Int, len: Int) { out.write(b, off, len); conn.touch() }
+            }
+            archive.write(touching) { i ->
+                markGot(client, files[i].id)
+                try { host.onDownloaded(files[i]) } catch (_: Throwable) {}
+            }
+            out.flush()
         } finally {
             slots.release()
         }
@@ -635,6 +791,26 @@ internal object AirWebHttp {
         URLDecoder.decode(if (plusIsSpace) s else s.replace("+", "%2B"), "UTF-8")
     } catch (_: IllegalArgumentException) { null }
 
+    /**
+     * `1-40,1000001,1000003-1000010` → the ids in that order (no repeats), or null when [raw] is absent or blank (meaning
+     * "everything"). Anything malformed is skipped; at most [limit] ids come back.
+     */
+    fun parseIds(raw: String?, limit: Int): List<Int>? {
+        if (raw.isNullOrBlank()) return null
+        val out = LinkedHashSet<Int>()
+        for (part in raw.split(',')) {
+            val t = part.trim()
+            if (t.isEmpty() || out.size >= limit) continue
+            val dash = t.indexOf('-')
+            val a = (if (dash < 0) t else t.substring(0, dash)).toIntOrNull() ?: continue
+            val b = if (dash < 0) a else t.substring(dash + 1).toIntOrNull() ?: continue
+            if (a < 0 || b < a) continue
+            var id = a
+            while (id <= b && out.size < limit) { out.add(id); id++ }
+        }
+        return out.toList()
+    }
+
     /** [matrix] (rows of modules, true = dark) as an SVG with the 4-module quiet zone scanners need, black on white. */
     fun qrSvg(matrix: Array<BooleanArray>): String {
         val n = matrix.size
@@ -740,6 +916,12 @@ internal object AirWebHttp {
         }
         append('"')
     }
+
+    fun shortMissPage(title: String, detail: String): String = """<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1"><title>AirWeb</title>
+<style>body{font-family:-apple-system,system-ui,"Segoe UI",Roboto,sans-serif;background:#f4f4f3;color:#1b1b1b;margin:0;padding:24px;line-height:1.5}
+@media (prefers-color-scheme:dark){body{background:#161616;color:#ececec}}main{max-width:32rem;margin:10vh auto}</style></head>
+<body><main><h1 style="font-size:1.4rem">${escapeHtml(title)}</h1><p>${escapeHtml(detail)}</p></main></body></html>"""
 
     fun expiredPage(): String = """<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1"><title>AirWeb</title>
