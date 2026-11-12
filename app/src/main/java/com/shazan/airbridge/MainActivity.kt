@@ -783,6 +783,7 @@ private fun DevicesScreen(
     // The lease holder as the input half reports it: cleared the moment its session ends (§8.6).
     val controller by InputRouter.controlledBy.collectAsState()
     var forgetting by remember { mutableStateOf<PairedPeer?>(null) }
+    val airWeb by AirWebSession.current.collectAsState()
     val readyPeers by InputRouter.peers.collectAsState()
     val resumeTick = rememberResumeTick()
     val serviceRunning by AirBridgeInputService.runningFlow.collectAsState()
@@ -830,6 +831,8 @@ private fun DevicesScreen(
                 Text(stringResource(R.string.this_phone_named, myName), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
+            // AirWeb goes on after its screen closes: show that it is on, and let it be stopped from here too.
+            airWeb?.let { m -> item(key = "airweb-running") { AirWebRunningCard(m) } }
             val list = transfers.values.sortedBy { it.key }
             if (list.isNotEmpty()) {
                 item { SectionHeader(stringResource(R.string.transfers)) }

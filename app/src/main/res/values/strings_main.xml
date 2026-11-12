@@ -175,4 +175,5 @@
     <string name="aw_short_note">Type it in the other computer\'s browser. The full link above is still the one to trust.</string>
     <string name="aw_notif_title">AirWeb is on</string>
     <string name="aw_notif_waiting">Waiting for a browser</string>
+    <string name="aw_running">AirWeb is running</string>
 </resources>

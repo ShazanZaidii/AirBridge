@@ -465,4 +465,5 @@
     <string name="aw_short_note">దీన్ని ఇతర కంప్యూటర్ బ్రౌజర్‌లో టైప్ చేయండి. పైన ఉన్న పూర్తి లింక్కే నమ్మదగినది.</string>
     <string name="aw_notif_title">AirWeb ఆన్‌లో ఉంది</string>
     <string name="aw_notif_waiting">బ్రౌజర్ కోసం వేచి ఉంది</string>
+    <string name="aw_running">AirWeb నడుస్తోంది</string>
 </resources>

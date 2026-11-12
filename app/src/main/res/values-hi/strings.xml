@@ -465,4 +465,5 @@
     <string name="aw_short_note">इसे दूसरे कंप्यूटर के ब्राउज़र में टाइप करें। ऊपर वाला पूरा लिंक ही भरोसेमंद है।</string>
     <string name="aw_notif_title">AirWeb चालू है</string>
     <string name="aw_notif_waiting">ब्राउज़र का इंतज़ार</string>
+    <string name="aw_running">AirWeb चल रहा है</string>
 </resources>

@@ -465,4 +465,5 @@
     <string name="aw_short_note">Tippe ihn im Browser des anderen Computers ein. Der vollständige Link oben bleibt der vertrauenswürdige.</string>
     <string name="aw_notif_title">AirWeb ist an</string>
     <string name="aw_notif_waiting">Wartet auf einen Browser</string>
+    <string name="aw_running">AirWeb läuft</string>
 </resources>

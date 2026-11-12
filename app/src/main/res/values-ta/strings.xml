@@ -465,4 +465,5 @@
     <string name="aw_short_note">இதை மற்ற கணினியின் உலாவியில் தட்டச்சு செய்யவும். மேலுள்ள முழு இணைப்பே நம்பகமானது.</string>
     <string name="aw_notif_title">AirWeb இயங்குகிறது</string>
     <string name="aw_notif_waiting">உலாவிக்காகக் காத்திருக்கிறது</string>
+    <string name="aw_running">AirWeb இயங்குகிறது</string>
 </resources>
