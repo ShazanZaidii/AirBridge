@@ -384,6 +384,36 @@ object Hub : PeerBus.Transport {
 
     // ---- user actions ----
 
+    /**
+     * The user tapped Disconnect, whichever way the device is reached. A Wi-Fi device we dial is handled by
+     * [WsClient]; one that dialled us (we are its host) or a Nearby one is closed here, with `bye user` so it
+     * does not come straight back, and stays that way until Connect.
+     */
+    fun disconnect(peerId: String) {
+        val p = PairStore.get(peerId) ?: return
+        if (p.via == "lan") { WsClient.disconnect(peerId); return }
+        PairStore.setUserPause(peerId, DisconnectBy.SELF)
+        val o = Outcome.Ended("user disconnect")
+        ready[peerId]?.close(o, "user")
+        sessions.filter { it.peerId == peerId }.forEach { it.close(o, "user") }
+        NearbyTransport.dropEndpoints(peerId)
+        recomputeStatus()
+    }
+
+    /**
+     * The user tapped Connect. A device we dial is dialled now; a Nearby one is asked again; one that dials us
+     * (this phone is its host) can only be let back in: the lift here means it is welcome, but the other device
+     * has to reconnect. Returns false for that last case so the screen can say so.
+     */
+    fun connect(peerId: String): Boolean {
+        val p = PairStore.get(peerId) ?: return false
+        return when (p.via) {
+            "lan" -> { if (!WsClient.connect(peerId)) com.shazan.airbridge.AirBridgeService.start(app); true }
+            "nearby" -> { PairStore.setUserPause(peerId, null); NearbyTransport.reconnect(peerId); recomputeStatus(); true }
+            else -> { PairStore.setUserPause(peerId, null); recomputeStatus(); false }
+        }
+    }
+
     /** Forget a device: send `unpair` if connected, then delete locally (§3.5). */
     fun forget(peerId: String) {
         ready[peerId]?.let { s ->

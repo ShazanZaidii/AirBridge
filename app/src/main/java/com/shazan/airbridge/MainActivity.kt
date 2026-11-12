@@ -25,6 +25,7 @@ import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -34,6 +35,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -66,6 +68,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -148,6 +151,8 @@ fun isVpnActive(context: Context): Boolean {
 private val pendingPairLink = mutableStateOf<String?>(null)
 
 class MainActivity : ComponentActivity() {
+    override fun attachBaseContext(newBase: Context) { super.attachBaseContext(AppLanguage.wrap(newBase)) }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // The app is always dark: light status / navigation bar icons whatever the system theme is.
@@ -412,9 +417,9 @@ private fun AirBridgeRoot() {
             onOpenSettings = { screen = Screen.SETTINGS },
         )
 
-        Screen.SCANNER -> CameraScannerScreen(
+        Screen.SCANNER -> QrScannerScreen(
             onCancel = { screen = Screen.ADD },
-            onScanned = { raw -> handlePairLink(raw) },
+            onPair = { raw -> handlePairLink(raw) },
         )
     }
 }
@@ -778,6 +783,7 @@ private fun DevicesScreen(
     // The lease holder as the input half reports it: cleared the moment its session ends (§8.6).
     val controller by InputRouter.controlledBy.collectAsState()
     var forgetting by remember { mutableStateOf<PairedPeer?>(null) }
+    val airWeb by AirWebSession.current.collectAsState()
     val readyPeers by InputRouter.peers.collectAsState()
     val resumeTick = rememberResumeTick()
     val serviceRunning by AirBridgeInputService.runningFlow.collectAsState()
@@ -825,6 +831,8 @@ private fun DevicesScreen(
                 Text(stringResource(R.string.this_phone_named, myName), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
+            // AirWeb goes on after its screen closes: show that it is on, and let it be stopped from here too.
+            airWeb?.let { m -> item(key = "airweb-running") { AirWebRunningCard(m) } }
             val list = transfers.values.sortedBy { it.key }
             if (list.isNotEmpty()) {
                 item { SectionHeader(stringResource(R.string.transfers)) }
@@ -849,9 +857,11 @@ private fun DevicesScreen(
                                 .putExtra(TrackpadActivity.EXTRA_MODE, mode.name),
                         )
                     },
-                    onDisconnect = { WsClient.disconnect(peer.id) },
+                    onDisconnect = { Hub.disconnect(peer.id) },
                     onConnect = {
-                        if (!WsClient.connect(peer.id)) AirBridgeService.start(ctx)
+                        AirBridgeService.start(ctx)
+                        // A device that dials this phone can't be dialled back from here: say what to do.
+                        if (!Hub.connect(peer.id)) toast(ctx, ctx.getString(R.string.connect_from_other, peer.name))
                     },
                 )
             }
@@ -883,9 +893,10 @@ private fun DeviceCard(
         else -> stringResource(R.string.st_offline) to ChipTone.NEUTRAL
     }
     val desktop = peer.plat == "macos" || peer.plat == "windows" || peer.plat == "linux"
-    val lan = peer.via == "lan"
-    val canDisconnect = lan && (status == PeerStatus.CONNECTED || status == PeerStatus.CONNECTING || status == PeerStatus.RECONNECTING)
-    val canConnect = lan && (disconnected || status == PeerStatus.OFFLINE)
+    // Every device gets the same choices, whichever way it is reached (this phone dials it, it dials this
+    // phone, or Nearby): a menu with only "Forget" looked broken.
+    val canDisconnect = status == PeerStatus.CONNECTED || status == PeerStatus.CONNECTING || status == PeerStatus.RECONNECTING
+    val canConnect = disconnected || status == PeerStatus.OFFLINE
     AbCard {
         Row(
             Modifier.fillMaxWidth().padding(start = Dimens.md, top = Dimens.md, bottom = Dimens.md, end = Dimens.xs),
@@ -1039,72 +1050,6 @@ private fun TransferCard(t: TransferUi) {
     }
 }
 
-// ---- QR scanner ----
-
-@Composable
-private fun CameraScannerScreen(onCancel: () -> Unit, onScanned: (String) -> Boolean) {
-    BackHandler(onBack = onCancel)
-    val ctx = LocalContext.current
-    val owner = LocalLifecycleOwner.current
-    val providerFuture = remember { ProcessCameraProvider.getInstance(ctx) }
-    val executor = remember { Executors.newSingleThreadExecutor() }
-    val preview = remember { Preview.Builder().build() }
-    val analyzerHolder = remember { arrayOfNulls<QrCodeAnalyzer>(1) }
-    val analysis = remember {
-        val analyzer = QrCodeAnalyzer { raw ->
-            ContextCompat.getMainExecutor(ctx).execute { if (!onScanned(raw)) analyzerHolder[0]?.reset() }
-        }
-        analyzerHolder[0] = analyzer
-        ImageAnalysis.Builder().setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST).build()
-            .also { it.setAnalyzer(executor, analyzer) }
-    }
-    // Unbind the camera and stop the analyzer thread when leaving the scanner.
-    DisposableEffect(Unit) {
-        onDispose {
-            try { if (providerFuture.isDone) providerFuture.get().unbind(preview, analysis) } catch (_: Exception) {}
-            analysis.clearAnalyzer()
-            analyzerHolder[0]?.close()
-            executor.shutdown()
-        }
-    }
-
-    Box(Modifier.fillMaxSize()) {
-        AndroidView(
-            factory = { c ->
-                val view = PreviewView(c)
-                preview.setSurfaceProvider(view.surfaceProvider)
-                providerFuture.addListener({
-                    try {
-                        if (owner.lifecycle.currentState != Lifecycle.State.DESTROYED) {
-                            providerFuture.get().bindToLifecycle(owner, CameraSelector.DEFAULT_BACK_CAMERA, preview, analysis)
-                        }
-                    } catch (_: Exception) {
-                        toast(c, c.getString(R.string.camera_unavailable))
-                    }
-                }, ContextCompat.getMainExecutor(c))
-                view
-            },
-            modifier = Modifier.fillMaxSize(),
-        )
-        // Viewfinder frame.
-        Box(
-            Modifier.align(Alignment.Center).size(240.dp)
-                .border(3.dp, MaterialTheme.colorScheme.primary, MaterialTheme.shapes.extraLarge),
-        )
-        Surface(color = MaterialTheme.colorScheme.scrim, modifier = Modifier.fillMaxWidth().align(Alignment.TopCenter)) {
-            Row(Modifier.statusBarsPadding().padding(Dimens.sm), verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onCancel) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back)) }
-                Spacer(Modifier.width(Dimens.sm))
-                Column {
-                    Text(stringResource(R.string.scan_the_code), style = MaterialTheme.typography.titleMedium)
-                    Text(stringResource(R.string.scan_the_code_sub), style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
-        }
-    }
-}
-
 // ---- Settings ----
 
 @Composable
@@ -1122,6 +1067,8 @@ private fun SettingsScreen(onBack: () -> Unit, onOpenLinkDebug: () -> Unit) {
     var autoConnect by remember { mutableStateOf(prefs.getBoolean(WsClient.PREF_AUTO_CONNECT, true)) }
     var visible by remember { mutableStateOf(prefs.getBoolean(NearbyTransport.PREF_VISIBLE, false)) }
     var renaming by remember { mutableStateOf(false) }
+    var pickingLanguage by remember { mutableStateOf(false) }
+    var language by remember { mutableStateOf(AppLanguage.current(ctx)) }
 
     val canWriteSettings = remember(resumeTick) { Settings.System.canWrite(ctx) }
     val dndAccess = remember(resumeTick) { ctx.getSystemService(NotificationManager::class.java)?.isNotificationPolicyAccessGranted == true }
@@ -1157,6 +1104,33 @@ private fun SettingsScreen(onBack: () -> Unit, onOpenLinkDebug: () -> Unit) {
         )
     }
 
+    if (pickingLanguage) {
+        AlertDialog(
+            onDismissRequest = { pickingLanguage = false },
+            title = { Text(stringResource(R.string.language)) },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    for ((tag, label) in AppLanguage.choices) {
+                        val shown = if (tag.isEmpty()) stringResource(R.string.language_system) else label
+                        Row(
+                            Modifier.fillMaxWidth().heightIn(min = Dimens.touch).clickable {
+                                pickingLanguage = false
+                                language = tag
+                                AppLanguage.set(ctx, tag) { (ctx as? android.app.Activity)?.recreate() }
+                            },
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            RadioButton(selected = tag == language, onClick = null)
+                            Spacer(Modifier.width(Dimens.md))
+                            Text(shown, style = MaterialTheme.typography.bodyLarge)
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { pickingLanguage = false }) { Text(stringResource(R.string.cancel)) } },
+        )
+    }
+
     // Long-press the title: hidden Wi-Fi Direct test screen (device tests S-W2/S-W3/S-W4).
     AbScaffold(title = stringResource(R.string.settings), onBack = onBack, onTitleLongPress = onOpenLinkDebug) {
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
@@ -1178,6 +1152,13 @@ private fun SettingsScreen(onBack: () -> Unit, onOpenLinkDebug: () -> Unit) {
                 InfoRow(title = stringResource(R.string.airweb), subtitle = stringResource(R.string.airweb_settings_sub), trailing = {
                     TextButton(onClick = { ctx.startActivity(AirWebActivity.intent(ctx, emptyList())) }, modifier = Modifier.height(Dimens.touch)) { Text(stringResource(R.string.open)) }
                 })
+                RowDivider()
+                InfoRow(
+                    title = stringResource(R.string.language),
+                    subtitle = AppLanguage.choices.firstOrNull { it.first == language && it.first.isNotEmpty() }?.second ?: stringResource(R.string.language_system),
+                    modifier = Modifier.clickable { pickingLanguage = true },
+                    trailing = { TextButton(onClick = { pickingLanguage = true }, modifier = Modifier.height(Dimens.touch)) { Text(stringResource(R.string.change)) } },
+                )
             }
 
             SectionHeader(stringResource(R.string.connection))

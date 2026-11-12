@@ -435,4 +435,35 @@
         <item quantity="one">%d Gerät verbunden</item>
         <item quantity="other">%d Geräte verbunden</item>
     </plurals>
+    <string name="language">Sprache</string>
+    <string name="language_system">Wie das Telefon</string>
+    <string name="change">Ändern</string>
+    <string name="connect_from_other">%1$s verbindet sich mit diesem Telefon. Öffne dort AirBridge und tippe auf Verbinden.</string>
+    <string name="qr_none_found">Kein QR-Code in diesem Bild gefunden</string>
+    <string name="qr_capture">Aufnehmen</string>
+    <string name="qr_choose_photo">Foto wählen</string>
+    <string name="qr_torch">Taschenlampe</string>
+    <string name="qr_open">Öffnen</string>
+    <string name="qr_copy">Kopieren</string>
+    <string name="qr_scan_again">Erneut scannen</string>
+    <string name="qr_airweb_title">Ein AirWeb-Link</string>
+    <string name="qr_airweb_sub">Eine Seite auf %1$s zum Dateiaustausch im Browser. Kein Kopplungscode. Im Browser öffnen?</string>
+    <string name="qr_web_title">Ein Weblink, kein AirBridge-Code</string>
+    <string name="qr_wifi_title">Ein WLAN-Code, kein AirBridge-Code</string>
+    <string name="qr_old_title">Ein anderer AirBridge-Code</string>
+    <string name="qr_old_sub">Diese Version versteht diesen Kopplungscode nicht. Aktualisiere AirBridge auf beiden Geräten.</string>
+    <string name="qr_other_title">Kein AirBridge-Code</string>
+    <string name="aw_new_link">Neuer Link</string>
+    <string name="aw_new_link_q">Neuen Link erstellen?</string>
+    <string name="aw_new_link_body">Der alte Link und QR-Code funktionieren für Neue nicht mehr. Bereits offene Seiten zeigen eine Meldung mit dem neuen Link.</string>
+    <string name="aw_keeps_running">AirWeb läuft weiter, wenn du diesen Bildschirm verlässt. Beende es hier oder über die Benachrichtigung.</string>
+    <string name="aw_need_short">Kurzen Link nötig?</string>
+    <string name="aw_short_left">Gilt noch %1$s. Gleiches WLAN nötig.</string>
+    <string name="aw_short_expired">Dieser Kurzlink ist abgelaufen.</string>
+    <string name="aw_short_new">Neuen Kurzlink holen</string>
+    <string name="aw_short_copy">Kurzlink kopieren</string>
+    <string name="aw_short_note">Tippe ihn im Browser des anderen Computers ein. Der vollständige Link oben bleibt der vertrauenswürdige.</string>
+    <string name="aw_notif_title">AirWeb ist an</string>
+    <string name="aw_notif_waiting">Wartet auf einen Browser</string>
+    <string name="aw_running">AirWeb läuft</string>
 </resources>
