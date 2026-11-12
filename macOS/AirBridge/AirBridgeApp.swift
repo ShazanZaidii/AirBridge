@@ -153,6 +153,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
                     try? "http://127.0.0.1:\(sess.port)/?t=\(sess.token)".write(toFile: out, atomically: true, encoding: .utf8)
                 }
             }
+            // airbridge://debug/airweb_newlink?out=/path — a new link on purpose; writes the new local link to that file.
+            if url.path == "/airweb_newlink", let sess = AirWebWindow.shared.session {
+                sess.newLink()
+                if let out = q.first(where: { $0.name == "out" })?.value {
+                    try? "http://127.0.0.1:\(sess.port)/?t=\(sess.token)".write(toFile: out, atomically: true, encoding: .utf8)
+                }
+            }
+            // airbridge://debug/airweb_close — closes only the window (AirWeb keeps running).
+            if url.path == "/airweb_close" { AirWebWindow.shared.debugCloseWindow() }
             // airbridge://debug/airweb_stop — closes AirWeb.
             if url.path == "/airweb_stop" { AirWebWindow.shared.stop() }
             // airbridge://debug/pro_setup?to=ID — the Pro Mirroring setup window.

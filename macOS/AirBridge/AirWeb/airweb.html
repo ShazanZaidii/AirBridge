@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="light dark">
 <meta name="referrer" content="no-referrer">
 <title>{{NAME}} · AirWeb</title>
@@ -10,70 +10,165 @@
   :root {
     --bg: #f4f4f3; --card: #ffffff; --line: #dcdcda; --text: #1b1b1b; --muted: #5f5f5c;
     --btn: #1b1b1b; --btn-text: #ffffff; --track: #e6e6e4; --fill: #3a3a3a; --bad: #9a2c22; --chip: #ececea;
+    --hover: #f2f2f0; --sel: #e7e7e4;
+    --r-card: 20px; --r-row: 16px; --r-btn: 12px;
   }
   @media (prefers-color-scheme: dark) {
     :root {
       --bg: #161616; --card: #1f1f1f; --line: #353533; --text: #ececea; --muted: #a3a3a0;
       --btn: #ececea; --btn-text: #161616; --track: #333331; --fill: #cfcfcc; --bad: #e08a80; --chip: #2b2b29;
+      --hover: #272725; --sel: #333331;
     }
   }
-  * { box-sizing: border-box; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
   body {
     margin: 0; background: var(--bg); color: var(--text);
     font-family: -apple-system, BlinkMacSystemFont, system-ui, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     font-size: 17px; line-height: 1.45;
   }
+  :focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
   main { max-width: 40rem; margin: 0 auto; padding: 1.25rem 1rem 3rem; }
+  body.sheet-on main { padding-bottom: 11rem; }
   header { margin: 0.5rem 0 1.25rem; }
   .eyebrow { font-size: 0.8rem; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); margin: 0; }
   h1 { font-size: 1.5rem; line-height: 1.25; margin: 0.2rem 0 0.4rem; word-wrap: break-word; overflow-wrap: anywhere; }
-  h2 { font-size: 1.05rem; margin: 0 0 0.25rem; }
+  h2 { font-size: 1.1rem; margin: 0; }
   .status { display: flex; align-items: flex-start; gap: 0.5rem; color: var(--muted); font-size: 0.95rem; margin: 0; }
   .dot { flex: none; width: 0.55rem; height: 0.55rem; border-radius: 50%; background: var(--muted); margin-top: 0.45rem; }
   .status.bad { color: var(--bad); }
   .status.bad .dot { background: var(--bad); }
+  .banner { margin: 0.75rem 0 0; padding: 0.75rem 0.9rem; border-radius: var(--r-row); background: var(--card); border: 2px solid var(--text); }
+  .banner-text { margin: 0; font-size: 0.95rem; font-weight: 600; }
+  .banner-links { display: grid; gap: 0.4rem; margin-top: 0.6rem; }
+  .banner-links a { display: block; padding: 0.6rem 0.8rem; min-height: 2.75rem; border-radius: var(--r-btn); background: var(--btn); color: var(--btn-text); text-decoration: none; font-weight: 600; font-size: 0.9rem; overflow-wrap: anywhere; }
   .who { display: flex; flex-wrap: wrap; gap: 0.35rem; margin: 0.6rem 0 0; padding: 0; list-style: none; }
-  .who li { display: block; padding: 0.15rem 0.6rem; border-radius: 999px; background: var(--chip); font-size: 0.82rem; color: var(--muted); border: 0; }
+  .who li { display: block; padding: 0.15rem 0.65rem; border-radius: 999px; background: var(--chip); font-size: 0.82rem; color: var(--muted); border: 0; }
   .who li.me { color: var(--text); font-weight: 600; }
-  section { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 1rem; margin-bottom: 1rem; }
-  .lead { color: var(--muted); font-size: 0.9rem; margin: 0 0 0.75rem; }
-  ul.list { list-style: none; margin: 0; padding: 0; }
-  ul.list li { display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem 0; border-top: 1px solid var(--line); }
-  ul.list li:first-child { border-top: 0; padding-top: 0.25rem; }
+  section { background: var(--card); border: 1px solid var(--line); border-radius: var(--r-card); padding: 1rem; margin-bottom: 1rem; }
+  .sec-head { display: flex; align-items: center; flex-wrap: wrap; gap: 0.4rem 0.6rem; margin: 0 0 0.35rem; min-height: 2.75rem; }
+  .pill { display: inline-block; min-width: 1.6rem; padding: 0.05rem 0.55rem; border-radius: 999px; background: var(--chip); color: var(--muted); font-size: 0.82rem; font-weight: 600; text-align: center; }
+  .head-actions { display: flex; gap: 0.5rem; margin-left: auto; }
+  .lead { color: var(--muted); font-size: 0.9rem; margin: 0 0 0.6rem; }
+  .hint { color: var(--muted); font-size: 0.875rem; margin: 0.6rem 0 0; }
+  .empty { color: var(--muted); margin: 0.25rem 0 0; }
+  .hidden { display: none !important; }
+
+  /* rows: soft rounded cards that light up as a whole, no hard dividers */
+  ul.list { list-style: none; margin: 0 -0.5rem; padding: 0; display: grid; gap: 0.3rem; }
+  ul.list:empty { display: none; }
+  ul.list li { display: flex; align-items: center; gap: 0.75rem; padding: 0.55rem 0.75rem; border-radius: var(--r-row); background: transparent; transition: background-color 0.15s ease, box-shadow 0.15s ease; }
+  @media (hover: hover) { ul.list li.pick:hover { background: var(--hover); } }
+  ul.list li.pick { cursor: pointer; }
+  ul.list li.pick:active { background: var(--sel); }
   .info { flex: 1 1 auto; min-width: 0; }
-  .name { margin: 0; word-wrap: break-word; overflow-wrap: anywhere; }
+  .name { margin: 0; word-wrap: break-word; overflow-wrap: anywhere; font-weight: 500; }
   .sub { margin: 0.1rem 0 0; color: var(--muted); font-size: 0.875rem; }
   .sub.bad { color: var(--bad); }
+  ul.list li.got .info { opacity: 0.6; }
+  ul.list li.sel { background: var(--sel); box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--text) 35%, transparent); }
+
+  /* buttons */
   .btn {
-    display: inline-block; flex: none; min-height: 2.75rem; padding: 0.6rem 1.1rem; border-radius: 10px;
-    font: inherit; font-size: 0.95rem; font-weight: 600; text-align: center; text-decoration: none; cursor: pointer;
+    display: inline-flex; align-items: center; justify-content: center; gap: 0.45rem; flex: none; min-height: 2.75rem; padding: 0.55rem 1.05rem;
+    border-radius: var(--r-btn); font: inherit; font-size: 0.95rem; font-weight: 600; text-align: center; text-decoration: none; cursor: pointer;
     border: 1px solid var(--line); background: var(--card); color: var(--text); -webkit-appearance: none; appearance: none;
+    transition: background-color 0.15s ease, transform 0.12s ease, opacity 0.15s ease;
   }
+  @media (hover: hover) { .btn:hover { background: var(--hover); } .btn.primary:hover { opacity: 0.88; background: var(--btn); } }
+  .btn:active { transform: scale(0.97); }
   .btn.primary { background: var(--btn); color: var(--btn-text); border-color: var(--btn); }
-  .btn.wide { display: block; width: 100%; }
   .btn[disabled] { opacity: 0.5; cursor: default; }
-  .row-actions { margin-top: 0.75rem; }
-  .empty { color: var(--muted); margin: 0; }
-  .picker { position: relative; display: block; overflow: hidden; }
-  .picker input { position: absolute; left: 0; top: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; font-size: 100px; }
-  .hint { color: var(--muted); font-size: 0.875rem; margin: 0.6rem 0 0; }
+  .btn svg { width: 1.15rem; height: 1.15rem; flex: none; }
+  ul.list li.got .btn { color: var(--muted); font-weight: 500; }
+  .chipbtn {
+    display: inline-flex; align-items: center; justify-content: center; min-height: 2.75rem; padding: 0.3rem 1rem; border-radius: 999px;
+    font: inherit; font-size: 0.9rem; font-weight: 600; cursor: pointer; color: var(--text); background: var(--chip); border: 1px solid transparent;
+    transition: background-color 0.15s ease, transform 0.12s ease;
+  }
+  @media (hover: hover) { .chipbtn:hover { background: var(--sel); } }
+  .chipbtn:active { transform: scale(0.96); }
+  .chipbtn.solid { background: var(--btn); color: var(--btn-text); }
+  .others-modes, .selecting-modes { display: none; gap: 0.5rem; }
+  #others-sec.can .others-modes { display: flex; }
+  #others-sec.selecting .others-modes { display: none; }
+  #others-sec.selecting .selecting-modes { display: flex; }
+  @media (max-width: 30rem) {
+    .btn.dl { padding: 0; width: 2.75rem; border-radius: 14px; }
+    .btn.dl .t { display: none; }
+  }
+
+  /* the round tick that appears in select mode */
+  .tick { display: none; position: relative; flex: none; width: 2.75rem; height: 2.75rem; margin: -0.25rem 0 -0.25rem -0.4rem; align-items: center; justify-content: center; border-radius: 50%; cursor: pointer; }
+  #others-sec.selecting .tick { display: inline-flex; }
+  #others-sec.selecting .btn.dl { display: none; }
+  .tick input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+  .tickbox { display: grid; place-items: center; width: 1.7rem; height: 1.7rem; border-radius: 50%; border: 2px solid var(--muted); color: var(--btn-text); transition: background-color 0.15s ease, border-color 0.15s ease; pointer-events: none; }
+  .tickbox svg { width: 1rem; height: 1rem; opacity: 0; transform: scale(0.4); transition: opacity 0.12s ease, transform 0.2s cubic-bezier(0.3, 1.6, 0.5, 1); }
+  .tick input:checked + .tickbox { background: var(--btn); border-color: var(--btn); animation: pop 0.24s ease-out; }
+  .tick input:checked + .tickbox svg { opacity: 1; transform: scale(1); }
+  .tick input:focus-visible + .tickbox { outline: 2px solid var(--text); outline-offset: 2px; }
+  @keyframes pop { 0% { transform: scale(0.85); } 60% { transform: scale(1.14); } 100% { transform: scale(1); } }
+  .badge { flex: none; display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.2rem 0.65rem; border-radius: 999px; background: var(--chip); color: var(--muted); font-size: 0.8rem; font-weight: 600; }
+  .badge svg { width: 0.85rem; height: 0.85rem; }
+
+  /* add files */
+  .dz { position: relative; display: flex; align-items: center; gap: 0.9rem; padding: 0.85rem 1rem; border: 2px dashed var(--line); border-radius: 18px; cursor: pointer; overflow: hidden; transition: background-color 0.15s ease, border-color 0.15s ease; }
+  @media (hover: hover) { .dz:hover { background: var(--hover); border-color: var(--muted); } }
+  .dz:focus-within { outline: 2px solid var(--text); outline-offset: 2px; }
+  .dz input { position: absolute; left: 0; top: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; font-size: 100px; }
+  .dz-icon { display: grid; place-items: center; flex: none; width: 2.9rem; height: 2.9rem; border-radius: 16px; background: var(--btn); color: var(--btn-text); transition: transform 0.2s cubic-bezier(0.3, 1.6, 0.5, 1); }
+  .dz:hover .dz-icon { transform: rotate(90deg); }
+  .dz-icon svg { width: 1.4rem; height: 1.4rem; }
+  .dz-text { display: grid; min-width: 0; }
+  .dz-text strong { font-size: 1.02rem; }
+  .dz-text small { color: var(--muted); font-size: 0.85rem; }
+  #uploads { margin-top: 0.5rem; }
   .bar { height: 6px; background: var(--track); border-radius: 3px; overflow: hidden; margin-top: 0.4rem; }
-  .bar span { display: block; height: 100%; width: 0; background: var(--fill); }
-  #uploads { margin-top: 0.75rem; }
-  #uploads li:first-child { border-top: 1px solid var(--line); padding-top: 0.75rem; }
+  .bar span { display: block; height: 100%; width: 0; background: var(--fill); border-radius: 3px; transition: width 0.2s ease; }
+  #mine { margin-top: 0.35rem; }
+
+  /* invite */
   .invite { display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; }
-  .invite .qrbox { flex: none; width: 9.5rem; height: 9.5rem; background: #fff; border-radius: 10px; padding: 0.25rem; border: 1px solid var(--line); }
+  .invite .qrbox { flex: none; width: 9.5rem; height: 9.5rem; background: #fff; border-radius: 16px; padding: 0.35rem; border: 1px solid var(--line); }
   .invite .qrbox img { display: block; width: 100%; height: 100%; }
   .invite .side { flex: 1 1 12rem; min-width: 0; }
   .link { font-size: 0.85rem; color: var(--muted); word-break: break-all; margin: 0 0 0.6rem; user-select: all; -webkit-user-select: all; }
-  .hidden { display: none; }
+  .shortask { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; width: 100%; min-height: 2.75rem; margin-top: 0.75rem; padding: 0.4rem 0.9rem; border: 0; border-radius: 14px; background: var(--chip); color: var(--text); font: inherit; font-size: 0.95rem; font-weight: 600; cursor: pointer; text-align: left; transition: background-color 0.15s ease; }
+  @media (hover: hover) { .shortask:hover { background: var(--sel); } }
+  .shortask svg { width: 1.1rem; height: 1.1rem; flex: none; transition: transform 0.2s ease; }
+  .shortask[aria-expanded="true"] svg { transform: rotate(180deg); }
+  .shortbox { margin-top: 0.6rem; padding: 0.85rem 0.9rem; border-radius: 16px; background: var(--hover); }
+  .shorturl { margin: 0.1rem 0 0.6rem; font-size: 1.15rem; word-break: break-all; user-select: all; -webkit-user-select: all; font-variant-numeric: tabular-nums; }
+  .shorturl .short-host { color: var(--muted); }
+  .shorturl .short-code { letter-spacing: 0.08em; }
+  .shortbtns { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+
+  /* the bar that appears while selecting or downloading in bulk */
+  .sheet {
+    position: fixed; left: 50%; bottom: max(0.75rem, env(safe-area-inset-bottom)); z-index: 5; width: min(36rem, calc(100% - 1.5rem));
+    transform: translateX(-50%); padding: 0.8rem; border-radius: 24px; background: var(--btn); color: var(--btn-text);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.3); animation: rise 0.3s cubic-bezier(0.2, 0.9, 0.3, 1.15);
+  }
+  @keyframes rise { from { transform: translate(-50%, 28px); opacity: 0; } to { transform: translate(-50%, 0); opacity: 1; } }
+  .sheet-top { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; padding: 0 0.3rem 0.5rem; }
+  .sheet .count { font-weight: 700; }
+  .sheet-link { min-height: 2.25rem; padding: 0 0.7rem; border: 0; border-radius: 999px; background: transparent; color: var(--btn-text); font: inherit; font-size: 0.9rem; text-decoration: underline; cursor: pointer; opacity: 0.85; }
+  .sheet-actions { display: flex; gap: 0.5rem; }
+  .sbtn { flex: 1 1 0; min-height: 2.9rem; padding: 0.4rem 0.8rem; border-radius: 16px; font: inherit; font-weight: 700; cursor: pointer; color: var(--btn-text); background: transparent; border: 1.5px solid color-mix(in srgb, var(--btn-text) 50%, transparent); transition: transform 0.12s ease, opacity 0.15s ease; }
+  .sbtn.primary { background: var(--btn-text); color: var(--btn); border-color: var(--btn-text); }
+  .sbtn:active { transform: scale(0.97); }
+  .sbtn[disabled] { opacity: 0.4; cursor: default; }
+  .sheet-status { margin: 0.55rem 0.3rem 0.1rem; font-size: 0.875rem; opacity: 0.9; }
+  .sheet :focus-visible { outline-color: var(--btn-text); }
+
   #drop {
-    position: fixed; inset: 0.6rem; z-index: 10; border: 2px dashed var(--muted); border-radius: 16px;
+    position: fixed; inset: 0.6rem; z-index: 10; border: 2px dashed var(--muted); border-radius: 22px;
     background: color-mix(in srgb, var(--bg) 88%, transparent); display: none; align-items: center; justify-content: center;
     font-size: 1.2rem; font-weight: 600; color: var(--muted); pointer-events: none;
   }
   #drop.on { display: flex; }
+  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
 </style>
 </head>
 <body data-name="{{NAME}}">
@@ -82,32 +177,50 @@
     <p class="eyebrow">AirWeb</p>
     <h1 id="title">{{NAME}}</h1>
     <p id="status" class="status" aria-live="polite"><span class="dot"></span><span id="status-text">Connected</span></p>
+    <div id="banner" class="banner hidden" role="alert">
+      <p id="banner-text" class="banner-text"></p>
+      <div id="banner-links" class="banner-links"></div>
+    </div>
     <ul id="who" class="who" aria-label="Devices connected"></ul>
   </header>
 
-  <section aria-labelledby="dl-h">
-    <h2 id="dl-h">Shared files</h2>
-    <p class="lead">Everyone connected to <span class="pname">{{NAME}}</span> sees these and can download them.</p>
-    <p id="dl-empty" class="empty">Nothing yet. Files that you, anyone else or <span class="pname">{{NAME}}</span> add show up here for everyone.</p>
-    <ul id="files" class="list"></ul>
-    <div id="dl-all-wrap" class="row-actions hidden">
-      <button id="dl-all" class="btn wide" type="button">Download all</button>
+  <section aria-labelledby="mine-h">
+    <div class="sec-head">
+      <h2 id="mine-h">Shared by you</h2>
+      <span id="mine-count" class="pill hidden"></span>
     </div>
-  </section>
-
-  <section aria-labelledby="ul-h">
-    <h2 id="ul-h">Add files</h2>
-    <p class="lead">What you add is shared with everyone connected.</p>
-    <label class="btn primary wide picker">
-      <span>Choose files</span>
+    <label class="dz">
+      <span class="dz-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></span>
+      <span class="dz-text"><strong>Add files</strong><small>Everyone here can download them.</small></span>
       <input id="pick" type="file" multiple aria-label="Choose files to share">
     </label>
-    <p class="hint">A copy is saved on <span class="pname">{{NAME}}</span>. Keep this page open until the files are sent. On a computer you can also drop files anywhere on this page.</p>
+    <p class="hint">A copy is saved on <span class="pname">{{NAME}}</span>. Keep this page open until the files are sent. On a computer you can also drop files anywhere on the page.</p>
     <ul id="uploads" class="list"></ul>
+    <ul id="mine" class="list"></ul>
+  </section>
+
+  <section id="others-sec" aria-labelledby="oth-h">
+    <div class="sec-head">
+      <h2 id="oth-h">From others</h2>
+      <span id="oth-count" class="pill hidden"></span>
+      <div class="head-actions">
+        <div class="others-modes">
+          <button id="getall" class="chipbtn" type="button">Get all</button>
+          <button id="selmode" class="chipbtn" type="button">Select</button>
+        </div>
+        <div class="selecting-modes">
+          <button id="selall" class="chipbtn" type="button">Select all</button>
+          <button id="seldone" class="chipbtn solid" type="button">Done</button>
+        </div>
+      </div>
+    </div>
+    <p class="lead">What <span class="pname">{{NAME}}</span> and everyone else connected has shared.</p>
+    <p id="dl-empty" class="empty">Nothing here yet. When <span class="pname">{{NAME}}</span> or anyone else adds a file, it shows up for you.</p>
+    <ul id="files" class="list"></ul>
   </section>
 
   <section aria-labelledby="inv-h">
-    <h2 id="inv-h">Invite someone</h2>
+    <h2 id="inv-h" class="sec-head">Invite someone</h2>
     <p class="lead">Anyone on the same Wi-Fi who opens this link joins the same files, no matter who showed it to them.</p>
     <div class="invite">
       <div class="qrbox"><img id="qr" alt="QR code of this page's link" width="152" height="152"></div>
@@ -116,8 +229,34 @@
         <button id="copy" class="btn" type="button">Copy link</button>
       </div>
     </div>
+    <button id="short-ask" class="shortask" type="button" aria-expanded="false" aria-controls="short-box">
+      <span>Need a short link?</span>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+    </button>
+    <div id="short-box" class="shortbox hidden">
+      <p class="lead">For a computer where you can't scan the code or type the long link. It works for 10 minutes. The full link above is still the one to trust.</p>
+      <p id="short-url" class="shorturl" aria-live="polite"></p>
+      <div class="shortbtns">
+        <button id="short-copy" class="btn primary" type="button">Copy short link</button>
+        <button id="short-new" class="btn hidden" type="button">Get a new short link</button>
+      </div>
+      <p id="short-left" class="hint" role="status"></p>
+    </div>
   </section>
 </main>
+
+<div id="bulk" class="sheet hidden" role="region" aria-label="Download several files">
+  <div class="sheet-top">
+    <span id="selcount" class="count" aria-live="polite">Tap files to select</span>
+    <button id="clear" class="sheet-link hidden" type="button">Clear</button>
+  </div>
+  <div class="sheet-actions">
+    <button id="dl-zip" class="sbtn primary" type="button">As one zip</button>
+    <button id="dl-files" class="sbtn" type="button">As separate files</button>
+    <button id="dl-stop" class="sbtn hidden" type="button">Stop</button>
+  </div>
+  <p id="bulk-status" class="sheet-status hidden" role="status"></p>
+</div>
 <div id="drop" aria-hidden="true">Drop files to share them</div>
 
 <script>
@@ -140,11 +279,13 @@
     for (i = 0; i < 16; i++) s += a.charAt((bytes ? bytes[i] : Math.floor(Math.random() * 256)) % a.length);
     return s;
   }
+  // One id per browser (not per tab), so what it has already downloaded stays greyed out after a refresh.
   var me = null;
-  try { me = sessionStorage.getItem("airweb-id"); } catch (e) {}
+  try { me = localStorage.getItem("airweb-id"); } catch (e) {}
+  if (!me) { try { me = sessionStorage.getItem("airweb-id"); } catch (e) {} }
   if (!me || !/^[A-Za-z0-9_-]{8,40}$/.test(me)) {
     me = randomId();
-    try { sessionStorage.setItem("airweb-id", me); } catch (e) {}
+    try { localStorage.setItem("airweb-id", me); } catch (e) { try { sessionStorage.setItem("airweb-id", me); } catch (e2) {} }
   }
   function deviceLabel() {
     var ua = navigator.userAgent || "", b = "Browser", os = "";
@@ -194,22 +335,44 @@
     if (s < 86400) return Math.floor(s / 3600) + " hr ago";
     return new Date(t).toLocaleDateString();
   }
-  // An element whose text is "<prefix><time>", refreshed by the timer below.
-  function timed(e, prefix, t) {
+  // An element whose text is "<prefix><time><suffix>", refreshed by the timer below.
+  function timed(e, prefix, t, suffix) {
     e.setAttribute("data-t", String(t));
     e.setAttribute("data-p", prefix);
-    e.textContent = prefix + ago(t);
+    e.setAttribute("data-x", suffix || "");
+    e.textContent = prefix + ago(t) + (suffix || "");
     return e;
   }
   setInterval(function () {
     var es = document.querySelectorAll("[data-t]");
-    for (var i = 0; i < es.length; i++) es[i].textContent = es[i].getAttribute("data-p") + ago(+es[i].getAttribute("data-t"));
+    for (var i = 0; i < es.length; i++) es[i].textContent = es[i].getAttribute("data-p") + ago(+es[i].getAttribute("data-t")) + (es[i].getAttribute("data-x") || "");
   }, 2000);
 
   var statusBase = "Connected";
   function setStatus(text, bad) {
     $("status-text").textContent = text;
     $("status").className = bad ? "status bad" : "status";
+  }
+
+  // A persistent notice under the title: "this link moved" (with the new one) or "can't reach the host here, try these".
+  var bannerKind = "", alts = [], failures = 0;
+  function showBanner(kind, text, links) {
+    bannerKind = kind;
+    $("banner-text").textContent = text;
+    var box = $("banner-links");
+    while (box.firstChild) box.removeChild(box.firstChild);
+    for (var i = 0; i < links.length; i++) {
+      var a = document.createElement("a");
+      a.href = links[i].href;
+      a.textContent = links[i].label;
+      box.appendChild(a);
+    }
+    $("banner").className = "banner";
+  }
+  function hideBanner(kind) {
+    if (bannerKind !== kind) return;
+    bannerKind = "";
+    $("banner").className = "banner hidden";
   }
 
   function setHost(name) {
@@ -244,65 +407,282 @@
 
   // ---- the shared pool ----
 
-  var files = [];
-  var lastList = "";
+  var ICON_DL = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 11l5 5 5-5M5 20h14"/></svg>';
+  var ICON_CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
 
-  function fileUrl(f) { return api("/d/" + f.id + "/" + encodeURIComponent(f.name)); }
+  var files = [];        // what others shared, newest first: the part you can download and select
+  var mineFiles = [];    // what this browser shared
+  var rows = {};         // id -> {li, name, sub, btn, btnText, cb, f, own}
+  var sel = {};          // id -> true: ticked (only while selecting)
+  var got = {};          // id -> true: this browser has downloaded it in full (the host tells us)
+  var act = {};          // id -> true: being sent to this browser right now
+  var gotCount = 0;      // the host's count of "got", sent back so it only resends the list when it changed
+  var lastList = "";
+  var selecting = false;
+
+  // ids=1-40,1000001: runs of consecutive ids written as ranges, so even a big selection is a short link
+  function rangeString(ids) {
+    var a = ids.slice().sort(function (x, y) { return x - y; }), out = [], i = 0;
+    while (i < a.length) {
+      var j = i;
+      while (j + 1 < a.length && a[j + 1] === a[j] + 1) j++;
+      out.push(j > i ? a[i] + "-" + a[j] : String(a[i]));
+      i = j + 1;
+    }
+    return out.join(",");
+  }
+
+  function fileUrl(f) { return api("/d/" + f.id + "/" + encodeURIComponent(f.name)) + "&c=" + encodeURIComponent(me); }
+  function zipUrl(ids) { return api("/z?ids=" + encodeURIComponent(rangeString(ids))) + "&c=" + encodeURIComponent(me); }
+
+  // Starts a download without leaving the page (an error answer then just fails the download).
+  function startDownload(url, name) {
+    var a = el("a");
+    a.href = url;
+    a.setAttribute("download", name || "");
+    a.style.display = "none";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  }
+
+  function paintRow(r) {
+    var f = r.f;
+    if (r.own) {
+      var pre0 = (f.size >= 0 ? size(f.size) + " · " : "");
+      if (f.added > 0) timed(r.sub, pre0, f.added - skew, "");
+      else { r.sub.removeAttribute("data-t"); r.sub.textContent = pre0.replace(/ · $/, ""); }
+      return;
+    }
+    var isGot = !!got[f.id], isAct = !!act[f.id];
+    r.li.className = "pick" + (isGot ? " got" : "") + (sel[f.id] ? " sel" : "") + (isAct ? " busy" : "");
+    r.btnText.textContent = isGot ? "Again" : "Download";
+    r.btn.setAttribute("aria-label", (isGot ? "Download again " : "Download ") + f.name);
+    r.btn.title = isGot ? "Download again" : "Download";
+    var pre = (f.size >= 0 ? size(f.size) + " · " : "") + (f.by ? "From " + f.by : "From " + host) + " · ";
+    var suffix = isAct ? " · Downloading…" : (isGot ? " · Downloaded" : "");
+    if (f.added > 0) timed(r.sub, pre, f.added - skew, suffix);
+    else { r.sub.removeAttribute("data-t"); r.sub.textContent = pre.replace(/ · $/, "") + suffix; }
+    r.cb.checked = !!sel[f.id];
+  }
+
+  function newest(a, b) { return (b.added || 0) - (a.added || 0) || b.id - a.id; }
 
   function renderFiles(list) {
     var key = JSON.stringify(list);
     if (key === lastList) return;
     lastList = key;
     // Newest first: what was just added is what people are looking for.
-    files = list.slice().sort(function (a, b) { return (b.added || 0) - (a.added || 0) || b.id - a.id; });
+    var all = list.slice().sort(newest), i;
+    files = all.filter(function (f) { return !f.own; });
+    mineFiles = all.filter(function (f) { return f.own; });
+    var present = {};
+    for (i = 0; i < files.length; i++) present[files[i].id] = true;
+    for (var id in sel) if (!present[id]) delete sel[id];
+    rows = {};
+
     var ul = $("files");
     while (ul.firstChild) ul.removeChild(ul.firstChild);
-    for (var i = 0; i < files.length; i++) {
+    var frag = document.createDocumentFragment();
+    for (i = 0; i < files.length; i++) {
       var f = files[i];
-      var li = el("li");
+      var li = el("li", "pick");
+      var tick = el("label", "tick");
+      var cb = el("input");
+      cb.type = "checkbox";
+      cb.setAttribute("aria-label", "Select " + f.name);
+      var box = el("span", "tickbox");
+      box.innerHTML = ICON_CHECK;
+      tick.appendChild(cb);
+      tick.appendChild(box);
       var info = el("div", "info");
-      info.appendChild(el("p", "name", f.name));
+      var name = el("p", "name", f.name);
       var sub = el("p", "sub");
-      var pre = (f.size >= 0 ? size(f.size) + " · " : "") + (f.own ? "From you" : (f.by ? "From " + f.by : "From " + host)) + " · ";
-      if (f.added > 0) timed(sub, pre, f.added - skew); else sub.textContent = pre.replace(/ · $/, "");
+      info.appendChild(name);
       info.appendChild(sub);
-      var a = el("a", "btn", "Download");
+      var a = el("a", "btn dl");
+      a.innerHTML = ICON_DL;
+      var t = el("span", "t", "Download");
+      a.appendChild(t);
       a.href = fileUrl(f);
       a.setAttribute("download", f.name);
-      a.setAttribute("aria-label", "Download " + f.name);
+      li.appendChild(tick);
       li.appendChild(info);
       li.appendChild(a);
-      ul.appendChild(li);
+      frag.appendChild(li);
+      var r = { li: li, name: name, sub: sub, btn: a, btnText: t, cb: cb, f: f, own: false };
+      rows[f.id] = r;
+      (function (r) {
+        r.cb.onchange = function () { if (r.cb.checked) sel[r.f.id] = true; else delete sel[r.f.id]; paintRow(r); updateBulk(); };
+        // In select mode the whole row is the tick box (the round tick itself works natively).
+        r.li.onclick = function (e) {
+          if (!selecting) return;
+          for (var n = e.target; n && n !== r.li; n = n.parentNode) if (n === r.cb.parentNode) return;
+          r.cb.checked = !r.cb.checked;
+          r.cb.onchange();
+        };
+        r.btn.onclick = function () { schedule(700); }; // the host will say "downloading" in a moment
+      })(r);
+      paintRow(r);
     }
+    ul.appendChild(frag);
+
+    var mul = $("mine");
+    while (mul.firstChild) mul.removeChild(mul.firstChild);
+    var mfrag = document.createDocumentFragment();
+    for (i = 0; i < mineFiles.length; i++) {
+      var mf = mineFiles[i];
+      var mli = el("li");
+      var minfo = el("div", "info");
+      var mname = el("p", "name", mf.name);
+      var msub = el("p", "sub");
+      minfo.appendChild(mname);
+      minfo.appendChild(msub);
+      var badge = el("span", "badge");
+      badge.innerHTML = ICON_CHECK;
+      badge.appendChild(document.createTextNode("Shared"));
+      mli.appendChild(minfo);
+      mli.appendChild(badge);
+      mfrag.appendChild(mli);
+      var mr = { li: mli, name: mname, sub: msub, f: mf, own: true };
+      rows["m" + mf.id] = mr;
+      paintRow(mr);
+    }
+    mul.appendChild(mfrag);
+
     $("dl-empty").className = files.length ? "empty hidden" : "empty";
-    $("dl-all-wrap").className = files.length > 1 ? "row-actions" : "row-actions hidden";
+    var oc = $("oth-count"); oc.textContent = String(files.length); oc.className = files.length ? "pill" : "pill hidden";
+    var mc = $("mine-count"); mc.textContent = String(mineFiles.length); mc.className = mineFiles.length ? "pill" : "pill hidden";
+    updateBulk();
   }
 
-  var downloadingAll = false;
-  $("dl-all").onclick = function () {
-    if (downloadingAll || !files.length) return;
-    downloadingAll = true;
-    var btn = $("dl-all"), list = files.slice(), i = 0;
-    btn.disabled = true;
-    (function next() {
-      if (i >= list.length) {
-        btn.textContent = "Download all";
-        btn.disabled = false;
-        downloadingAll = false;
-        return;
-      }
-      btn.textContent = "Downloading " + (i + 1) + " of " + list.length;
-      var a = el("a");
-      a.href = fileUrl(list[i]);
-      a.setAttribute("download", list[i].name);
-      a.style.display = "none";
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      i++;
-      setTimeout(next, 1500); // one at a time; browsers drop downloads started too close together
-    })();
+  // Greys out what this browser already has and marks what is arriving; no rebuild.
+  function applyStates() {
+    for (var id in rows) paintRow(rows[id]);
+    updateBulk();
+  }
+
+  // ---- select, get all, download selected (one zip or separate files) ----
+
+  function chosen() { return files.filter(function (f) { return sel[f.id]; }); }
+
+  var sayText = "", sayTimer = null;
+  function say(text) {
+    sayText = text || "";
+    var p = $("bulk-status");
+    p.textContent = sayText;
+    p.className = sayText ? "sheet-status" : "sheet-status hidden";
+    if (sayTimer) { clearTimeout(sayTimer); sayTimer = null; }
+    // A message left over after a download finishes goes away by itself.
+    if (sayText && !selecting && !batch && !zipWatch) sayTimer = setTimeout(function () { say(""); }, 9000);
+    updateBulk();
+  }
+
+  function updateBulk() {
+    var n = files.length, k = 0, i;
+    if (selecting && n < 2) selecting = false;
+    for (i = 0; i < n; i++) if (sel[files[i].id]) k++;
+    var sec = $("others-sec");
+    sec.className = (n > 1 ? "can" : "") + (selecting ? " selecting" : "");
+    $("selmode").setAttribute("aria-pressed", selecting ? "true" : "false");
+    $("selall").textContent = k === n && n > 0 ? "None" : "Select all";
+    var busyNow = !!batch || !!zipWatch;
+    var show = selecting || busyNow || !!sayText;
+    $("bulk").className = show ? "sheet" : "sheet hidden";
+    document.body.className = show ? "sheet-on" : "";
+    $("selcount").textContent = k > 0 ? k + (k === 1 ? " file selected" : " files selected") : (selecting ? "Tap files to select" : (busyNow ? "Downloading" : "Downloads"));
+    $("clear").className = selecting && k > 0 && !busyNow ? "sheet-link" : "sheet-link hidden";
+    $("dl-zip").className = selecting && k > 1 && !busyNow ? "sbtn primary" : "sbtn primary hidden";
+    $("dl-files").textContent = k === 1 ? "Download" : "As separate files";
+    $("dl-files").className = selecting && !busyNow ? (k > 1 ? "sbtn" : "sbtn primary") : "sbtn hidden";
+    $("dl-stop").className = batch ? "sbtn" : "sbtn hidden";
+    $("dl-zip").disabled = false;
+    $("dl-files").disabled = k === 0;
+  }
+
+  function startSelecting(all) {
+    selecting = true;
+    sel = {};
+    if (all) for (var i = 0; i < files.length; i++) sel[files[i].id] = true;
+    applyStates();
+  }
+  function stopSelecting() { selecting = false; sel = {}; applyStates(); }
+
+  $("selmode").onclick = function () { startSelecting(false); };
+  $("getall").onclick = function () { startSelecting(true); };
+  $("seldone").onclick = stopSelecting;
+  $("selall").onclick = function () {
+    var every = files.length > 0 && files.every(function (f) { return sel[f.id]; });
+    sel = {};
+    if (!every) for (var i = 0; i < files.length; i++) sel[files[i].id] = true;
+    applyStates();
   };
+  $("clear").onclick = function () { sel = {}; applyStates(); };
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape" && selecting) stopSelecting(); });
+
+  // One zip: the host streams it (a real size is announced, so the browser shows progress).
+  var zipWatch = null;
+  $("dl-zip").onclick = function () {
+    var list = chosen();
+    if (list.length < 2 || batch) return;
+    var ids = list.map(function (f) { return f.id; });
+    startDownload(zipUrl(ids), "AirWeb-" + ids.length + "-files.zip");
+    zipWatch = { ids: ids, at: Date.now(), seen: false };
+    say("Preparing a zip of " + ids.length + " files…");
+    schedule(700);
+  };
+  function watchZip() {
+    if (!zipWatch) return;
+    var n = 0, i;
+    for (i = 0; i < zipWatch.ids.length; i++) if (got[zipWatch.ids[i]]) n++;
+    if (n > 0) zipWatch.seen = true;
+    if (n === zipWatch.ids.length) { zipWatch = null; say("The zip with " + n + " files has finished downloading."); return; }
+    if (zipWatch.seen) say("Zip: " + n + " of " + zipWatch.ids.length + " files through…");
+    else if (Date.now() - zipWatch.at > 20000) say("Still waiting for the zip to start. If nothing is downloading, your browser may be blocking it. Allow downloads for this page and try again.");
+  }
+
+  // Separate files, a few at a time. The host says when each one arrived in full, so none is started too early.
+  var batch = null;
+  var PARALLEL = 4;
+  $("dl-files").onclick = function () {
+    if (batch) return;
+    var list = chosen();
+    if (!list.length) return;
+    batch = { list: list.slice(), next: 0, flight: {}, done: 0, skipped: 0, seen: false, at: Date.now() };
+    say(list.length > 1 ? "Downloading " + list.length + " files. If your browser asks to allow multiple downloads, choose Allow." : "Downloading…");
+    pumpBatch();
+    schedule(700);
+  };
+  $("dl-stop").onclick = function () { endBatch("Stopped. " + batch.done + " of " + batch.list.length + " were downloaded."); };
+
+  function endBatch(msg) { batch = null; say(msg); }
+
+  function pumpBatch() {
+    if (!batch) return;
+    var now = Date.now(), id;
+    for (id in batch.flight) {
+      if (got[id]) { delete batch.flight[id]; batch.done++; batch.seen = true; }
+      else if (act[id]) batch.seen = true;
+      else if (now - batch.flight[id] > 25000 && batch.seen) { delete batch.flight[id]; batch.skipped++; } // never started by the browser
+    }
+    if (!batch.seen && batch.next > 0 && now - batch.at > 30000) {
+      endBatch("Your browser didn't start the downloads. Allow multiple downloads for this page (the address bar usually offers it), or use the zip.");
+      return;
+    }
+    var inFlight = Object.keys(batch.flight).length;
+    while (inFlight < PARALLEL && batch.next < batch.list.length) {
+      var f = batch.list[batch.next++];
+      batch.flight[f.id] = Date.now();
+      startDownload(fileUrl(f), f.name);
+      inFlight++;
+    }
+    var total = batch.list.length;
+    if (batch.next >= total && Object.keys(batch.flight).length === 0) {
+      endBatch(batch.skipped ? batch.done + " of " + total + " downloaded; " + batch.skipped + " weren't started by your browser." : "All " + total + " files downloaded.");
+      return;
+    }
+    say("Downloading " + Math.min(batch.done + inFlight, total) + " of " + total + "…");
+  }
 
   // ---- polling: the host says how often (slower with more people); hidden tabs ask less ----
 
@@ -313,22 +693,39 @@
   }
   function poll() {
     var x = new XMLHttpRequest();
-    x.open("GET", api("/api/state?v=" + encodeURIComponent(version)) + who(), true);
+    x.open("GET", api("/api/state?v=" + encodeURIComponent(version) + "&g=" + gotCount) + who(), true);
     x.timeout = 8000;
     x.onload = function () {
       if (x.status === 200) {
         try {
           var s = JSON.parse(x.responseText);
+          failures = 0;
+          if (s.moved) {
+            // The host gave this session a new link: say so for good, with the way there.
+            var to = location.protocol + "//" + location.host + s.moved;
+            showBanner("moved", "This link has been replaced. Continue on the new link.", [{ label: "Open the new link", href: to }]);
+            setStatus("This link has been replaced.", true);
+            schedule(5000);
+            return;
+          }
+          if (s.alts) alts = s.alts;
+          hideBanner("lost");
           setHost(s.name);
           free = typeof s.free === "number" ? s.free : -1;
           if (typeof s.now === "number") skew = s.now - Date.now();
           if (typeof s.poll === "number") pollMs = Math.min(Math.max(s.poll, 1500), 15000);
           if (s.files) { renderFiles(s.files); version = s.v || ""; }
+          if (s.got) { got = {}; for (var gi = 0; gi < s.got.length; gi++) got[s.got[gi]] = true; }
+          if (typeof s.gn === "number") gotCount = s.gn;
+          act = {}; if (s.act) for (var ai = 0; ai < s.act.length; ai++) act[s.act[ai]] = true;
+          applyStates();
+          pumpBatch();
+          watchZip();
           renderPeers(s.peers || [], typeof s.count === "number" ? s.count : (s.peers || []).length);
           if (offline || $("status").className !== "status") setStatus(statusBase, false);
           offline = false;
         } catch (e) {}
-        schedule(document.hidden ? pollMs * 3 : pollMs);
+        schedule(batch || zipWatch ? 800 : (document.hidden ? pollMs * 3 : pollMs));
       } else if (x.status === 403) {
         setStatus("This link has stopped working. Scan the new code on " + host + ".", true);
         schedule(10000);
@@ -343,7 +740,17 @@
   }
   function lost() {
     offline = true;
+    failures++;
     setStatus("Can't reach " + host + ". Keep AirWeb open on it and stay on the same Wi-Fi.", true);
+    if (failures >= 2 && bannerKind !== "moved") {
+      // The host may have changed network (Wi-Fi to hotspot): offer the other addresses it told us about.
+      var links = [];
+      for (var i = 0; i < alts.length; i++) {
+        var m2 = /^http:\/\/([^\/]+)\//.exec(alts[i]);
+        if (m2 && m2[1] !== location.host) links.push({ label: "Try " + m2[1], href: alts[i] });
+      }
+      if (links.length) showBanner("lost", host + " isn't answering here. It may have moved to another network address:", links);
+    }
     schedule(4000);
   }
   document.addEventListener("visibilitychange", function () { if (!document.hidden) schedule(0); });
@@ -360,7 +767,7 @@
   };
 
   function add(file) {
-    var li = el("li");
+    var li = el("li", "up");
     var info = el("div", "info");
     var sub = el("p", "sub", "Waiting · " + size(file.size));
     var bar = el("div", "bar");
@@ -393,6 +800,8 @@
       job.fill.style.width = "100%";
       job.bar.className = "bar hidden";
       schedule(0); // show it in the list right away
+      // The shared file now appears under "Shared by you"; this progress row has done its job.
+      setTimeout(function () { if (job.li.parentNode) job.li.parentNode.removeChild(job.li); }, 2500);
     } else {
       var b = el("button", "btn", "Try again");
       b.type = "button";
@@ -484,29 +893,75 @@
     pump();
   });
 
-  // ---- invite: this page's link as a QR code (drawn by the host) and a copy button ----
+  // ---- invite: this page's link as a QR code (drawn by the host), a copy button and an optional short link ----
 
   var link = location.protocol + "//" + location.host + "/?t=" + token;
   $("link").textContent = link;
   $("qr").src = api("/qr.svg");
-  $("copy").onclick = function () {
-    var b = $("copy");
+
+  function copyText(text, b, idle) {
     function done(ok) {
-      b.textContent = ok ? "Copied" : "Select the link and copy it";
-      setTimeout(function () { b.textContent = "Copy link"; }, 1800);
+      b.textContent = ok ? "Copied" : "Select it and copy";
+      setTimeout(function () { b.textContent = idle; }, 1800);
     }
     try {
-      if (navigator.clipboard && window.isSecureContext) { navigator.clipboard.writeText(link).then(function () { done(true); }, function () { done(false); }); return; }
+      if (navigator.clipboard && window.isSecureContext) { navigator.clipboard.writeText(text).then(function () { done(true); }, function () { done(false); }); return; }
     } catch (e) {}
     var t = document.createElement("textarea");
-    t.value = link; t.setAttribute("readonly", ""); t.style.position = "fixed"; t.style.opacity = "0";
+    t.value = text; t.setAttribute("readonly", ""); t.style.position = "fixed"; t.style.opacity = "0";
     document.body.appendChild(t);
     t.select();
     var ok = false;
     try { ok = document.execCommand("copy"); } catch (e) {}
     document.body.removeChild(t);
     done(ok);
+  }
+  $("copy").onclick = function () { copyText(link, $("copy"), "Copy link"); };
+
+  // "Need a short link?": the host makes a six-character code that opens the same session for 10 minutes.
+  var shortCode = "", shortUntil = 0, shortTimer = null;
+  function shortFull() { return location.protocol + "//" + location.host + "/j/" + shortCode; }
+  function paintShort() {
+    var u = $("short-url");
+    while (u.firstChild) u.removeChild(u.firstChild);
+    if (shortCode) {
+      u.appendChild(el("span", "short-host", location.host + "/j/"));
+      u.appendChild(el("strong", "short-code", shortCode));
+    }
+    var left = Math.max(0, Math.round((shortUntil - Date.now()) / 1000));
+    var live = !!shortCode && left > 0;
+    if (shortCode && !live) { shortCode = ""; while (u.firstChild) u.removeChild(u.firstChild); }
+    $("short-copy").className = live ? "btn primary" : "btn primary hidden";
+    $("short-new").className = !live && shortUntil ? "btn primary" : "btn hidden";
+    if (live) $("short-left").textContent = "Works for " + Math.floor(left / 60) + ":" + (left % 60 < 10 ? "0" : "") + (left % 60) + " more, for anyone on this Wi-Fi.";
+    else if (shortUntil) { $("short-left").textContent = "That short link has expired."; if (shortTimer) { clearInterval(shortTimer); shortTimer = null; } }
+  }
+  function askShort() {
+    $("short-left").textContent = "Making a short link…";
+    var x = new XMLHttpRequest();
+    x.open("POST", api("/api/short") + who(), true);
+    x.timeout = 8000;
+    x.onload = function () {
+      try {
+        var r = JSON.parse(x.responseText);
+        if (x.status !== 200 || !r.code) throw new Error("no code");
+        shortCode = r.code;
+        shortUntil = Date.now() + r.ttl * 1000;
+        paintShort();
+        if (!shortTimer) shortTimer = setInterval(paintShort, 1000);
+      } catch (e) { $("short-left").textContent = "Couldn't make a short link. Try again."; $("short-new").className = "btn primary"; }
+    };
+    x.onerror = x.ontimeout = function () { $("short-left").textContent = "Couldn't reach " + host + ". Try again."; $("short-new").className = "btn primary"; };
+    x.send("");
+  }
+  $("short-ask").onclick = function () {
+    var open = $("short-box").className.indexOf("hidden") >= 0;
+    $("short-box").className = open ? "shortbox" : "shortbox hidden";
+    this.setAttribute("aria-expanded", open ? "true" : "false");
+    if (open && !shortCode) askShort();
   };
+  $("short-new").onclick = function () { $("short-new").className = "btn hidden"; askShort(); };
+  $("short-copy").onclick = function () { copyText(shortFull(), $("short-copy"), "Copy short link"); };
 
   poll();
 })();

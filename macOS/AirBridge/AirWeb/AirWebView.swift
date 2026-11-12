@@ -7,6 +7,11 @@ struct AirWebView: View {
     @ObservedObject var session: AirWebSession
     @State private var dropping = false
     @State private var copied = false
+    @State private var shortOpen = false
+    @State private var shortURL: String?
+    @State private var shortUntil = Date.distantPast
+    @State private var shortCopied = false
+    @State private var confirmNewLink = false
 
     var body: some View {
         HStack(spacing: 0) {
@@ -65,6 +70,7 @@ struct AirWebView: View {
                         .frame(width: 232, height: 232)
                 }
                 linkRow(link)
+                shortLinkRow
                 Text("Scan this with a camera and open the link. Everyone who joins shares the same files. All devices must be on the same Wi-Fi.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
@@ -73,16 +79,78 @@ struct AirWebView: View {
                 Label(session.deviceName, systemImage: "laptopcomputer")
                     .font(.callout.weight(.medium))
                     .lineLimit(1)
-                if session.addresses.count > 1 {
-                    Button("Use Another Address") { session.nextAddress() }
+                HStack(spacing: Theme.sm) {
+                    if session.addresses.count > 1 {
+                        Button("Use Another Address") { session.nextAddress() }
+                            .controlSize(.small)
+                            .help("This Mac is on more than one network. Show the link for the next one.")
+                    }
+                    Button("New Link") { confirmNewLink = true }
                         .controlSize(.small)
-                        .help("This Mac is on more than one network. Show the link for the next one.")
+                        .help("Replace the link. Pages already open will show a message with the new one.")
+                }
+                .confirmationDialog("Make a new link?", isPresented: $confirmNewLink) {
+                    Button("New Link") { session.newLink(); shortURL = nil }
+                    Button("Cancel", role: .cancel) {}
+                } message: {
+                    Text("The old link and QR code stop working for anyone new. Pages that are already open will show a message with the new link.")
                 }
             } else {
                 ProgressView().controlSize(.small).padding(.top, 120)
             }
         }
         .padding(24)
+    }
+
+    /// "Need a short link?": six characters on this Mac's address, for a computer where the code can't be scanned.
+    @ViewBuilder private var shortLinkRow: some View {
+        VStack(spacing: Theme.sm) {
+            Button {
+                shortOpen.toggle()
+                if shortOpen, shortUntil <= Date() { askShort() }
+            } label: {
+                Label("Need a short link?", systemImage: shortOpen ? "chevron.up" : "chevron.down")
+                    .labelStyle(.titleAndIcon)
+            }
+            .buttonStyle(.link)
+            .controlSize(.small)
+            if shortOpen, let url = shortURL {
+                TimelineView(.periodic(from: .now, by: 1)) { ctx in
+                    let left = max(0, Int(shortUntil.timeIntervalSince(ctx.date)))
+                    VStack(spacing: Theme.sm) {
+                        Text(url).font(.callout.monospaced().weight(.medium)).textSelection(.enabled)
+                            .foregroundStyle(left > 0 ? .primary : .secondary)
+                        Text(left > 0 ? "Works for \(left / 60):\(String(format: "%02d", left % 60)) more. Same Wi-Fi needed."
+                                      : "This short link has expired.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        if left > 0 {
+                            Button {
+                                let pb = NSPasteboard.general
+                                pb.clearContents()
+                                pb.setString("http://" + url, forType: .string)
+                                shortCopied = true
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { shortCopied = false }
+                            } label: { Label(shortCopied ? "Copied" : "Copy Short Link", systemImage: shortCopied ? "checkmark" : "doc.on.doc") }
+                                .controlSize(.small)
+                        } else {
+                            Button("Get a New Short Link") { askShort() }.controlSize(.small)
+                        }
+                        Text("Type it in the other computer's browser. The full link above is still the one to trust.")
+                            .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .padding(10)
+                .frame(maxWidth: .infinity)
+                .background(RoundedRectangle(cornerRadius: Theme.radius).fill(.quaternary.opacity(0.5)))
+            }
+        }
+    }
+
+    private func askShort() {
+        guard let s = session.shortLink() else { return }
+        shortURL = s.url
+        shortUntil = Date().addingTimeInterval(TimeInterval(s.secondsLeft))
     }
 
     private func linkRow(_ link: String) -> some View {
