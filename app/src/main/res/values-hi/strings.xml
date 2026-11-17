@@ -466,4 +466,15 @@
     <string name="aw_notif_title">AirWeb चालू है</string>
     <string name="aw_notif_waiting">ब्राउज़र का इंतज़ार</string>
     <string name="aw_running">AirWeb चल रहा है</string>
+    <string name="pp_title">भुगतान ऐप्स</string>
+    <string name="pp_switch">UPI ऐप खुला होने पर कंट्रोल बंद रखें</string>
+    <string name="pp_switch_sub">Paytm, PhonePe, Google Pay और BHIM तब तक भुगतान नहीं करने देते जब तक कोई एक्सेसिबिलिटी सेवा चालू हो। ये ऐप सामने हों तो AirBridge अपनी दोनों सेवाएँ बंद कर देता है और बाद में फिर चालू कर देता है।</string>
+    <string name="pp_usage">उपयोग एक्सेस</string>
+    <string name="pp_usage_sub">सिर्फ़ यह जानने के लिए कि इनमें से कोई ऐप सामने है या नहीं।</string>
+    <string name="pp_secure">अपने-आप दोबारा चालू</string>
+    <string name="pp_secure_sub">कंप्यूटर से एक बार अनुमति देनी होती है: adb shell pm grant com.shazan.airbridge android.permission.WRITE_SECURE_SETTINGS। इसके बिना भुगतान के बाद कंट्रोल आपको खुद चालू करना होगा।</string>
+    <string name="pp_copy">कमांड कॉपी करें</string>
+    <string name="pp_copied">कमांड कॉपी हो गया</string>
+    <string name="pp_notif_title">AirBridge कंट्रोल बंद है</string>
+    <string name="pp_notif_text">भुगतान ऐप के लिए इसे बंद किया गया था। दोबारा चालू करने के लिए टैप करें।</string>
 </resources>

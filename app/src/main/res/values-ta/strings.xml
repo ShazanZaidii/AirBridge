@@ -466,4 +466,15 @@
     <string name="aw_notif_title">AirWeb இயங்குகிறது</string>
     <string name="aw_notif_waiting">உலாவிக்காகக் காத்திருக்கிறது</string>
     <string name="aw_running">AirWeb இயங்குகிறது</string>
+    <string name="pp_title">பணம் செலுத்தும் ஆப்கள்</string>
+    <string name="pp_switch">UPI ஆப் திறந்திருக்கும்போது கட்டுப்பாட்டை அணைக்கவும்</string>
+    <string name="pp_switch_sub">ஏதேனும் அணுகல்தன்மை சேவை இயங்கினால் Paytm, PhonePe, Google Pay, BHIM பணம் செலுத்த அனுமதிக்காது. இந்த ஆப்கள் முன்னால் இருக்கும்போது AirBridge தன் இரு சேவைகளையும் அணைத்து, பின்னர் மீண்டும் இயக்கும்.</string>
+    <string name="pp_usage">பயன்பாட்டு அணுகல்</string>
+    <string name="pp_usage_sub">இவற்றில் ஏதேனும் ஆப் முன்னால் உள்ளதா என்று அறிய மட்டும்.</string>
+    <string name="pp_secure">தானாகவே மீண்டும் இயங்கும்</string>
+    <string name="pp_secure_sub">கணினியிலிருந்து ஒருமுறை அனுமதி வழங்க வேண்டும்: adb shell pm grant com.shazan.airbridge android.permission.WRITE_SECURE_SETTINGS. இல்லையெனில் பணம் செலுத்திய பின் கட்டுப்பாட்டை நீங்களே இயக்க வேண்டும்.</string>
+    <string name="pp_copy">கட்டளையை நகலெடு</string>
+    <string name="pp_copied">கட்டளை நகலெடுக்கப்பட்டது</string>
+    <string name="pp_notif_title">AirBridge கட்டுப்பாடு அணைந்துள்ளது</string>
+    <string name="pp_notif_text">பணம் செலுத்தும் ஆப்புக்காக அணைக்கப்பட்டது. மீண்டும் இயக்க தட்டவும்.</string>
 </resources>
