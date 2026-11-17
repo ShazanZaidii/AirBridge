@@ -30,6 +30,15 @@ class AirBridgeInputService : AccessibilityService() {
 
         /** [isRunning] as a flow, for the UI. */
         val runningFlow: StateFlow<Boolean> = _runningFlow
+
+        /** Switches this service off (Android offers no way to switch it back on): used around payment apps. False if it isn't connected. */
+        fun turnOff(): Boolean {
+            val s = running ?: return false
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                try { s.disableSelf() } catch (t: Throwable) { Log.w("AirBridgePayPause", "disableSelf", t) }
+            }
+            return true
+        }
     }
 
     private var controller: TargetController? = null

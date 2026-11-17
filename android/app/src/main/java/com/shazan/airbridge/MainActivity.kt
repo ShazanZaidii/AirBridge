@@ -1230,6 +1230,33 @@ private fun SettingsScreen(onBack: () -> Unit, onOpenLinkDebug: () -> Unit) {
                 }
             }
 
+            SectionHeader(stringResource(R.string.pp_title))
+            AbCard {
+                var ppOn by remember { mutableStateOf(com.shazan.airbridge.payment.PaymentPause.isEnabled(ctx)) }
+                val usageOk = remember(resumeTick) { com.shazan.airbridge.payment.PaymentPause.hasUsageAccess(ctx) }
+                val secureOk = remember(resumeTick) { com.shazan.airbridge.payment.PaymentPause.canSwitchSecurely(ctx) }
+                SwitchRow(
+                    stringResource(R.string.pp_switch), stringResource(R.string.pp_switch_sub), ppOn,
+                    { on -> ppOn = on; com.shazan.airbridge.payment.PaymentPause.setEnabled(ctx, on) },
+                )
+                RowDivider()
+                AccessRow(stringResource(R.string.pp_usage), stringResource(R.string.pp_usage_sub), usageOk) {
+                    open(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS, Uri.parse("package:${ctx.packageName}")))
+                }
+                RowDivider()
+                InfoRow(title = stringResource(R.string.pp_secure), subtitle = stringResource(R.string.pp_secure_sub), trailing = {
+                    if (secureOk) StatusChip(stringResource(R.string.allowed), ChipTone.SUCCESS)
+                    else TextButton(
+                        onClick = {
+                            val cm = ctx.getSystemService(android.content.ClipboardManager::class.java)
+                            cm?.setPrimaryClip(android.content.ClipData.newPlainText("adb", "adb shell pm grant ${ctx.packageName} android.permission.WRITE_SECURE_SETTINGS"))
+                            toast(ctx, ctx.getString(R.string.pp_copied))
+                        },
+                        modifier = Modifier.height(Dimens.touch),
+                    ) { Text(stringResource(R.string.pp_copy)) }
+                })
+            }
+
             SectionHeader(stringResource(R.string.about))
             AbCard {
                 InfoRow(title = stringResource(R.string.about_version, BuildConfig.VERSION_NAME), subtitle = stringResource(R.string.about_sub),

@@ -466,4 +466,15 @@
     <string name="aw_notif_title">AirWeb ఆన్‌లో ఉంది</string>
     <string name="aw_notif_waiting">బ్రౌజర్ కోసం వేచి ఉంది</string>
     <string name="aw_running">AirWeb నడుస్తోంది</string>
+    <string name="pp_title">చెల్లింపు యాప్‌లు</string>
+    <string name="pp_switch">UPI యాప్ తెరిచి ఉన్నప్పుడు నియంత్రణను ఆఫ్ చేయండి</string>
+    <string name="pp_switch_sub">ఏదైనా యాక్సెసిబిలిటీ సేవ ఆన్‌లో ఉంటే Paytm, PhonePe, Google Pay, BHIM చెల్లింపుకు అనుమతించవు. ఈ యాప్‌లు ముందు ఉన్నప్పుడు AirBridge తన రెండు సేవలను ఆఫ్ చేసి, తర్వాత మళ్లీ ఆన్ చేస్తుంది.</string>
+    <string name="pp_usage">వినియోగ యాక్సెస్</string>
+    <string name="pp_usage_sub">వీటిలో ఏదైనా యాప్ ముందు ఉందో లేదో తెలుసుకోవడానికి మాత్రమే.</string>
+    <string name="pp_secure">దానంతట అదే మళ్లీ ఆన్ అవుతుంది</string>
+    <string name="pp_secure_sub">కంప్యూటర్ నుండి ఒకసారి అనుమతి ఇవ్వాలి: adb shell pm grant com.shazan.airbridge android.permission.WRITE_SECURE_SETTINGS. లేకపోతే చెల్లింపు తర్వాత నియంత్రణను మీరే ఆన్ చేయాలి.</string>
+    <string name="pp_copy">కమాండ్ కాపీ చేయండి</string>
+    <string name="pp_copied">కమాండ్ కాపీ అయింది</string>
+    <string name="pp_notif_title">AirBridge నియంత్రణ ఆఫ్‌లో ఉంది</string>
+    <string name="pp_notif_text">చెల్లింపు యాప్ కోసం ఆఫ్ చేయబడింది. మళ్లీ ఆన్ చేయడానికి నొక్కండి.</string>
 </resources>
