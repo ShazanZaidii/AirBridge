@@ -475,4 +475,15 @@
     <string name="aw_notif_title">AirWeb est actif</string>
     <string name="aw_notif_waiting">En attente d\'un navigateur</string>
     <string name="aw_running">AirWeb est actif</string>
+    <string name="pp_title">Applis de paiement</string>
+    <string name="pp_switch">Couper le contrôle quand une appli UPI est ouverte</string>
+    <string name="pp_switch_sub">Paytm, PhonePe, Google Pay et BHIM refusent de payer tant qu\'un service d\'accessibilité est actif. AirBridge désactive ses deux services quand ces applis sont au premier plan, puis les réactive.</string>
+    <string name="pp_usage">Accès aux données d\'utilisation</string>
+    <string name="pp_usage_sub">Uniquement pour savoir si l\'une de ces applis est au premier plan.</string>
+    <string name="pp_secure">Se réactive tout seul</string>
+    <string name="pp_secure_sub">Demande une autorisation unique depuis un ordinateur : adb shell pm grant com.shazan.airbridge android.permission.WRITE_SECURE_SETTINGS. Sans elle, vous réactivez le contrôle vous-même après le paiement.</string>
+    <string name="pp_copy">Copier la commande</string>
+    <string name="pp_copied">Commande copiée</string>
+    <string name="pp_notif_title">Le contrôle AirBridge est coupé</string>
+    <string name="pp_notif_text">Il a été coupé pour une appli de paiement. Touchez pour le réactiver.</string>
 </resources>

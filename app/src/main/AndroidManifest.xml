@@ -47,6 +47,11 @@
         android:name="android.permission.WRITE_SETTINGS"
         tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.ACCESS_NOTIFICATION_POLICY" />
+    <!-- Only to know when a UPI app (Paytm, PhonePe, Google Pay, BHIM) comes to the front, so the two accessibility
+         services can be off while it is (PaymentPause). Special access: the user grants it in Settings. -->
+    <uses-permission
+        android:name="android.permission.PACKAGE_USAGE_STATS"
+        tools:ignore="ProtectedPermissions" />
 
     <!-- Calls on your computer (PROTOCOL §13.3): asked only when the user turns that on in Settings.
          Call state, answer/decline/end, and (optional) contact names for numbers the dialer shows raw. -->

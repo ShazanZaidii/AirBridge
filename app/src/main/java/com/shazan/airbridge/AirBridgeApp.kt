@@ -27,6 +27,8 @@ class AirBridgeApp : Application() {
         InputRouter.install(this)
         // OEM gesture switches the trackpad turned off and could not put back (crash / kill).
         com.shazan.airbridge.input.OsGestureGuard.restore(this)
+        // Accessibility services off while a UPI app is in front (Paytm refuses to pay otherwise); repairs a pause a kill left.
+        com.shazan.airbridge.payment.PaymentPause.ensureRunning(this)
         NetHooks.clipboardPush = { reason -> ClipboardSync.pushNow(reason) }
         // v1 pinned ws:// URLs are meaningless in v2 (peers are found by id).
         getSharedPreferences("AirBridgePrefs", Context.MODE_PRIVATE).edit().remove("WS_URLS").apply()
