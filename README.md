@@ -10,7 +10,7 @@
 | iPhone Mirroring | Your phone's screen on your Mac, and your computer's screen on your phone |
 | Calls and notifications on the Mac | Your phone's calls and notifications on your Mac or PC |
 | Devices in the Batteries widget | Your phone's and PC's battery in the Mac's Notification Center |
-| - | **Control anything from anything.** Your Mac or PC keyboard and mouse can drive another computer or an Android phone, and your phone doubles as a trackpad and keyboard for any computer |
+| - | **Control anything from anything.** Your Mac or PC keyboard and mouse can drive another computer or an Android phone, and your phone doubles as a trackpad and keyboard for any computer or another Android phone |
 | - | **AirWeb: share with anyone, even with no app.** Show a QR code and anyone with a browser can drop files into one shared pool. No install, no account |
 | - | **Mix any devices on one layout.** A Mac, a PC and a phone side by side, in whatever order you like |
 | - | **Drag files across screens.** Pick up files on your Mac or PC and carry them over the edge onto another computer or your Android phone |
@@ -36,7 +36,7 @@ AirBridge is an independent project and is not affiliated with Apple. The Apple 
 
 **One keyboard and mouse for all of them.** Push the cursor off the edge of your Mac or PC and it carries on, on your other computer or on your Android phone. It is the same idea as Apple's Universal Control, across Mac, Windows and Android. You arrange the screens in the Displays window. Only one device is in control at a time, and control loops are refused.
 
-**Phone as a trackpad and keyboard.** Use your Android phone to move the pointer and type on a Mac or PC.
+**Phone as a trackpad and keyboard.** Use your Android phone to move the pointer and type on a Mac, a PC or another Android phone.
 
 **Phone calls and notifications on your computer.** Both are off until you turn them on. Notifications can be dismissed, replied to, or opened on the phone from the computer. Calls show up on the computer, where you can answer, decline or end them. Bluetooth is used to tell which computer the phone is next to.
 
