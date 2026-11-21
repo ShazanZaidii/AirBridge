@@ -68,6 +68,8 @@ namespace AirBridge
             };
             ClipboardMonitor = new ClipboardManager();
             ClipboardMonitor.LocalTextChanged += text => Peers?.Clipboard.OnLocalText(text);
+            ClipboardMonitor.LocalFilesChanged += files => Peers?.Clipboard.OnLocalFiles(files);
+            ClipboardMonitor.LocalImageChanged += png => Peers?.Clipboard.OnLocalImage(png);
             ClipboardMonitor.Start(_hiddenClipboardWindow);
 
             _trayIcon = new TaskbarIcon { ToolTipText = "AirBridge" };

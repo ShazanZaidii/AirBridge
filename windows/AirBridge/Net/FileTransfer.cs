@@ -62,6 +62,8 @@ namespace AirBridge.Net
             public readonly CancellationTokenSource Cts = new();
             public long Received;
             public long LastAck;
+            /// <summary>A clipboard transfer (§5.1): kept in the cache folder, quiet, and put on the clipboard when done.</summary>
+            public bool Clip;
         }
 
         public void OnText(string t, JsonObject o)
@@ -135,20 +137,22 @@ namespace AirBridge.Net
             if (files.Count == 0 || files.Where((f, i) => f.Index != i).Any()) { Reject(id, "user"); return; }
             long total = files.Sum(f => f.Size);
 
+            bool clip = Protocol.Bool(o, "clip") == true;
+            string saveDir = clip ? ClipboardInbox.In : SaveDirectory;
             var reserved = new List<InFile>();
             try
             {
-                Directory.CreateDirectory(SaveDirectory);
+                Directory.CreateDirectory(saveDir);
                 try
                 {
-                    var drive = new DriveInfo(Path.GetPathRoot(SaveDirectory)!);
+                    var drive = new DriveInfo(Path.GetPathRoot(saveDir)!);
                     if (drive.AvailableFreeSpace < total + 64L * 1024 * 1024) { Reject(id, "disk"); return; }
                 }
                 catch { /* unknown free space: try anyway */ }
 
                 foreach (var f in files)
                 {
-                    string path = ReserveUniquePath(SaveDirectory, SanitizeFileName(f.Name));
+                    string path = ReserveUniquePath(saveDir, SanitizeFileName(f.Name));
                     reserved.Add(new InFile { Size = f.Size, Path = path, Complete = f.Size == 0 });
                 }
             }
@@ -160,7 +164,7 @@ namespace AirBridge.Net
                 return;
             }
 
-            var inc = new Incoming { Id = id, Files = reserved, Total = total };
+            var inc = new Incoming { Id = id, Files = reserved, Total = total, Clip = clip };
             _incoming[id] = inc;
             _ = Task.Run(() => WriterLoopAsync(inc));
 
@@ -168,12 +172,15 @@ namespace AirBridge.Net
             accept["id"] = id;
             accept["window"] = Protocol.DefaultWindow;
             _session.EnqueueJson(accept);
-            _svc.Transfers.Start(InKey(id), _session.PeerName, incoming: true, Label(files.Select(f => SanitizeFileName(f.Name)).ToList()), total,
-                                 peerId: _session.PeerId ?? "", fileCount: files.Count);
-            _svc.Transfers.RegisterCancel(InKey(id), () =>
+            if (!clip) // a clipboard transfer is quiet: no card on the board
             {
-                if (_incoming.TryRemove(id, out var x)) CancelIncoming(x, sendCancel: "user", message: TransferView.CancelledMessage);
-            });
+                _svc.Transfers.Start(InKey(id), _session.PeerName, incoming: true, Label(files.Select(f => SanitizeFileName(f.Name)).ToList()), total,
+                                     peerId: _session.PeerId ?? "", fileCount: files.Count);
+                _svc.Transfers.RegisterCancel(InKey(id), () =>
+                {
+                    if (_incoming.TryRemove(id, out var x)) CancelIncoming(x, sendCancel: "user", message: TransferView.CancelledMessage);
+                });
+            }
             Log.Info($"Receiving {files.Count} file(s), {total} bytes from {_session.PeerName} (id {id})");
         }
 
@@ -273,7 +280,11 @@ namespace AirBridge.Net
             var paths = inc.Files.Where(f => f.Complete).Select(f => f.Path).ToList();
             _svc.Transfers.Finish(InKey(inc.Id), ok, ok ? null : "Incomplete", saved: paths);
 
-            if (paths.Count > 0) _svc.OnFilesReceived(_session.PeerName, paths);
+            if (paths.Count > 0)
+            {
+                if (inc.Clip) { if (ok) _svc.OnClipboardReceived(paths); }
+                else _svc.OnFilesReceived(_session.PeerName, paths);
+            }
         }
 
         private void CancelIncoming(Incoming inc, string? sendCancel, string? message = null)
@@ -341,7 +352,7 @@ namespace AirBridge.Net
             }
         }
 
-        public async Task<TransferResult> SendAsync(IReadOnlyList<string> paths, IProgress<double>? progress, CancellationToken callerCt)
+        public async Task<TransferResult> SendAsync(IReadOnlyList<string> paths, IProgress<double>? progress, CancellationToken callerCt, bool clip = false)
         {
             // The caller's token, plus Cancel on a transfer card.
             using var userCts = CancellationTokenSource.CreateLinkedTokenSource(callerCt);
@@ -372,10 +383,14 @@ namespace AirBridge.Net
                     arr.Add(new JsonObject { ["i"] = i, ["name"] = files[i].Name, ["size"] = files[i].Size, ["mime"] = MimeFor(files[i].Name) });
                 offer["files"] = arr;
                 offer["total"] = og.Total;
+                if (clip) offer["clip"] = true; // §5.1
                 if (!_session.EnqueueJson(offer)) return new TransferResult(false, "Disconnected", Array.Empty<string>());
-                _svc.Transfers.Start(OutKey(id), _session.PeerName, incoming: false, Label(files.Select(f => f.Name).ToList()), og.Total,
-                                     peerId: _session.PeerId ?? "", sources: files.Select(f => f.Path).ToList(), fileCount: files.Count, waiting: true);
-                _svc.Transfers.RegisterCancel(OutKey(id), () => { try { userCts.Cancel(); } catch (ObjectDisposedException) { } });
+                if (!clip) // a clipboard transfer is quiet: no card on the board
+                {
+                    _svc.Transfers.Start(OutKey(id), _session.PeerName, incoming: false, Label(files.Select(f => f.Name).ToList()), og.Total,
+                                         peerId: _session.PeerId ?? "", sources: files.Select(f => f.Path).ToList(), fileCount: files.Count, waiting: true);
+                    _svc.Transfers.RegisterCancel(OutKey(id), () => { try { userCts.Cancel(); } catch (ObjectDisposedException) { } });
+                }
 
                 var acceptTask = og.Accepted.Task;
                 if (await Task.WhenAny(acceptTask, Task.Delay(TimeSpan.FromSeconds(30), ct)).ConfigureAwait(false) != acceptTask)
