@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.outlined.Computer
@@ -49,6 +50,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -59,12 +61,11 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.foundation.text.TextAutoSize
-import androidx.compose.ui.text.TextStyle
 
 /**
  * One line that shrinks (down to [min]) instead of wrapping or breaking a word: button labels, titles,
@@ -84,7 +85,7 @@ fun platformIcon(plat: String): ImageVector = when (plat) {
     else -> Icons.Outlined.Devices
 }
 
-fun platformLabel(plat: String): String = com.shazan.airbridge.net.Hub.app.getString(when (plat) {
+fun platformLabel(plat: String): String = com.shazan.airbridge.connection.ConnectionHub.app.getString(when (plat) {
     "macos" -> com.shazan.airbridge.R.string.plat_mac; "windows" -> com.shazan.airbridge.R.string.plat_windows
     "linux" -> com.shazan.airbridge.R.string.plat_linux; "android" -> com.shazan.airbridge.R.string.plat_android
     "ios" -> com.shazan.airbridge.R.string.plat_ios
@@ -92,7 +93,7 @@ fun platformLabel(plat: String): String = com.shazan.airbridge.net.Hub.app.getSt
 })
 
 /** "your Mac" / "your PC" for instructions. */
-fun platformNoun(plat: String): String = com.shazan.airbridge.net.Hub.app.getString(when (plat) {
+fun platformNoun(plat: String): String = com.shazan.airbridge.connection.ConnectionHub.app.getString(when (plat) {
     "macos" -> com.shazan.airbridge.R.string.noun_mac; "windows" -> com.shazan.airbridge.R.string.noun_pc
     "android" -> com.shazan.airbridge.R.string.noun_phone; "ios" -> com.shazan.airbridge.R.string.noun_iphone
     else -> com.shazan.airbridge.R.string.noun_computer
@@ -272,8 +273,9 @@ fun SwitchRow(title: String, subtitle: String?, checked: Boolean, onChange: (Boo
         Switch(
             checked = checked, onCheckedChange = null, enabled = enabled,
             colors = SwitchDefaults.colors(
-                checkedThumbColor = OnAccent,
-                checkedTrackColor = Accent,
+                checkedThumbColor = Background,
+                checkedTrackColor = OnSurface,
+                checkedBorderColor = Color.Transparent,
                 uncheckedThumbColor = MaterialTheme.colorScheme.onSurfaceVariant,
                 uncheckedTrackColor = MaterialTheme.colorScheme.surfaceVariant,
                 uncheckedBorderColor = MaterialTheme.colorScheme.outline,

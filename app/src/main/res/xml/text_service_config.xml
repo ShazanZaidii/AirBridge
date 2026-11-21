@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Optional service "AirBridge Typing & Clipboard" (AirBridgeTextService). Everything here is the
+  Optional service "AirBridge Typing & Clipboard" (TypingAccessibilityService). Everything here is the
   minimum the screen-content features need; keep it that way (each change switches the service off
   after an update).
 

@@ -61,6 +61,9 @@
     <!-- Calls on the computer: only the number of the call that is ringing now (Android gives it with this
          permission only), so the computer shows who is calling from the first ring. The call history is never read. -->
     <uses-permission android:name="android.permission.READ_CALL_LOG" />
+    <!-- The number of a call the user makes from this phone (the dialer's own screen never shows it to apps), so the
+         computer names who is being called. Only that number, only while the call is being set up. -->
+    <uses-permission android:name="android.permission.PROCESS_OUTGOING_CALLS" />
     <uses-feature android:name="android.hardware.telephony" android:required="false" />
 
     <!-- App names and icons for forwarded notifications (Android 11+ package visibility): launcher apps only. -->
@@ -133,7 +136,7 @@
 
         <!-- "Are you sure?" for the Cancel button of a running transfer (notification action). -->
         <activity
-            android:name=".TransferCancelActivity"
+            android:name=".transfer.TransferCancelActivity"
             android:excludeFromRecents="true"
             android:exported="false"
             android:launchMode="singleTop"
@@ -142,7 +145,7 @@
             android:theme="@android:style/Theme.Translucent.NoTitleBar" />
 
         <activity
-            android:name=".SyncActivity"
+            android:name=".clipboard.SyncActivity"
             android:excludeFromRecents="true"
             android:exported="false"
             android:noHistory="true"
@@ -150,7 +153,7 @@
             android:theme="@android:style/Theme.Translucent.NoTitleBar" />
 
         <activity
-            android:name=".ShareActivity"
+            android:name=".share.ShareActivity"
             android:excludeFromRecents="true"
             android:exported="true"
             android:taskAffinity=""
@@ -166,7 +169,7 @@
         <!-- AirWeb: serves a web page so a device without the app can swap files (share sheet, Settings).
              Opens inside whatever opened it (AirBridge, or the app you shared from), so Back returns there. -->
         <activity
-            android:name=".AirWebActivity"
+            android:name=".airweb.AirWebActivity"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
             android:exported="false"
             android:label="@string/airweb"
@@ -175,7 +178,7 @@
 
         <!-- Keeps the one AirWeb session alive after its screen is closed (Back no longer ends it). -->
         <service
-            android:name=".AirWebService"
+            android:name=".airweb.AirWebService"
             android:exported="false"
             android:foregroundServiceType="connectedDevice"
             android:label="@string/airweb" />
@@ -192,10 +195,10 @@
         </provider>
 
         <!-- Puts the transfer notification back if it is swiped away while the transfer still runs. -->
-        <receiver android:name=".net.TransferNotifs$Deleted" android:exported="false" />
+        <receiver android:name=".transfer.TransferNotifs$Deleted" android:exported="false" />
 
         <service
-            android:name=".AirBridgeService"
+            android:name=".app.AirBridgeService"
             android:exported="false"
             android:foregroundServiceType="connectedDevice"
             android:label="@string/app_name" />
@@ -218,7 +221,7 @@
             android:exported="false" />
 
         <service
-            android:name=".AirBridgeTileService"
+            android:name=".clipboard.ClipboardTileService"
             android:exported="true"
             android:icon="@drawable/ic_launcher_foreground"
             android:label="@string/tile_sync_clipboard"
@@ -229,7 +232,7 @@
         </service>
 
         <service
-            android:name=".AirBridgeInputService"
+            android:name=".control.accessibility.ControlAccessibilityService"
             android:exported="true"
             android:label="@string/svc_core_name"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
@@ -243,7 +246,7 @@
 
         <!-- Optional: the only part that can read screen content (typing, copy/paste, copy detection). -->
         <service
-            android:name=".AirBridgeTextService"
+            android:name=".control.accessibility.TypingAccessibilityService"
             android:exported="true"
             android:label="@string/svc_text_name"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
@@ -258,7 +261,7 @@
         <!-- Phone notifications on your computers (PROTOCOL §13). Bound by the system only after the user
              allows notification access; forwards nothing until the Settings switch is on. -->
         <service
-            android:name=".phone.PhoneNotifListener"
+            android:name=".phone.notifications.PhoneNotificationListener"
             android:exported="true"
             android:label="@string/pn_listener_name"
             android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
@@ -269,7 +272,7 @@
 
         <!-- Only reacts to protected system broadcasts. -->
         <receiver
-            android:name=".BootReceiver"
+            android:name=".app.BootReceiver"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
@@ -281,7 +284,7 @@
              Always landscape (either side, by the sensor, whatever auto-rotate says), and usable from
              the lock screen like v1: showWhenLocked + turnScreenOn. -->
         <activity
-            android:name=".TrackpadActivity"
+            android:name=".control.trackpad.TrackpadActivity"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
             android:excludeFromRecents="true"
             android:exported="true"

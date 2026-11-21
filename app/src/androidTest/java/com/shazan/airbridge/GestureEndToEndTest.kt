@@ -14,8 +14,9 @@ import androidx.compose.ui.test.performClick
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
-import com.shazan.airbridge.net.PeerBus
-import com.shazan.airbridge.net.PeerInfo
+import com.shazan.airbridge.connection.PeerBus
+import com.shazan.airbridge.connection.PeerInfo
+import com.shazan.airbridge.control.trackpad.TrackpadActivity
 import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertEquals

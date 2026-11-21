@@ -22,10 +22,10 @@ import android.view.Display
 import android.view.RoundedCorner
 import androidx.core.app.NotificationCompat
 import com.shazan.airbridge.R
-import com.shazan.airbridge.net.Hub
-import com.shazan.airbridge.net.Notifs
-import com.shazan.airbridge.net.PeerBus
-import com.shazan.airbridge.net.Protocol
+import com.shazan.airbridge.app.Notifs
+import com.shazan.airbridge.connection.ConnectionHub
+import com.shazan.airbridge.connection.PeerBus
+import com.shazan.airbridge.connection.session.Protocol
 import org.json.JSONObject
 
 /**
@@ -56,7 +56,7 @@ object PhoneMirror {
 
     private val thread by lazy { HandlerThread("airbridge-mirror-src").apply { start() } }
     private val h by lazy { Handler(thread.looper) }
-    private val app: Context get() = Hub.app
+    private val app: Context get() = ConnectionHub.app
 
     /** API 29+ (FGS type `mediaProjection`, `MediaCodecInfo.isHardwareAccelerated`) with a hardware H.264 encoder. */
     val supported: Boolean by lazy {
@@ -145,7 +145,7 @@ object PhoneMirror {
             val s = Stream(p.sink, p.name, p.req, p.codec, mp)
             stream = s
             // Wi-Fi out of power save while streaming: power-save sleeps add 100 ms or more of lag per frame.
-            com.shazan.airbridge.net.TransferLocks.acquire(app)
+            com.shazan.airbridge.transfer.TransferLocks.acquire(app)
             streamingTo = p.sink
             if (!s.start()) {
                 Log.w(TAG, "stream setup failed")
@@ -195,7 +195,7 @@ object PhoneMirror {
         send(peer, JSONObject().put("t", "mirror_wait").put("reason", "consent"))
         h.removeCallbacks(consentTimeout)
         h.postDelayed(consentTimeout, CONSENT_TIMEOUT_MS)
-        Hub.main.post { askConsent(info.name) }
+        ConnectionHub.main.post { askConsent(info.name) }
         Log.i(TAG, "${info.name} asks to show this screen ($codec, max ${req.maxW}x${req.maxH}@${req.fps})")
     }
 
@@ -211,7 +211,7 @@ object PhoneMirror {
         pending = null
         pendingSink = null
         h.removeCallbacks(consentTimeout)
-        Hub.main.post { try { Notifs.cancel(NOTIF_REQUEST) } catch (_: Throwable) {} }
+        ConnectionHub.main.post { try { Notifs.cancel(NOTIF_REQUEST) } catch (_: Throwable) {} }
     }
 
     private fun stopFor(peer: String, reason: String?) {
@@ -224,7 +224,7 @@ object PhoneMirror {
         stream = null
         streamingTo = null
         s.release()
-        com.shazan.airbridge.net.TransferLocks.release()
+        com.shazan.airbridge.transfer.TransferLocks.release()
         if (notifySink) send(s.sink, stopMsg(reason))
         Log.i(TAG, "stopped showing the screen to ${s.name} ($reason)")
         try { MirrorService.stop(app) } catch (_: Throwable) {}
@@ -430,7 +430,7 @@ object PhoneMirror {
             updateSuspend()
         }
 
-        private fun queued(): Long = try { Hub.readySession(sink)?.link?.queuedBytes() ?: 0L } catch (_: Throwable) { 0L }
+        private fun queued(): Long = try { ConnectionHub.readySession(sink)?.link?.queuedBytes() ?: 0L } catch (_: Throwable) { 0L }
 
         private fun updateSuspend() { enc?.suspend(!flow.open || queued() > MAX_QUEUED_BYTES) }
 

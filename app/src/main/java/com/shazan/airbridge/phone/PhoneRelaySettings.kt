@@ -6,8 +6,9 @@ import android.content.Context
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.provider.Settings
-import androidx.core.content.ContextCompat
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
+import com.shazan.airbridge.phone.notifications.PhoneNotificationListener
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
@@ -32,6 +33,7 @@ object PhoneRelaySettings {
         Manifest.permission.ANSWER_PHONE_CALLS,
         Manifest.permission.READ_CONTACTS,
         Manifest.permission.READ_CALL_LOG,
+        Manifest.permission.PROCESS_OUTGOING_CALLS,
     ) + (if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) arrayOf(Manifest.permission.BLUETOOTH_ADVERTISE) else emptyArray())
 
     private var prefs: SharedPreferences? = null
@@ -81,7 +83,7 @@ object PhoneRelaySettings {
     fun hasNotificationAccess(ctx: Context): Boolean =
         NotificationManagerCompat.getEnabledListenerPackages(ctx).contains(ctx.packageName)
 
-    fun listenerComponent(ctx: Context): ComponentName = ComponentName(ctx, PhoneNotifListener::class.java)
+    fun listenerComponent(ctx: Context): ComponentName = ComponentName(ctx, PhoneNotificationListener::class.java)
 
     /** The page with our listener's switch (its own page on Android 11+, else the list of all listeners). */
     fun accessIntent(ctx: Context): android.content.Intent =
@@ -98,4 +100,12 @@ object PhoneRelaySettings {
     fun canReadContacts(ctx: Context): Boolean = granted(ctx, Manifest.permission.READ_CONTACTS)
     /** Android hands over the ringing call's number only with Call logs. */
     fun canSeeNumber(ctx: Context): Boolean = granted(ctx, Manifest.permission.READ_CALL_LOG)
+
+    /** The number of a call this phone is placing (Android sends it to apps holding this permission only). */
+    fun canSeeOutgoing(ctx: Context): Boolean = granted(ctx, Manifest.permission.PROCESS_OUTGOING_CALLS)
+
+    /** The "Call logs" step asks for both: the ringing call's number and the number being dialled. */
+    val CALL_LOG_PERMISSIONS: Array<String> = arrayOf(Manifest.permission.READ_CALL_LOG, Manifest.permission.PROCESS_OUTGOING_CALLS)
+
+    fun canSeeNumbers(ctx: Context): Boolean = canSeeNumber(ctx) && canSeeOutgoing(ctx)
 }

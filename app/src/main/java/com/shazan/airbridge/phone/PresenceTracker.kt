@@ -1,5 +1,7 @@
 package com.shazan.airbridge.phone
 
+import com.shazan.airbridge.phone.notifications.NotifWire
+
 /**
  * Is the user on the phone right now (§13.4)? Pure, unit-tested; [PhonePresence] feeds it Android's events.
  *

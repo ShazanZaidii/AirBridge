@@ -476,12 +476,12 @@
     <string name="aw_notif_waiting">En attente d\'un navigateur</string>
     <string name="aw_running">AirWeb est actif</string>
     <string name="pp_title">Applis de paiement</string>
-    <string name="pp_switch">Couper le contrôle quand une appli UPI est ouverte</string>
-    <string name="pp_switch_sub">Paytm, PhonePe, Google Pay et BHIM refusent de payer tant qu\'un service d\'accessibilité est actif. AirBridge désactive ses deux services quand ces applis sont au premier plan ou qu\'aucun appareil n\'est connecté depuis une minute, et les réactive quand il le faut.</string>
+    <string name="pp_switch">Mettre en pause le contrôle à distance quand une app de paiement est ouverte</string>
+    <string name="pp_switch_sub">Les apps bancaires et de paiement, comme Paytm, PhonePe et Google Pay, refusent un paiement tant qu\'un service d\'accessibilité est activé, et le contrôle à distance en est un. Si cette option est activée, AirBridge désactive le contrôle à distance quand l\'une de ces apps est au premier plan et le réactive quand vous la quittez. Il le désactive aussi quand aucun de vos ordinateurs n\'a été connecté depuis une minute, et le réactive dès qu\'un se connecte.</string>
     <string name="pp_usage">Accès aux données d\'utilisation</string>
-    <string name="pp_usage_sub">Uniquement pour savoir si l\'une de ces applis est au premier plan.</string>
-    <string name="pp_secure">Se réactive tout seul</string>
-    <string name="pp_secure_sub">Demande une autorisation unique depuis un ordinateur : adb shell pm grant com.shazan.airbridge android.permission.WRITE_SECURE_SETTINGS. Sans elle, vous réactivez le contrôle vous-même après le paiement, et la désactivation sans appareil est ignorée.</string>
+    <string name="pp_usage_sub">Permet à AirBridge de voir quelle app est au premier plan, uniquement pour repérer une app de paiement. Sans cela, AirBridge ne sait pas quand vous en ouvrez une, et votre paiement peut être bloqué.</string>
+    <string name="pp_secure">Réactiver le contrôle automatiquement</string>
+    <string name="pp_secure_sub">Android n\'autorise AirBridge à réactiver lui-même le contrôle à distance qu\'avec une autorisation spéciale, que seul un ordinateur peut donner. Cela demande une configuration unique, environ 10 minutes. Sans elle, vous réactivez le contrôle à distance vous-même après chaque paiement, et AirBridge ne peut pas le désactiver quand aucun ordinateur n\'est connecté.</string>
     <string name="pp_copy">Copier la commande</string>
     <string name="pp_copied">Commande copiée</string>
     <string name="pp_notif_title">Le contrôle AirBridge est coupé</string>

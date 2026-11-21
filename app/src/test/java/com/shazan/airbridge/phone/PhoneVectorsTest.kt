@@ -1,5 +1,6 @@
 package com.shazan.airbridge.phone
 
+import com.shazan.airbridge.phone.notifications.NotifWire
 import org.junit.Assert.assertEquals
 import org.junit.Test
 import java.io.File
