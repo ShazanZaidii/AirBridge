@@ -548,6 +548,14 @@ nonisolated final class Controller: @unchecked Sendable {
         escDowns.removeAll()
         pendingDX = 0; pendingDY = 0
         CGAssociateMouseAndMouseCursorPosition(0)
+        // A carried file drag is still held on the Mac: park the frozen cursor a little inside the screen, not on the
+        // very edge, or macOS keeps switching Spaces (see CarryPark).
+        var park: CarryPark?
+        if !files.isEmpty, let r = geometry().display(at: anchor) {
+            park = CarryPark.make(display: r, vertical: edge.isVertical, atMin: edge == .left || edge == .top,
+                                  along: edge.isVertical ? anchor.y : anchor.x, span: span)
+            CGWarpMouseCursorPosition(park!.point)
+        }
         ControlGate.shared.controlling = peer
         // The cursor stays visible (frozen at the edge) until the target confirms its own cursor is up, so there is
         // never a moment with no cursor anywhere. It is hidden in remoteAck.
@@ -561,8 +569,11 @@ nonisolated final class Controller: @unchecked Sendable {
             PeerBus.shared.send(to: peer, DragPayload.describe(files).message(id: id))
             // Let the drag session see the cursor resting on the catcher (it may have arrived there in one jump).
             // Queued on main behind the catcher's show, so the panel is up when the event arrives.
+            let rest = park?.point ?? anchor
+            let wide = park?.rect
             DispatchQueue.main.async {
-                Injector.post(CGEvent(mouseEventSource: nil, mouseType: .leftMouseDragged, mouseCursorPosition: anchor, mouseButton: .left))
+                if let wide { DropCatcher.shared.show(rect: wide) }
+                Injector.post(CGEvent(mouseEventSource: nil, mouseType: .leftMouseDragged, mouseCursorPosition: rest, mouseButton: .left))
             }
             InputLog.shared.log("drag: carrying \(files.count) item(s) to \(peerName(peer))")
         }

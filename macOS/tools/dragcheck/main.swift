@@ -112,5 +112,33 @@ do {
     check(huge.count == 1_000_000_000 && huge.totalBytes > 0, "huge numbers are clamped, never trap")
 }
 
+// MARK: parking spot (the frozen cursor must not rest on the screen edge)
+
+do {
+    let screen = CGRect(x: 0, y: 0, width: 1512, height: 982)
+    func inside(_ p: CGPoint, _ r: CGRect) -> Bool { r.contains(p) }
+    // right edge (the usual: the phone sits to the right), cursor pinned at x = 1511, y = 400
+    let r = CarryPark.make(display: screen, vertical: true, atMin: false, along: 400, span: (100, 700))
+    check(r.point.x <= screen.maxX - 1 - CarryPark.inset + 0.001 && r.point.x > screen.maxX - CarryPark.depth, "right edge: parked inside, away from the edge")
+    check(inside(r.point, r.rect), "right edge: the catcher covers the parked cursor")
+    check(r.rect.maxX <= screen.maxX && r.rect.minY >= screen.minY && r.rect.maxY <= screen.maxY, "right edge: catcher stays on the display")
+    check(r.point.y == 400, "right edge: same height as the cursor")
+    let l = CarryPark.make(display: screen, vertical: true, atMin: true, along: 400, span: (100, 700))
+    check(l.point.x >= CarryPark.inset - 0.001 && l.point.x < CarryPark.depth && inside(l.point, l.rect) && l.rect.minX == 0, "left edge")
+    let t = CarryPark.make(display: screen, vertical: false, atMin: true, along: 900, span: (0, 1512))
+    check(t.point.y >= CarryPark.inset - 0.001 && inside(t.point, t.rect) && t.rect.minY == 0, "top edge")
+    let b = CarryPark.make(display: screen, vertical: false, atMin: false, along: 900, span: (0, 1512))
+    check(b.point.y <= screen.maxY - 1 - CarryPark.inset + 0.001 && inside(b.point, b.rect) && b.rect.maxY == screen.maxY, "bottom edge")
+    // a short span, and the cursor in a corner: still a catcher of a useful length that holds the cursor, on the display
+    let c = CarryPark.make(display: screen, vertical: true, atMin: false, along: 981, span: (975, 982))
+    check(inside(c.point, c.rect) && c.rect.height >= CarryPark.minAlong / 2 && c.rect.maxY <= screen.maxY && c.point.y <= screen.maxY - 2, "corner: clamped onto the display, catcher holds the cursor")
+    // the cursor is never closer to the edge than the inset
+    for (vert, min) in [(true, true), (true, false), (false, true), (false, false)] {
+        let q = CarryPark.make(display: screen, vertical: vert, atMin: min, along: 300, span: (0, 2000))
+        let d = vert ? (min ? q.point.x - screen.minX : screen.maxX - 1 - q.point.x) : (min ? q.point.y - screen.minY : screen.maxY - 1 - q.point.y)
+        check(d >= CarryPark.inset - 0.001, "never rests nearer the edge than the inset (vertical=\(vert) min=\(min))")
+    }
+}
+
 print("\(passed) passed, \(failed) failed")
 exit(failed == 0 ? 0 : 1)
