@@ -6,10 +6,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 
 /**
- * Local design tokens for the trackpad / keyboard / screen UI, taken from
- * the design tokens ("dark theme"). `ui/theme` does not define these
- * yet; when it does, point these at it. [Warning] and [KeyboardBg] are not in the shared tokens
- * (defined here; reported to the theme owner).
+ * Local design tokens for the trackpad / keyboard / screen UI. `ui/theme` does not define
+ * these yet; when it does, point these at it.
  */
 internal object Tp {
     // Same neutral graphite as the app (ui/theme/Color.kt), one blue accent, no green.
