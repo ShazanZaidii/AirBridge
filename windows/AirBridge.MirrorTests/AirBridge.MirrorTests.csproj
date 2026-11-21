@@ -11,5 +11,7 @@
 	</PropertyGroup>
 	<ItemGroup>
 		<Compile Include="../AirBridge/Input/MirrorSourceCore.cs" Link="Shared/MirrorSourceCore.cs" />
+		<Compile Include="../AirBridge/Input/VideoPixels.cs" Link="Shared/VideoPixels.cs" />
+		<Compile Include="../AirBridge/Input/H264Stream.cs" Link="Shared/H264Stream.cs" />
 	</ItemGroup>
 </Project>

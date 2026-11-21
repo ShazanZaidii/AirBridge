@@ -102,6 +102,7 @@ namespace AirBridge.Input
     {
         public MirrorUnavailable? Unavailable { get; }
         public UnavailableMirrorPlatform(string code, string message) { Unavailable = new MirrorUnavailable(code, message); }
+        public int MaxFps => 30;
         public MirrorDisplay PickDisplay() => new(0, 0, 0, 0, 0, 0);
         public IMirrorEncoder? CreateEncoder(IReadOnlyList<string> codecs, int w, int h, int fps, int bitrate, Action<EncodedFrame> output) => null;
         public IMirrorCapture? CreateCapture(MirrorDisplay display, int w, int h, int fps, Action<ICapturedFrame> onFrame, Action<string> onStopped) => null;

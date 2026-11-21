@@ -34,6 +34,8 @@ namespace AirBridge.Input
     {
         /// <summary>Null when a capture and an encoder can be made on this PC.</summary>
         MirrorUnavailable? Unavailable { get; }
+        /// <summary>The most frames per second this platform can capture and encode. A request above it is cut down, and mirror_info says so.</summary>
+        int MaxFps { get; }
         /// <summary>The display to mirror: the one under the cursor, else the primary.</summary>
         MirrorDisplay PickDisplay();
         IMirrorEncoder? CreateEncoder(IReadOnlyList<string> codecs, int w, int h, int fps, int bitrate, Action<EncodedFrame> output);
@@ -153,7 +155,7 @@ namespace AirBridge.Input
 
             var codecs = (m["codecs"] as JsonArray)?.Select(n => n?.GetValue<string>()).Where(s => s != null).Select(s => s!).ToList() ?? new List<string> { "h264" };
             if (codecs.Count == 0) codecs.Add("h264");
-            int fps = Math.Clamp((int?)Num(m, "fps") ?? 60, 10, 120);
+            int fps = Math.Min(Math.Clamp((int?)Num(m, "fps") ?? 60, 10, 120), Math.Max(10, _platform.MaxFps));
             int maxW = Math.Max(160, (int?)Num(m, "maxW") ?? 1920);
             int maxH = Math.Max(160, (int?)Num(m, "maxH") ?? 1080);
             int bitrate = Math.Clamp((int?)Num(m, "bitrate") ?? 8_000_000, MinBitrate, 80_000_000);
