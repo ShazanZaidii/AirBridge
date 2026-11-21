@@ -163,7 +163,7 @@ class CallExperienceTest {
     }
 
     @Test fun matchesSharedVectors() {
-        val f = listOf(java.io.File("../docs/test-vectors/call-experience.jsonl"), java.io.File("docs/test-vectors/call-experience.jsonl")).first { it.exists() }
+        val f = listOf(java.io.File("../../docs/test-vectors/call-experience.jsonl"), java.io.File("../docs/test-vectors/call-experience.jsonl"), java.io.File("docs/test-vectors/call-experience.jsonl")).first { it.exists() }
         val lines = f.readLines().filter { it.isNotBlank() }
         val ringing = NotifWire.Call("c4-mxk2b0", NotifWire.CallState.RINGING, "Asha Kapoor", "+91 98765 43210", null,
             can = listOf("answer", "decline"), label = "Mobile")
