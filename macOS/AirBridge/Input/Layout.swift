@@ -68,6 +68,38 @@ nonisolated final class Layout: @unchecked Sendable {
         return map
     }
 
+    /// A reinstalled device keeps the spot you gave it: its placement moves from the old id to the new one (if the new
+    /// one has none yet).
+    func migrate(from old: String, to new: String) {
+        lock.lock()
+        guard old != new, let p = map[old] else { lock.unlock(); return }
+        if map[new] == nil { map[new] = p }
+        map[old] = nil
+        persistLocked()
+        lock.unlock()
+        notify()
+    }
+
+    /// Forget the placement of a device that is no longer paired.
+    func remove(_ id: String) {
+        lock.lock()
+        guard map.removeValue(forKey: id) != nil else { lock.unlock(); return }
+        persistLocked()
+        lock.unlock()
+        notify()
+    }
+
+    /// Drop every placement whose device is no longer paired (dead ids from reinstalls, forgotten devices).
+    func prune(keeping ids: Set<String>) {
+        lock.lock()
+        let dead = map.keys.filter { !ids.contains($0) }
+        guard !dead.isEmpty else { lock.unlock(); return }
+        for id in dead { map[id] = nil }
+        persistLocked()
+        lock.unlock()
+        notify()
+    }
+
     /// Assigns `id` to `edge` (nil parks it). Any other peer on that edge is parked (§8.1: one per edge).
     func set(_ id: String, edge: ScreenEdge?, start: Double, end: Double, name: String) {
         lock.lock()

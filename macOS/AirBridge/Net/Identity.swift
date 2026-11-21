@@ -1,6 +1,8 @@
 import Foundation
 import CoreGraphics
 import SystemConfiguration
+import CryptoKit
+import IOKit
 
 /// This device's protocol identity (§2.1).
 nonisolated enum Identity {
@@ -12,6 +14,18 @@ nonisolated enum Identity {
         let s = UUID().uuidString.lowercased()
         UserDefaults.standard.set(s, forKey: idKey)
         return s
+    }()
+
+    /// A fingerprint of this Mac that survives reinstalling the app (a hash of the hardware UUID, never the UUID itself).
+    /// `id` is new whenever the app's data is cleared, so a device that remembers only `id` keeps a stale entry per reset;
+    /// with this it can tell "same Mac, new install" from "a different Mac with the same name". Nil if unreadable.
+    static let hw: String? = {
+        let service = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("IOPlatformExpertDevice"))
+        guard service != 0 else { return nil }
+        defer { IOObjectRelease(service) }
+        guard let uuid = IORegistryEntryCreateCFProperty(service, "IOPlatformUUID" as CFString, kCFAllocatorDefault, 0)?
+            .takeRetainedValue() as? String, !uuid.isEmpty else { return nil }
+        return SHA256.hash(data: Data("airbridge-hw|\(uuid)".utf8)).prefix(16).map { String(format: "%02x", $0) }.joined()
     }()
 
     /// User override, otherwise the computer name.
@@ -42,6 +56,7 @@ nonisolated enum Identity {
             "pk": publicKey.base64EncodedString(), "screen": ["w": screen.w, "h": screen.h],
         ]
         if let paired { msg["paired"] = paired }
+        if let hw { msg["hw"] = hw }
         return msg
     }
 }

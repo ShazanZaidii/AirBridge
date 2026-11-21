@@ -13,17 +13,126 @@
 			</array>
 		</dict>
 	</array>
-	<key>NSLocalNetworkUsageDescription</key>
-	<string>AirBridge finds and connects to your phone and other computers on this network to sync the clipboard, send files and share the keyboard and mouse.</string>
-	<key>NSBluetoothAlwaysUsageDescription</key>
-	<string>AirBridge uses Bluetooth to tell whether your phone is next to this Mac, so calls ring where you are.</string>
 	<key>NSAppleEventsUsageDescription</key>
 	<string>AirBridge asks System Events to show or hide the menu bar when you tap the menu bar shortcut on your phone.</string>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>AirBridge uses Bluetooth to tell whether your phone is next to this Mac, so calls ring where you are.</string>
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_airbridge._tcp</string>
 		<string>_adb-tls-pairing._tcp</string>
 		<string>_adb-tls-connect._tcp</string>
+	</array>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>AirBridge finds and connects to your phone and other computers on this network to sync the clipboard, send files and share the keyboard and mouse.</string>
+	<key>NSServices</key>
+	<array>
+		<dict>
+			<key>NSMenuItem</key>
+			<dict>
+				<key>default</key>
+				<string>Send with AirBridge</string>
+			</dict>
+			<key>NSMessage</key>
+			<string>sendWithAirBridge</string>
+			<key>NSPortName</key>
+			<string>AirBridge</string>
+			<key>NSSendFileTypes</key>
+			<array>
+				<string>public.item</string>
+			</array>
+		</dict>
+	</array>
+	<key>UTExportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>com.apple.accessory-device</string>
+			</array>
+			<key>UTTypeDescription</key>
+			<string>Windows PC (AirBridge)</string>
+			<key>UTTypeIcons</key>
+			<dict>
+				<key>UTTypeSymbolName</key>
+				<string>pc</string>
+			</dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.shazan.airbridge.device.windows</string>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.bluetooth-vendor-product-id</key>
+				<array>
+					<string>76:64001</string>
+				</array>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>com.apple.accessory-device</string>
+			</array>
+			<key>UTTypeDescription</key>
+			<string>Linux computer (AirBridge)</string>
+			<key>UTTypeIcons</key>
+			<dict>
+				<key>UTTypeSymbolName</key>
+				<string>terminal.fill</string>
+			</dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.shazan.airbridge.device.linux</string>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.bluetooth-vendor-product-id</key>
+				<array>
+					<string>76:64002</string>
+				</array>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>com.apple.accessory-device</string>
+			</array>
+			<key>UTTypeDescription</key>
+			<string>Mac (AirBridge)</string>
+			<key>UTTypeIcons</key>
+			<dict>
+				<key>UTTypeSymbolName</key>
+				<string>macbook</string>
+			</dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.shazan.airbridge.device.mac</string>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.bluetooth-vendor-product-id</key>
+				<array>
+					<string>76:64003</string>
+				</array>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>com.apple.accessory-device</string>
+			</array>
+			<key>UTTypeDescription</key>
+			<string>Computer (AirBridge)</string>
+			<key>UTTypeIcons</key>
+			<dict>
+				<key>UTTypeSymbolName</key>
+				<string>desktopcomputer</string>
+			</dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.shazan.airbridge.device.computer</string>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.bluetooth-vendor-product-id</key>
+				<array>
+					<string>76:64005</string>
+				</array>
+			</dict>
+		</dict>
 	</array>
 </dict>
 </plist>

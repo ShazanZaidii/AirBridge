@@ -321,9 +321,29 @@ import SwiftUI
     }
 
     private func accept(_ pb: NSPasteboard, slot: DockSlot.Kind?) -> Bool {
-        let urls = DropItems.fileURLs(pb)
-        let promises = urls.isEmpty ? DropItems.promises(pb) : []
-        guard !urls.isEmpty || !promises.isEmpty else { return false }
+        var dropped = DropItems.fileURLs(pb)
+        var promises = dropped.isEmpty ? DropItems.promises(pb) : []
+        // The screenshot thumbnail (and other apps' temporary exports) carry a file promise next to a file URL into a
+        // folder AirBridge may not read ("you don't have permission"). The promise is the sanctioned way: the sender
+        // writes the file for us at drop time. So when any URL is short-lived and a promise is there, take the promise.
+        if !dropped.isEmpty, dropped.contains(where: DropItems.isVolatile) {
+            let p = DropItems.promises(pb)
+            if !p.isEmpty { promises = p; dropped = [] }
+        }
+        guard !dropped.isEmpty || !promises.isEmpty else { return false }
+        // Files that only exist while the drag lasts (the screenshot thumbnail, a recording preview) are copied now,
+        // before anything else: macOS removes them as soon as the drop ends, long before the send starts.
+        let staged = DropItems.stageVolatile(dropped)
+        let failed = Set(staged.failed.map(\.path))
+        let urls = staged.files.filter { !failed.contains($0.path) }
+        // Log what the drag carried: a drop that fails must say why (Settings → Input log, or ~/Library/Logs/AirBridge/input.log).
+        InputLog.shared.log("drop: \(dropped.count) file URL(s), \(promises.count) promise(s) (preferred when the URLs are short-lived), types \((pb.types ?? []).map(\.rawValue).prefix(8)); " +
+                            (staged.failed.isEmpty ? "ok" : "could not copy: \(staged.errors.joined(separator: "; "))"))
+        // If the copy failed but the drag also carries a promise, take the promise (the sender writes the file for us).
+        let usePromises = !staged.failed.isEmpty && urls.isEmpty ? DropItems.promises(pb) : promises
+        let recover = urls.isEmpty && !usePromises.isEmpty ? [] : staged.failed
+        let image = recover.isEmpty ? nil : DropItems.imageData(pb)
+        guard !urls.isEmpty || !usePromises.isEmpty || !recover.isEmpty else { return false }
         cancelClose()
         // With one device, a drop anywhere means that device; the bubble the drop landed on otherwise.
         let target: DockSlot.Kind? = slot ?? (model.targets.count == 1 ? .device(model.targets[0].id) : nil)
@@ -335,11 +355,12 @@ import SwiftUI
             model.held = true
             model.cursor = nil
         }
-        Self.resolve(urls: urls, promises: promises) { [weak self] files, temp in
+        Self.resolve(urls: urls, promises: usePromises, extraTemp: staged.temp, recover: recover, image: image) { [weak self] files, temp in
             guard let self else { Self.removeTemp(temp); return }
             guard !files.isEmpty else {
                 Self.removeTemp(temp)
-                AppModel.shared.notice("Only files and folders with files in them can be sent")
+                AppModel.shared.notice(recover.isEmpty ? "Only files and folders with files in them can be sent"
+                    : "Could not read \(recover[0].lastPathComponent): macOS removed it when you let go. Wait for the thumbnail to save, then drag the saved file.")
                 self.close()
                 return
             }
@@ -381,7 +402,8 @@ import SwiftUI
     func dismissHeld() { closeHeld() }
 
     private func route(_ files: [URL], temp: [URL], to kind: DockSlot.Kind) {
-        let cleanup: (() -> Void)? = temp.isEmpty ? nil : { Self.removeTemp(temp) }
+        // Not at once when the send ends: a failed card can still be retried from the copies.
+        let cleanup: (() -> Void)? = temp.isEmpty ? nil : { DropItems.removeTempLater(temp) }
         switch kind {
         case .airWeb:
             AirWebWindow.shared.show(offering: files, batches: temp)
@@ -403,12 +425,24 @@ import SwiftUI
 
     /// Turns dropped URLs (folders walked) and file promises (received into a temporary folder) into files.
     /// `temp` lists folders to delete once the files are no longer needed.
-    private static func resolve(urls: [URL], promises: [NSFilePromiseReceiver],
+    private static func resolve(urls: [URL], promises: [NSFilePromiseReceiver], extraTemp: [URL] = [],
+                                recover: [URL] = [], image: Data? = nil,
                                 done: @escaping @MainActor (_ files: [URL], _ temp: [URL]) -> Void) {
-        if !urls.isEmpty {
+        if !urls.isEmpty || !recover.isEmpty {
             DispatchQueue.global(qos: .userInitiated).async {
-                let files = DropItems.expand(urls)
-                onMain { done(files, []) }
+                var files = DropItems.expand(urls)
+                var temp = extraTemp
+                var dir: URL? = temp.first
+                for bad in recover {
+                    if let u = DropItems.recover(bad, imageData: image, stagingDir: &dir) {
+                        files.append(u)
+                        InputLog.shared.log("drop: recovered \(bad.lastPathComponent) from \(u.deletingLastPathComponent().lastPathComponent)/")
+                    } else {
+                        InputLog.shared.log("drop: could not recover \(bad.lastPathComponent)")
+                    }
+                }
+                if let dir, !temp.contains(dir) { temp.append(dir) }
+                onMain { done(files, temp) }
             }
             return
         }

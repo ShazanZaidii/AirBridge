@@ -23,6 +23,9 @@ import UserNotifications
     /// Confirm-mode pairings waiting for the user (§3.3), oldest first.
     @Published var pairPrompts: [PairPrompt] = []
 
+    /// Older entries that look like earlier installs of a device that just connected: asked about, never removed unasked.
+    @Published var staleOffer: StaleOffer?
+
     /// Control state from the input half, e.g. "Controlled by Pixel 9" or
     /// "Controlling Pixel 9 · Ctrl+Opt+Cmd+Esc to return". nil = idle.
     ///

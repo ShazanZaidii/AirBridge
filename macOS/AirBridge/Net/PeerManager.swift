@@ -16,6 +16,12 @@ nonisolated struct DeviceRow: Identifiable, Equatable, Sendable {
     let status: String?
 }
 
+/// Older entries that look like earlier installs of a device that just connected, offered to the user for removal.
+nonisolated struct StaleOffer: Equatable, Sendable {
+    let name: String
+    let ids: [String]
+}
+
 /// UI row for an unpaired host found over mDNS.
 nonisolated struct HostRow: Identifiable, Equatable, Sendable {
     let id: String
@@ -62,6 +68,9 @@ nonisolated final class PeerManager: PeerTransport, @unchecked Sendable {
         queue.async { [self] in
             guard !started else { return }
             started = true
+            // Screen placements left behind by devices that are no longer paired (every reinstall used to leave one).
+            let paired = Set(PeerStore.shared.all().map(\.id))
+            if !paired.isEmpty { Layout.shared.prune(keeping: paired) }
             localIP = NetworkUtils.getLocalIPAddress()
             Pairing.shared.onChange = { [weak self] _ in self?.queue.async { self?.publishPairing() } }
             Pairing.shared.start()
@@ -255,8 +264,60 @@ nonisolated final class PeerManager: PeerTransport, @unchecked Sendable {
             if let a = s.remoteAddress { setLastAddress(s.peerId, "\(a.host)|\(a.port)") }
         }
         connectors[s.peerId]?.sessionReady(s)
+        tidyOlderEntries(for: s)
         publishPeers()
         publishUI()
+    }
+
+    // MARK: Entries left by reinstalls
+
+    private static let dismissedKey = "AirBridge.staleDismissed"
+
+    private func entries() -> [StaleDevices.Entry] {
+        PeerStore.shared.all().map { StaleDevices.Entry(id: $0.id, name: $0.name, plat: $0.plat, hw: $0.hw) }
+    }
+
+    /// A device just connected. If it is the same physical device as older entries (same fingerprint), those entries are
+    /// dead: replace them, and the screen placement you gave the device moves to its new id. Older entries from before
+    /// fingerprints existed can't be proven, so the user is asked about them once instead.
+    private func tidyOlderEntries(for s: Session) {
+        guard let hw = s.peerHw, PeerStore.shared.hasKey(s.peerId) else { return }
+        PeerStore.shared.setHw(id: s.peerId, hw: hw)
+        let connected = Set(ready.keys)
+        let gone = StaleDevices.superseded(current: s.peerId, hw: hw, among: entries(), connected: connected)
+        for e in gone {
+            Layout.shared.migrate(from: e.id, to: s.peerId)
+            removePeer(e.id)
+        }
+        if !gone.isEmpty {
+            let name = s.peerName
+            onMain { AppModel.shared.notice("\(name) was reinstalled: its old entry was replaced") }
+        }
+        let me = StaleDevices.Entry(id: s.peerId, name: s.peerName, plat: s.peerPlat, hw: hw)
+        let dismissed = Set(UserDefaults.standard.stringArray(forKey: Self.dismissedKey) ?? [])
+        let maybe = StaleDevices.candidates(current: me, among: entries(), connected: connected, dismissed: dismissed)
+        let offer = maybe.isEmpty ? nil : StaleOffer(name: s.peerName, ids: maybe.map(\.id))
+        onMain { AppModel.shared.staleOffer = offer }
+    }
+
+    /// The user's answer to a [StaleOffer]: remove those entries (their screen placement moves to the device that is
+    /// connected now) or keep them and don't ask again.
+    func resolveStale(_ offer: StaleOffer, remove: Bool) {
+        queue.async { [self] in
+            if remove {
+                let current = ready.values.first { $0.peerName == offer.name && $0.peerHw != nil }?.peerId
+                for id in offer.ids {
+                    if let current { Layout.shared.migrate(from: id, to: current) }
+                    removePeer(id)
+                }
+            } else {
+                var d = Set(UserDefaults.standard.stringArray(forKey: Self.dismissedKey) ?? [])
+                d.formUnion(offer.ids)
+                UserDefaults.standard.set(Array(d), forKey: Self.dismissedKey)
+            }
+            onMain { AppModel.shared.staleOffer = nil }
+            publishUI()
+        }
     }
 
     func sessionClosed(_ s: Session, wasReady: Bool) {
@@ -306,6 +367,7 @@ nonisolated final class PeerManager: PeerTransport, @unchecked Sendable {
 
     private func removePeer(_ id: String) {
         PeerStore.shared.delete(id)
+        Layout.shared.remove(id)
         outboundIds = outboundIds.filter { $0 != id }
         setLastAddress(id, nil)
         connectors[id]?.pause()
@@ -381,6 +443,7 @@ nonisolated final class PeerManager: PeerTransport, @unchecked Sendable {
         snapshot = list
         snapLock.unlock()
         PeerBus.shared.notifyPeers(list)
+        DevicePowerSources.shared.peersChanged(list)
         onMain { AppModel.shared.readyPeers = list }
     }
 
