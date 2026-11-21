@@ -468,13 +468,18 @@
     <string name="aw_running">AirWeb läuft</string>
     <string name="pp_title">Zahlungs-Apps</string>
     <string name="pp_switch">Steuerung ausschalten, solange eine UPI-App offen ist</string>
-    <string name="pp_switch_sub">Paytm, PhonePe, Google Pay und BHIM zahlen nicht, solange ein Bedienungshilfen-Dienst läuft. AirBridge schaltet seine beiden Dienste aus, solange diese Apps vorne sind, und danach wieder ein.</string>
+    <string name="pp_switch_sub">Paytm, PhonePe, Google Pay und BHIM zahlen nicht, solange ein Bedienungshilfen-Dienst läuft. AirBridge schaltet seine beiden Dienste aus, solange diese Apps vorne sind oder eine Minute lang kein Gerät verbunden war, und wieder ein, wenn sie gebraucht werden.</string>
     <string name="pp_usage">Nutzungszugriff</string>
     <string name="pp_usage_sub">Nur, um zu erkennen, ob eine dieser Apps vorne ist.</string>
     <string name="pp_secure">Schaltet sich selbst wieder ein</string>
-    <string name="pp_secure_sub">Braucht einmalig eine Berechtigung vom Computer: adb shell pm grant com.shazan.airbridge android.permission.WRITE_SECURE_SETTINGS. Ohne sie schaltest du die Steuerung nach dem Bezahlen selbst wieder ein.</string>
+    <string name="pp_secure_sub">Braucht einmalig eine Berechtigung vom Computer: adb shell pm grant com.shazan.airbridge android.permission.WRITE_SECURE_SETTINGS. Ohne sie schaltest du die Steuerung nach dem Bezahlen selbst wieder ein, und das Ausschalten ohne Gerät entfällt.</string>
     <string name="pp_copy">Befehl kopieren</string>
     <string name="pp_copied">Befehl kopiert</string>
     <string name="pp_notif_title">AirBridge-Steuerung ist aus</string>
     <string name="pp_notif_text">Sie wurde für eine Zahlungs-App ausgeschaltet. Tippe, um sie wieder einzuschalten.</string>
+    <string name="xfer_cancel_recv_q">Empfang von %1$s abbrechen?</string>
+    <string name="xfer_cancel_send_q">Senden von %1$s abbrechen?</string>
+    <string name="xfer_cancel_keep">Weitermachen</string>
+    <string name="xfer_cancel_yes">Übertragung abbrechen</string>
+    <string name="xfer_cancelling">Wird abgebrochen …</string>
 </resources>
