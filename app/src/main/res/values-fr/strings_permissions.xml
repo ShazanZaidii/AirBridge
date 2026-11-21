@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Settings → "Get AirBridge ready": the guided setup of every permission, with what each is for. -->
+    <string name="setup_title">Préparer AirBridge</string>
+    <string name="setup_sub">Tout configurer en une seule fois, pas à pas. Nous expliquons chaque étape avant qu\'elle ne commence.</string>
+    <string name="setup_progress">%1$d sur %2$d prêts</string>
+    <string name="setup_done_title">Tout est configuré</string>
+    <string name="setup_done_sub">AirBridge a toutes les autorisations qu\'il peut utiliser.</string>
+    <string name="setup_review">Revoir</string>
+    <string name="setup_sheet_title">Voici ce que nous allons configurer</string>
+    <string name="setup_sheet_intro">Vous verrez quelques fenêtres, puis des pages de réglages Android. Sur chacune, trouvez AirBridge et activez-le. Ignorez ce que vous ne voulez pas. Rien n\'est activé sans votre choix.</string>
+    <string name="setup_start">Commencer</string>
+    <string name="setup_step">Étape %1$d sur %2$d</string>
+    <string name="setup_open">Ouvrir les réglages</string>
+    <string name="setup_skip">Ignorer</string>
+    <string name="setup_what_to_do">À faire</string>
+    <string name="setup_quick_title">Autorisations rapides</string>
+    <string name="setup_quick_why">Téléphone, contacts, journaux d\'appels, notifications et appareils à proximité : pour les appels, les noms des appelants et pour trouver votre ordinateur.</string>
+    <string name="setup_notif_title">Accès aux notifications</string>
+    <string name="setup_notif_why">Affiche les notifications et les appels de votre téléphone sur votre ordinateur.</string>
+    <string name="setup_notif_how">Touchez AirBridge, puis activez l\'accès aux notifications.</string>
+    <string name="setup_usage_why">Détecte l\'ouverture d\'une app de paiement pour que le contrôle à distance se mette en pause.</string>
+    <string name="setup_usage_how">Touchez AirBridge, puis activez l\'accès à l\'utilisation.</string>
+    <string name="setup_overlay_why">Affiche la bulle du presse-papiers par-dessus les autres apps.</string>
+    <string name="setup_overlay_how">Touchez AirBridge, puis activez « Autoriser l\'affichage par-dessus les autres apps ».</string>
+    <string name="setup_dnd_why">Permet à votre ordinateur d\'activer et de désactiver Ne pas déranger.</string>
+    <string name="setup_dnd_how">Touchez AirBridge, puis activez l\'accès à Ne pas déranger.</string>
+    <string name="setup_write_why">Permet aux touches de luminosité de votre ordinateur de régler la luminosité de ce téléphone.</string>
+    <string name="setup_write_how">Touchez AirBridge, puis activez « Autoriser la modification des réglages système ».</string>
+    <string name="setup_a11y_why">Permet à votre ordinateur de déplacer le pointeur, de toucher et de saisir du texte sur ce téléphone.</string>
+    <string name="setup_a11y_how">Touchez %1$s, puis activez-le. Envie de saisir du texte depuis l\'ordinateur ? Activez aussi %2$s.</string>
+    <string name="perm_all_done">Tout est autorisé</string>
+    <string name="perm_all_partial">Certains réglages sont encore désactivés</string>
+    <string name="setup_continue">Continuer</string>
+    <string name="setup_optional">Facultatif</string>
+    <string name="setup_quick_how">Touchez « Autoriser » sur chaque fenêtre qui s\'affiche.</string>
+    <string name="setup_a11y_find">Android ne défile peut-être pas jusque-là pour vous. Si vous ne le voyez pas, faites défiler jusqu\'en bas vers « %1$s » (certains téléphones disent « %2$s ») et cherchez AirBridge.</string>
+    <string name="setup_a11y_group_a">Applications installées</string>
+    <string name="setup_a11y_group_b">Applications téléchargées</string>
+    <string name="setup_label_for">À quoi ça sert</string>
+    <string name="setup_label_skip">Si vous l\'ignorez</string>
+    <string name="setup_quick_skip">Les appels ne peuvent pas être affichés ni pris sur votre ordinateur, les appelants s\'affichent sans nom et votre ordinateur ne trouve pas ce téléphone à proximité.</string>
+    <string name="setup_notif_skip">Votre ordinateur n\'affichera pas les notifications de ce téléphone, et les appels peuvent apparaître sans le nom de l\'appelant.</string>
+    <string name="setup_usage_skip">AirBridge ne peut pas savoir qu\'une app bancaire ou de paiement est ouverte. Ces apps refusent de payer pendant que le contrôle à distance est actif : vos paiements pourraient être bloqués.</string>
+    <string name="setup_overlay_skip">La bulle du presse-papiers ne peut pas s\'afficher et le texte copié n\'est pas envoyé automatiquement à votre ordinateur.</string>
+    <string name="setup_dnd_skip">Votre ordinateur ne peut pas activer ni désactiver Ne pas déranger sur ce téléphone.</string>
+    <string name="setup_write_skip">Les touches de luminosité de votre ordinateur ne changeront pas la luminosité de ce téléphone.</string>
+    <string name="setup_a11y_skip">Votre ordinateur ne peut ni déplacer le pointeur, ni toucher, ni saisir du texte sur ce téléphone : le contrôle à distance reste désactivé.</string>
+    <string name="adv_title">Avancé</string>
+    <string name="adv_sub">Conseils pour les téléphones qui ferment sans cesse AirBridge en arrière-plan</string>
+</resources>

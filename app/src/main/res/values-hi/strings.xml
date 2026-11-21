@@ -467,12 +467,12 @@
     <string name="aw_notif_waiting">ब्राउज़र का इंतज़ार</string>
     <string name="aw_running">AirWeb चल रहा है</string>
     <string name="pp_title">भुगतान ऐप्स</string>
-    <string name="pp_switch">UPI ऐप खुला होने पर कंट्रोल बंद रखें</string>
-    <string name="pp_switch_sub">Paytm, PhonePe, Google Pay और BHIM तब तक भुगतान नहीं करने देते जब तक कोई एक्सेसिबिलिटी सेवा चालू हो। ये ऐप सामने हों, या एक मिनट तक कोई डिवाइस जुड़ा न हो, तो AirBridge अपनी दोनों सेवाएँ बंद कर देता है और ज़रूरत पड़ने पर फिर चालू कर देता है।</string>
+    <string name="pp_switch">पेमेंट ऐप खुला हो तो रिमोट कंट्रोल रोकें</string>
+    <string name="pp_switch_sub">बैंकिंग और पेमेंट ऐप, जैसे Paytm, PhonePe और Google Pay, किसी भी accessibility सेवा के चालू रहते भुगतान लेने से मना कर देते हैं, और रिमोट कंट्रोल भी ऐसी ही एक सेवा है। इसे चालू रखने पर, ऐसा कोई ऐप सामने आते ही AirBridge रिमोट कंट्रोल बंद कर देता है और आपके निकलते ही वापस चालू कर देता है। जब एक मिनट तक आपका कोई कंप्यूटर जुड़ा न हो, तब भी वह रिमोट कंट्रोल बंद कर देता है, और कंप्यूटर जुड़ते ही वापस चालू करता है।</string>
     <string name="pp_usage">उपयोग एक्सेस</string>
-    <string name="pp_usage_sub">सिर्फ़ यह जानने के लिए कि इनमें से कोई ऐप सामने है या नहीं।</string>
-    <string name="pp_secure">अपने-आप दोबारा चालू</string>
-    <string name="pp_secure_sub">कंप्यूटर से एक बार अनुमति देनी होती है: adb shell pm grant com.shazan.airbridge android.permission.WRITE_SECURE_SETTINGS। इसके बिना भुगतान के बाद कंट्रोल आपको खुद चालू करना होगा, और डिवाइस न होने पर बंद करना छोड़ दिया जाता है।</string>
+    <string name="pp_usage_sub">AirBridge को दिखाता है कि कौन सा ऐप सामने है, सिर्फ़ पेमेंट ऐप पहचानने के लिए। इसके बिना AirBridge जान नहीं पाएगा कि आपने कोई पेमेंट ऐप खोला है, और आपका भुगतान रुक सकता है।</string>
+    <string name="pp_secure">कंट्रोल अपने-आप वापस चालू करें</string>
+    <string name="pp_secure_sub">Android AirBridge को रिमोट कंट्रोल खुद वापस चालू करने तभी देता है जब उसे एक ख़ास अनुमति मिले, और यह अनुमति सिर्फ़ कंप्यूटर दे सकता है। इसके लिए एक बार का सेटअप करना होता है, करीब 10 मिनट। इसके बिना, हर भुगतान के बाद आपको रिमोट कंट्रोल खुद चालू करना होगा, और जब कोई कंप्यूटर जुड़ा न हो तब AirBridge उसे बंद नहीं कर पाएगा।</string>
     <string name="pp_copy">कमांड कॉपी करें</string>
     <string name="pp_copied">कमांड कॉपी हो गया</string>
     <string name="pp_notif_title">AirBridge कंट्रोल बंद है</string>

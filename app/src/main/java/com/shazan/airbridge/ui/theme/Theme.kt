@@ -1,5 +1,6 @@
 package com.shazan.airbridge.ui.theme
 
+import android.util.DisplayMetrics
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
@@ -11,7 +12,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Density
-import android.util.DisplayMetrics
 import androidx.compose.ui.unit.dp
 
 private val AirBridgeColors = darkColorScheme(

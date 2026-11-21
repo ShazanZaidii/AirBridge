@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Settings → "Get AirBridge ready": the guided setup of every permission, with what each is for. -->
+    <string name="setup_title">AirBridge-ஐ தயார் செய்யுங்கள்</string>
+    <string name="setup_sub">எல்லாவற்றையும் ஒரே வழிகாட்டும் அமைப்பில் செய்யுங்கள். ஒவ்வொரு படிக்கும் முன் விளக்குவோம்.</string>
+    <string name="setup_progress">%2$d இல் %1$d தயார்</string>
+    <string name="setup_done_title">எல்லாம் அமைக்கப்பட்டது</string>
+    <string name="setup_done_sub">AirBridge-க்கு பயன்படுத்தக்கூடிய எல்லா அனுமதிகளும் உள்ளன.</string>
+    <string name="setup_review">பார்</string>
+    <string name="setup_sheet_title">நாங்கள் இதை அமைப்போம்</string>
+    <string name="setup_sheet_intro">சில பாப்-அப்கள் தோன்றும், பிறகு Android அமைப்புகள் பக்கங்கள். ஒவ்வொன்றிலும் AirBridge-ஐக் கண்டு இயக்குங்கள். வேண்டாதவற்றைத் தவிர்க்கலாம். நீங்கள் தேர்ந்தெடுக்காதது எதுவும் இயக்கப்படாது.</string>
+    <string name="setup_start">தொடங்கு</string>
+    <string name="setup_step">படி %1$d / %2$d</string>
+    <string name="setup_open">அமைப்புகளைத் திற</string>
+    <string name="setup_skip">தவிர்</string>
+    <string name="setup_what_to_do">என்ன செய்ய வேண்டும்</string>
+    <string name="setup_quick_title">விரைவு அனுமதிகள்</string>
+    <string name="setup_quick_why">தொலைபேசி, தொடர்புகள், அழைப்புப் பதிவு, அறிவிப்புகள், அருகிலுள்ள சாதனங்கள்: அழைப்புகள், அழைப்பவர் பெயர், உங்கள் கணினியைக் கண்டறிய.</string>
+    <string name="setup_notif_title">அறிவிப்பு அணுகல்</string>
+    <string name="setup_notif_why">உங்கள் தொலைபேசியின் அறிவிப்புகளையும் அழைப்புகளையும் கணினியில் காட்டும்.</string>
+    <string name="setup_notif_how">AirBridge-ஐத் தட்டி, அறிவிப்பு அணுகலை இயக்குங்கள்.</string>
+    <string name="setup_usage_why">பணம் செலுத்தும் ஆப்ஸ் திறந்தால் கண்டறியும், ரிமோட் கட்டுப்பாடு அதற்காக இடைநிறுத்தப்படும்.</string>
+    <string name="setup_usage_how">AirBridge-ஐத் தட்டி, பயன்பாட்டு அணுகலை இயக்குங்கள்.</string>
+    <string name="setup_overlay_why">கிளிப்போர்டு குமிழியை மற்ற ஆப்ஸ் மேல் காட்டும்.</string>
+    <string name="setup_overlay_how">AirBridge-ஐத் தட்டி, “மற்ற ஆப்ஸ் மேல் காட்ட அனுமதி”யை இயக்குங்கள்.</string>
+    <string name="setup_dnd_why">உங்கள் கணினி ‘தொந்தரவு செய்யாதே’யை இயக்க/அணைக்க அனுமதிக்கும்.</string>
+    <string name="setup_dnd_how">AirBridge-ஐத் தட்டி, ‘தொந்தரவு செய்யாதே’ அணுகலை இயக்குங்கள்.</string>
+    <string name="setup_write_why">உங்கள் கணினியின் பிரகாச விசைகள் இந்த தொலைபேசியின் பிரகாசத்தை மாற்ற அனுமதிக்கும்.</string>
+    <string name="setup_write_how">AirBridge-ஐத் தட்டி, “கணினி அமைப்புகளை மாற்ற அனுமதி”யை இயக்குங்கள்.</string>
+    <string name="setup_a11y_why">உங்கள் கணினி இந்த தொலைபேசியில் பாயிண்டரை நகர்த்த, தட்ட, தட்டச்சு செய்ய அனுமதிக்கும்.</string>
+    <string name="setup_a11y_how">%1$s-ஐத் தட்டி இயக்குங்கள். கணினியிலிருந்து தட்டச்சு செய்ய வேண்டுமா? %2$s-ஐயும் இயக்குங்கள்.</string>
+    <string name="perm_all_done">அனைத்தும் அனுமதிக்கப்பட்டுள்ளது</string>
+    <string name="perm_all_partial">சில சுவிட்சுகள் இன்னும் அணைந்துள்ளன</string>
+    <string name="setup_continue">தொடர்</string>
+    <string name="setup_optional">விருப்பம்</string>
+    <string name="setup_quick_how">தோன்றும் ஒவ்வொரு பாப்-அப்பிலும் “அனுமதி” என்பதைத் தட்டுங்கள்.</string>
+    <string name="setup_a11y_find">Android தானாக அங்கே செல்லாமல் இருக்கலாம். தெரியவில்லை என்றால் கடைசி வரை “%1$s” (சில தொலைபேசிகளில் “%2$s”) வரை ஸ்க்ரோல் செய்து AirBridge-ஐத் தேடுங்கள்.</string>
+    <string name="setup_a11y_group_a">நிறுவிய ஆப்ஸ்</string>
+    <string name="setup_a11y_group_b">பதிவிறக்கிய ஆப்ஸ்</string>
+    <string name="setup_label_for">இது எதற்காக</string>
+    <string name="setup_label_skip">தவிர்த்தால் என்ன ஆகும்</string>
+    <string name="setup_quick_skip">உங்கள் கணினியில் அழைப்புகளைக் காட்டவோ எடுக்கவோ முடியாது, அழைப்பவர் பெயர் தெரியாது, அருகிலுள்ள இந்த தொலைபேசியை உங்கள் கணினி கண்டறிய முடியாது.</string>
+    <string name="setup_notif_skip">இந்த தொலைபேசியின் அறிவிப்புகளை உங்கள் கணினி காட்டாது, அழைப்புகள் பெயர் இல்லாமல் தோன்றலாம்.</string>
+    <string name="setup_usage_skip">வங்கி அல்லது பணம் செலுத்தும் ஆப்ஸ் திறந்திருப்பதை AirBridge அறிய முடியாது. ரிமோட் கட்டுப்பாடு இயங்கும்போது அத்தகைய ஆப்ஸ் பணம் செலுத்த மறுக்கும், எனவே உங்கள் பணப்பரிவர்த்தனைகள் தடைபடலாம்.</string>
+    <string name="setup_overlay_skip">கிளிப்போர்டு குமிழி தோன்றாது, நகலெடுத்த உரை தானாக கணினிக்குச் செல்லாது.</string>
+    <string name="setup_dnd_skip">இந்த தொலைபேசியில் ‘தொந்தரவு செய்யாதே’யை உங்கள் கணினி இயக்கவோ அணைக்கவோ முடியாது.</string>
+    <string name="setup_write_skip">உங்கள் கணினியின் பிரகாச விசைகள் இந்த தொலைபேசியின் பிரகாசத்தை மாற்றாது.</string>
+    <string name="setup_a11y_skip">இந்த தொலைபேசியில் உங்கள் கணினி பாயிண்டரை நகர்த்தவோ தட்டவோ தட்டச்சு செய்யவோ முடியாது, எனவே ரிமோட் கட்டுப்பாடு அணைந்தே இருக்கும்.</string>
+    <string name="adv_title">மேம்பட்டது</string>
+    <string name="adv_sub">AirBridge-ஐ பின்னணியில் மூடிவிடும் தொலைபேசிகளுக்கான குறிப்புகள்</string>
+</resources>

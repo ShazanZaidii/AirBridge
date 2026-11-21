@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Settings → "Get AirBridge ready": the guided setup of every permission, with what each is for. -->
+    <string name="setup_title">AirBridge ను సిద్ధం చేయండి</string>
+    <string name="setup_sub">అన్నింటినీ ఒకే గైడెడ్ సెటప్‌లో చేయండి. ప్రతి అడుగుకు ముందు వివరిస్తాం.</string>
+    <string name="setup_progress">%2$d లో %1$d సిద్ధం</string>
+    <string name="setup_done_title">అన్నీ సెట్ అయ్యాయి</string>
+    <string name="setup_done_sub">AirBridge కు వాడగలిగే అన్ని అనుమతులు ఉన్నాయి.</string>
+    <string name="setup_review">చూడండి</string>
+    <string name="setup_sheet_title">మేము ఇది సెటప్ చేస్తాం</string>
+    <string name="setup_sheet_intro">కొన్ని పాప్-అప్‌లు కనిపిస్తాయి, తర్వాత Android సెట్టింగ్స్ పేజీలు. ప్రతిదానిలో AirBridge ను కనుగొని ఆన్ చేయండి. వద్దనుకున్నది వదిలేయండి. మీరు ఎంచుకోనిది ఏదీ ఆన్ కాదు.</string>
+    <string name="setup_start">ప్రారంభించు</string>
+    <string name="setup_step">దశ %1$d / %2$d</string>
+    <string name="setup_open">సెట్టింగ్స్ తెరువు</string>
+    <string name="setup_skip">వదిలేయి</string>
+    <string name="setup_what_to_do">ఏం చేయాలి</string>
+    <string name="setup_quick_title">త్వరిత అనుమతులు</string>
+    <string name="setup_quick_why">ఫోన్, కాంటాక్ట్స్, కాల్ లాగ్, నోటిఫికేషన్లు, సమీప పరికరాలు: కాల్స్, కాలర్ పేరు, మీ కంప్యూటర్‌ను కనుగొనడానికి.</string>
+    <string name="setup_notif_title">నోటిఫికేషన్ యాక్సెస్</string>
+    <string name="setup_notif_why">మీ ఫోన్ నోటిఫికేషన్లు, కాల్స్‌ను మీ కంప్యూటర్‌లో చూపిస్తుంది.</string>
+    <string name="setup_notif_how">AirBridge ను తాకి, నోటిఫికేషన్ యాక్సెస్ ఆన్ చేయండి.</string>
+    <string name="setup_usage_why">పేమెంట్ యాప్ తెరిచినప్పుడు గుర్తిస్తుంది, రిమోట్ కంట్రోల్ దాని కోసం ఆగుతుంది.</string>
+    <string name="setup_usage_how">AirBridge ను తాకి, వినియోగ యాక్సెస్ ఆన్ చేయండి.</string>
+    <string name="setup_overlay_why">క్లిప్‌బోర్డ్ బబుల్‌ను ఇతర యాప్‌ల పైన చూపిస్తుంది.</string>
+    <string name="setup_overlay_how">AirBridge ను తాకి, “ఇతర యాప్‌ల పైన చూపడానికి అనుమతి” ఆన్ చేయండి.</string>
+    <string name="setup_dnd_why">మీ కంప్యూటర్ ‘అంతరాయం కలిగించవద్దు’ ఆన్/ఆఫ్ చేయడానికి అనుమతిస్తుంది.</string>
+    <string name="setup_dnd_how">AirBridge ను తాకి, ‘అంతరాయం కలిగించవద్దు’ యాక్సెస్ ఆన్ చేయండి.</string>
+    <string name="setup_write_why">మీ కంప్యూటర్ బ్రైట్‌నెస్ కీలు ఈ ఫోన్ బ్రైట్‌నెస్ మార్చడానికి అనుమతిస్తుంది.</string>
+    <string name="setup_write_how">AirBridge ను తాకి, “సిస్టమ్ సెట్టింగ్స్ మార్చడానికి అనుమతి” ఆన్ చేయండి.</string>
+    <string name="setup_a11y_why">మీ కంప్యూటర్ ఈ ఫోన్‌లో పాయింటర్ కదిలించడానికి, తాకడానికి, టైప్ చేయడానికి అనుమతిస్తుంది.</string>
+    <string name="setup_a11y_how">%1$s ను తాకి ఆన్ చేయండి. కంప్యూటర్ నుండి టైప్ చేయాలా? %2$s కూడా ఆన్ చేయండి.</string>
+    <string name="perm_all_done">అన్నీ అనుమతించబడ్డాయి</string>
+    <string name="perm_all_partial">కొన్ని స్విచ్‌లు ఇంకా ఆఫ్‌లో ఉన్నాయి</string>
+    <string name="setup_continue">కొనసాగించు</string>
+    <string name="setup_optional">ఐచ్ఛికం</string>
+    <string name="setup_quick_how">కనిపించే ప్రతి పాప్-అప్‌లో “అనుమతించు” తాకండి.</string>
+    <string name="setup_a11y_find">Android దానంతట అదే అక్కడికి స్క్రోల్ చేయకపోవచ్చు. కనిపించకపోతే చివరి వరకు “%1$s” (కొన్ని ఫోన్లలో “%2$s”) వరకు స్క్రోల్ చేసి AirBridge ను వెతకండి.</string>
+    <string name="setup_a11y_group_a">ఇన్‌స్టాల్ చేసిన యాప్‌లు</string>
+    <string name="setup_a11y_group_b">డౌన్‌లోడ్ చేసిన యాప్‌లు</string>
+    <string name="setup_label_for">ఇది దేనికి</string>
+    <string name="setup_label_skip">వదిలేస్తే ఏమవుతుంది</string>
+    <string name="setup_quick_skip">మీ కంప్యూటర్‌లో కాల్స్ చూపలేరు లేదా ఎత్తలేరు, కాలర్ పేరు కనిపించదు, మరియు మీ కంప్యూటర్ సమీపంలోని ఈ ఫోన్‌ను కనుగొనలేదు.</string>
+    <string name="setup_notif_skip">మీ కంప్యూటర్ ఈ ఫోన్ నోటిఫికేషన్లను చూపదు, కాల్స్ పేరు లేకుండా కనిపించవచ్చు.</string>
+    <string name="setup_usage_skip">బ్యాంకింగ్ లేదా పేమెంట్ యాప్ తెరిచి ఉందని AirBridge గుర్తించలేదు. రిమోట్ కంట్రోల్ నడుస్తున్నప్పుడు అలాంటి యాప్‌లు చెల్లింపును నిరాకరిస్తాయి, కాబట్టి మీ చెల్లింపులు ఆగిపోవచ్చు.</string>
+    <string name="setup_overlay_skip">క్లిప్‌బోర్డ్ బబుల్ కనిపించదు, కాపీ చేసిన టెక్స్ట్ ఆటోమేటిక్‌గా కంప్యూటర్‌కు వెళ్లదు.</string>
+    <string name="setup_dnd_skip">మీ కంప్యూటర్ ఈ ఫోన్‌లో ‘అంతరాయం కలిగించవద్దు’ ఆన్ లేదా ఆఫ్ చేయలేదు.</string>
+    <string name="setup_write_skip">మీ కంప్యూటర్ బ్రైట్‌నెస్ కీలు ఈ ఫోన్ బ్రైట్‌నెస్‌ను మార్చవు.</string>
+    <string name="setup_a11y_skip">మీ కంప్యూటర్ ఈ ఫోన్‌లో పాయింటర్ కదిలించలేదు, తాకలేదు, టైప్ చేయలేదు, కాబట్టి రిమోట్ కంట్రోల్ ఆఫ్‌లోనే ఉంటుంది.</string>
+    <string name="adv_title">అధునాతనం</string>
+    <string name="adv_sub">AirBridge‌ను బ్యాక్‌గ్రౌండ్‌లో మూసివేసే ఫోన్‌ల కోసం సూచనలు</string>
+</resources>
