@@ -16,7 +16,11 @@ nonisolated enum Proto {
     /// `notif_sink` / `call_sink`: shows a phone's notifications and calls and sends replies/controls back (§13).
     /// `battery_sink`: lists a phone's battery in the system's battery list (Devices/DevicePowerSources.swift).
     /// `call_ring`: decides where calls ring from the phone's presence and beacon (§13.5).
-    static let baseCaps = ["clip", "xfer", "ctl_source", "ctl_target", "drag_files", "mirror_sink", "notif_sink", "call_sink", "call_ring", "battery_sink"]
+    /// Clipboard images and files (§5.1): what is worth sending without being asked.
+    static let clipImageMaxBytes = 25 * 1024 * 1024
+    static let clipFilesMaxBytes = 100 * 1024 * 1024
+    static let clipFilesMaxCount = 20
+    static let baseCaps = ["clip", "xfer", "ctl_source", "ctl_target", "drag_files", "mirror_sink", "notif_sink", "call_sink", "call_ring", "battery_sink", "clip_media"]
 
     /// `hello.caps`: `mirror_source` only while the screen-recording permission is granted (§8.7).
     static var caps: [String] { CGPreflightScreenCaptureAccess() ? baseCaps + ["mirror_source"] : baseCaps }

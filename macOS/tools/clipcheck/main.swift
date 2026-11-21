@@ -60,4 +60,42 @@ pb2.clearContents(); pb2.setString("something newer", forType: .string)
 check("a newer copy is not overwritten", !ClipboardImages.addPNG(Data([1, 2, 3]), to: pb2, expectedChange: stale))
 check("and the newer copy is intact", pb2.string(forType: .string) == "something newer" && !(pb2.types ?? []).contains(.png))
 
+
+// setImage / pngFromPasteboard
+let pb3 = NSPasteboard(name: NSPasteboard.Name("airbridge.clipcheck.\(UUID().uuidString)"))
+let png3 = ClipboardImages.pngData(for: jpg)!
+ClipboardImages.setImage(png: png3, on: pb3)
+let t3 = Set(pb3.types ?? [])
+check("setImage: png and tiff, no file location", t3.contains(.png) && t3.contains(.tiff) && !t3.contains(.fileURL))
+check("setImage: png is the same bytes", pb3.data(forType: .png) == png3)
+check("pngFromPasteboard returns the png", ClipboardImages.pngFromPasteboard(pb3) == png3)
+let pb4 = NSPasteboard(name: NSPasteboard.Name("airbridge.clipcheck.\(UUID().uuidString)"))
+pb4.clearContents(); pb4.declareTypes([.tiff], owner: nil); pb4.setData(NSImage(contentsOf: tiff)!.tiffRepresentation!, forType: .tiff)
+check("pngFromPasteboard converts a tiff-only clipboard to png", isPNG(ClipboardImages.pngFromPasteboard(pb4)))
+let pb5 = NSPasteboard(name: NSPasteboard.Name("airbridge.clipcheck.\(UUID().uuidString)"))
+pb5.clearContents(); pb5.setString("just text", forType: .string)
+check("pngFromPasteboard gives nothing for text", ClipboardImages.pngFromPasteboard(pb5) == nil)
+
+// inbox / outbox
+let out = ClipboardInbox.outFile(named: "clipboard.png", data: png3)
+check("outFile writes the bytes", out != nil && (try? Data(contentsOf: out!)) == png3 && out!.lastPathComponent == "clipboard.png")
+let out2 = ClipboardInbox.outFile(named: "clipboard.png", data: png3)
+check("two outFiles never share a folder", out != nil && out2 != nil && out!.deletingLastPathComponent() != out2!.deletingLastPathComponent())
+ClipboardInbox.discard(out!); ClipboardInbox.discard(out2!)
+check("discard removes the file and its folder", !FileManager.default.fileExists(atPath: out!.deletingLastPathComponent().path))
+
+let fakeRoot = dir.appendingPathComponent("cache")
+let inDir = fakeRoot.appendingPathComponent("in"), outDir = fakeRoot.appendingPathComponent("out")
+try! FileManager.default.createDirectory(at: inDir, withIntermediateDirectories: true)
+try! FileManager.default.createDirectory(at: outDir, withIntermediateDirectories: true)
+let oldFile = inDir.appendingPathComponent("old.png"), newFile = inDir.appendingPathComponent("new.png"), oldOut = outDir.appendingPathComponent("o.png")
+for f in [oldFile, newFile, oldOut] { try! Data([1]).write(to: f) }
+let twoDaysAgo = Date().addingTimeInterval(-2 * 86_400)
+try! FileManager.default.setAttributes([.modificationDate: twoDaysAgo], ofItemAtPath: oldFile.path)
+try! FileManager.default.setAttributes([.modificationDate: twoDaysAgo], ofItemAtPath: oldOut.path)
+ClipboardInbox.purgeOld(in: fakeRoot)
+check("purge removes data older than a day", !FileManager.default.fileExists(atPath: oldFile.path) && !FileManager.default.fileExists(atPath: oldOut.path))
+check("purge keeps recent data", FileManager.default.fileExists(atPath: newFile.path))
+check("the inbox is in the caches folder, not Downloads", ClipboardInbox.directory.path.contains("/Library/Caches/") && !ClipboardInbox.directory.path.contains("Downloads"))
+
 print("clipcheck: \(passed) passed, \(failed) failed"); exit(failed == 0 ? 0 : 1)

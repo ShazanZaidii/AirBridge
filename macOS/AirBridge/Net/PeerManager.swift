@@ -138,6 +138,23 @@ nonisolated final class PeerManager: PeerTransport, @unchecked Sendable {
         }
     }
 
+    /// True when at least one connected peer can take a clipboard image or files (§5.1).
+    func anyClipMediaPeer() -> Bool { peers().contains { $0.caps.contains("clip_media") } }
+
+    /// Sends `urls` as a clipboard transfer (§5.1) to every ready peer that advertised `clip_media`.
+    /// `cleanup` runs once the last of those transfers has ended (or at once when there is none).
+    func broadcastClipMedia(_ urls: [URL], cleanup: @escaping () -> Void) {
+        queue.async { [self] in
+            let targets = ready.values.filter { $0.peerCaps.contains("clip_media") }
+            guard !targets.isEmpty else { cleanup(); return }
+            let left = CountDown(targets.count, then: cleanup)
+            for s in targets {
+                guard let t = s.transfers else { left.one(); continue }
+                t.send(urls: urls, clip: true) { left.one() }
+            }
+        }
+    }
+
     func sendFiles(_ urls: [URL], to peerId: String, cleanup: (() -> Void)?) {
         queue.async { [self] in
             guard let t = ready[peerId]?.transfers else {
@@ -615,5 +632,17 @@ nonisolated final class OutboundConnector: @unchecked Sendable {
         }
         retryWork = work
         queue.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+}
+
+/// Runs `then` after `one()` has been called `count` times. Thread safe.
+nonisolated final class CountDown: @unchecked Sendable {
+    private let lock = NSLock()
+    private var left: Int
+    private let then: () -> Void
+    init(_ count: Int, then: @escaping () -> Void) { left = count; self.then = then }
+    func one() {
+        lock.lock(); left -= 1; let fire = left == 0; lock.unlock()
+        if fire { then() }
     }
 }
