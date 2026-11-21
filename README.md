@@ -7,7 +7,7 @@
 | AirDrop | Send files between Android, Mac and Windows |
 | Universal Clipboard | One clipboard across all of them: text, pictures and files |
 | Universal Control | One keyboard and mouse for all of them |
-| iPhone Mirroring | Your phone's screen on your Mac or PC, and your Mac's screen on your phone |
+| iPhone Mirroring | Your phone's screen on your Mac or PC, and your Mac's or PC's screen on your phone |
 | Calls and notifications on the Mac | Your phone's calls and notifications on your Mac or PC |
 | Devices in the Batteries widget | Your phone's and PC's battery in the Mac's Notification Center |
 | - | **Control anything from anything.** Your Mac or PC keyboard and mouse can drive another computer or an Android phone, and your phone doubles as a trackpad and keyboard for any computer or another Android phone |
@@ -40,7 +40,7 @@ AirBridge is an independent project and is not affiliated with Apple. The Apple 
 
 **Phone calls and notifications on your computer.** Both are off until you turn them on. Notifications can be dismissed, replied to, or opened on the phone from the computer. Calls show up on the computer, where you can answer, decline or end them. Bluetooth is used to tell which computer the phone is next to.
 
-**Screen mirroring.** Watch your phone's screen on your Mac and control it from there, or show your Mac's screen on your phone. The Mac also has an optional "Pro mirroring" mode that uses Android's wireless debugging.
+**Screen mirroring.** Watch your phone's screen on your Mac and control it from there, or show your Mac's or PC's screen on your phone. On Windows, showing the PC's screen on a phone is new and still being tested. The Mac also has an optional "Pro mirroring" mode that uses Android's wireless debugging.
 
 **AirWeb, for devices that don't have AirBridge.** Start AirWeb on your phone, Mac or PC and it shows a QR code. Anyone on the same Wi-Fi opens the link in a browser and uploads or downloads files through one shared pool. No app needed on their side.
 
@@ -85,7 +85,7 @@ Yes. Move the cursor past the edge of your Mac screen and it continues on the ot
 Yes, once you turn it on in the Android app. You can reply to messages and answer, decline or end calls from the computer.
 
 **Can I see my Android screen on my Mac?**
-Yes. AirBridge mirrors the phone to a Mac window and lets you control it. The Mac can also mirror its own screen to the phone.
+Yes. AirBridge mirrors the phone to a Mac window and lets you control it. The Mac can also mirror its own screen to the phone, and so can a Windows PC (that part is new on Windows).
 
 **Do I need an account, internet access or a cloud service?**
 No. Devices talk directly to each other on the same local network. Some public or guest Wi-Fi networks stop devices from seeing each other. A phone hotspot is a way around that.
