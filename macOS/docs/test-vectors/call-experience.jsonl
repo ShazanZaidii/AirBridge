@@ -1,0 +1,8 @@
+{"t":"call_state","id":"c4-mxk2b0","state":"ringing","muted":false,"speaker":false,"can":["answer","decline"],"name":"Asha Kapoor","number":"+91 98765 43210","label":"Mobile"}
+{"t":"call_state","id":"c4-mxk2b0","state":"active","muted":true,"speaker":true,"can":["end","mute","speaker"],"name":"Asha Kapoor","number":"+91 98765 43210","label":"Mobile","since":1762070412000}
+{"t":"call_photo","id":"c4-mxk2b0","jpg":"/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAALCAABAAEBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AKp//2Q=="}
+{"t":"call_presence","screen":true,"locked":false,"touch":true,"idle_ms":2500}
+{"t":"call_beacon","on":true,"key":"AAECAwQFBgcICQoLDA0ODw==","uuid":"754338F5-9682-4D7A-9A60-84968B058DDE","period":900}
+{"t":"call_beacon","on":false}
+{"t":"call_ring","id":"c4-mxk2b0","phone":"silent"}
+{"t":"_beacon_vector","key":"AAECAwQFBgcICQoLDA0ODw==","unix_ms":1762080300000,"epoch":1957867,"id":"48dfa4903066889a"}

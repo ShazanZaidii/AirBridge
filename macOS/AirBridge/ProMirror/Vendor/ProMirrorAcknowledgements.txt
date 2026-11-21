@@ -1,0 +1,41 @@
+AirBridge Pro mirroring — third-party software
+=============================================
+
+Pro mirroring uses two unmodified third-party programs, bundled in this app's Resources folder.
+
+1. scrcpy server 5.0.1 (file: scrcpy-server-v5.0.1)
+   Runs on the Android phone while it is mirrored.
+   Source: https://github.com/Genymobile/scrcpy (tag v5.0.1)
+   Release file: scrcpy-server-v5.0.1
+   SHA-256: 764eb6f79811d5211fe9df341120882ba9994c7a61b897d7bf3fb662e53bc536
+   (matches SHA256SUMS.txt of the v5.0.1 release)
+
+   Copyright (C) 2018 Genymobile
+   Copyright (C) 2018-2026 Romain Vimont
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+
+   The full license text is in scrcpy-LICENSE.txt.
+   AirBridge talks to this server with its own client code; no scrcpy client code is included.
+
+2. adb (Android Debug Bridge) from Android SDK Platform-Tools 37.0.1 for macOS (file: adb)
+   Runs on this Mac to pair with and connect to the phone over Wireless debugging.
+   Download: https://dl.google.com/android/repository/platform-tools_r37.0.1-darwin.zip
+   Archive SHA-1 (Google's repository manifest): 6ae73f4de6452dc57e62ec02b68eed92a4c21661
+   Archive SHA-256: ee39ad5967e95c2a07f04dbcbde96b1a0c916ba376096db5d2f498b7727a5d1d
+   Binary SHA-256: 1811e253b21b12cbfda7201ebaf86c10e7ddcb5c606a7a81f7c82b4c429c2d3b
+   Signed by Google LLC (Developer ID, Team EQHXZ8M8AV); bundled unmodified.
+
+   adb is part of the Android Open Source Project and is licensed under the Apache License 2.0.
+   The licenses of adb and the libraries it contains are listed in android-platform-tools-NOTICE.txt
+   (the NOTICE.txt shipped with Platform-Tools).
