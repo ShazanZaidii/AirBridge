@@ -10,7 +10,7 @@ import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
-import com.shazan.airbridge.net.Notifs
+import com.shazan.airbridge.app.Notifs
 
 /**
  * Invisible screen that shows Android's own screen-capture consent dialog for a pending `mirror_start`

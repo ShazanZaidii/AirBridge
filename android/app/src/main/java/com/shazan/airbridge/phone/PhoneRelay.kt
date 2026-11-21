@@ -21,8 +21,17 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.RemoteInput
 import androidx.core.content.ContextCompat
-import com.shazan.airbridge.net.Hub
-import com.shazan.airbridge.net.PeerInfo
+import com.shazan.airbridge.connection.ConnectionHub
+import com.shazan.airbridge.connection.PeerInfo
+import com.shazan.airbridge.phone.calls.BeaconAdvertiser
+import com.shazan.airbridge.phone.calls.CallMachine
+import com.shazan.airbridge.phone.calls.CallWatcher
+import com.shazan.airbridge.phone.notifications.FloodGate
+import com.shazan.airbridge.phone.notifications.NotifActions
+import com.shazan.airbridge.phone.notifications.NotifFilter
+import com.shazan.airbridge.phone.notifications.NotifIndex
+import com.shazan.airbridge.phone.notifications.NotifWire
+import com.shazan.airbridge.phone.notifications.PhoneNotificationListener
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 
@@ -57,7 +66,7 @@ object PhoneRelay {
     /** Forwarding is on and the listener is connected (what [onSettingsChanged] compares against). */
     private var forwarding = false
 
-    private val ctx: Context get() = Hub.app
+    private val ctx: Context get() = ConnectionHub.app
 
     // ---- lifecycle ----
 
@@ -66,6 +75,7 @@ object PhoneRelay {
         CallWatcher.init(app)
         PhonePresence.init(app)
         BeaconAdvertiser.init(app)
+        DeviceBattery.init(app)
     }
 
     fun onListenerConnected() = worker.post {
@@ -86,14 +96,14 @@ object PhoneRelay {
      * only a real on/off transition resyncs or clears the computers' lists.
      */
     fun onSettingsChanged() = worker.post {
-        val now = PhoneRelaySettings.notifsEnabled && PhoneNotifListener.instance != null
+        val now = PhoneRelaySettings.notifsEnabled && PhoneNotificationListener.instance != null
         if (now && !forwarding) resyncAll() else if (!now && forwarding) clearAll(sendRemovals = true)
         forwarding = now
         CallWatcher.refresh()
         broadcastState()
         // §13.4: the beacon follows the calls switch (and the Bluetooth permission asked with it).
         val beacon = JsonMaps.toJson(BeaconAdvertiser.message())
-        ringPeers(ignoreSwitch = true).forEach { Hub.send(it.id, beacon) }
+        ringPeers(ignoreSwitch = true).forEach { ConnectionHub.send(it.id, beacon) }
         BeaconAdvertiser.refresh()
         PhonePresence.publish(force = true)
     }
@@ -106,7 +116,7 @@ object PhoneRelay {
                 active.remove(k); gate.forget(k); sendToSinks(NotifWire.remove(k))
             }
         } else {
-            PhoneNotifListener.instance?.snapshot()?.filter { it.first.packageName == pkg }?.forEach { (sbn, imp) ->
+            PhoneNotificationListener.instance?.snapshot()?.filter { it.first.packageName == pkg }?.forEach { (sbn, imp) ->
                 handlePosted(sbn, imp, quiet = true)
             }
         }
@@ -115,7 +125,7 @@ object PhoneRelay {
     // ---- peers ----
 
     fun onPeerReady(peerId: String) = worker.post {
-        val p = Hub.readySession(peerId)?.info() ?: return@post
+        val p = ConnectionHub.readySession(peerId)?.info() ?: return@post
         if (NotifWire.CAP_NOTIF_SINK !in p.caps && NotifWire.CAP_CALL_SINK !in p.caps) return@post
         send(peerId, stateMsg())
         if (NotifWire.CAP_NOTIF_SINK in p.caps) resyncPeer(peerId)
@@ -147,44 +157,44 @@ object PhoneRelay {
     private fun wantsNotifs(p: PeerInfo) = NotifWire.CAP_NOTIF_SINK in p.caps && subs[p.id]?.notifs != false
     private fun wantsCalls(p: PeerInfo) = NotifWire.CAP_CALL_SINK in p.caps && subs[p.id]?.calls != false
 
-    private fun notifSinks(): List<PeerInfo> = Hub.peers().filter { wantsNotifs(it) }
-    fun callSinks(): List<PeerInfo> = Hub.peers().filter { wantsCalls(it) }
+    private fun notifSinks(): List<PeerInfo> = ConnectionHub.peers().filter { wantsNotifs(it) }
+    fun callSinks(): List<PeerInfo> = ConnectionHub.peers().filter { wantsCalls(it) }
 
     /** §13.4: computers that decide where calls ring (they get presence and the beacon key). */
     fun ringPeers(ignoreSwitch: Boolean = false): List<PeerInfo> =
         if (!ignoreSwitch && !PhoneRelaySettings.callsEnabled) emptyList()
-        else Hub.peers().filter { wantsCalls(it) && NotifWire.CAP_CALL_RING in it.caps }
+        else ConnectionHub.peers().filter { wantsCalls(it) && NotifWire.CAP_CALL_RING in it.caps }
 
     fun sendRaw(peerId: String, json: JSONObject) {
-        try { Hub.send(peerId, json) } catch (t: Throwable) { Log.w(TAG, "send", t) }
+        try { ConnectionHub.send(peerId, json) } catch (t: Throwable) { Log.w(TAG, "send", t) }
     }
 
     fun sendToCallSinks(m: Map<String, Any?>) {
         val json = JsonMaps.toJson(m)
-        callSinks().forEach { Hub.send(it.id, json) }
+        callSinks().forEach { ConnectionHub.send(it.id, json) }
     }
 
     private fun send(peerId: String, m: Map<String, Any?>) {
-        try { Hub.send(peerId, JsonMaps.toJson(m)) } catch (t: Throwable) { Log.w(TAG, "send", t) }
+        try { ConnectionHub.send(peerId, JsonMaps.toJson(m)) } catch (t: Throwable) { Log.w(TAG, "send", t) }
     }
 
     private fun sendToSinks(m: Map<String, Any?>) {
         val sinks = notifSinks()
         if (sinks.isEmpty()) return
         val json = JsonMaps.toJson(m)
-        sinks.forEach { Hub.send(it.id, json) }
+        sinks.forEach { ConnectionHub.send(it.id, json) }
     }
 
     fun sendCall(c: NotifWire.Call) {
         if (!PhoneRelaySettings.callsEnabled && c.state != NotifWire.CallState.ENDED) return
         val json = JsonMaps.toJson(NotifWire.call(c))
-        callSinks().forEach { Hub.send(it.id, json) }
+        callSinks().forEach { ConnectionHub.send(it.id, json) }
     }
 
     fun sendCallResult(peerId: String, m: Map<String, Any?>) = send(peerId, m)
 
     private fun stateMsg(): Map<String, Any?> {
-        val access = PhoneNotifListener.instance != null
+        val access = PhoneNotificationListener.instance != null
         val notifs = PhoneRelaySettings.notifsEnabled && access
         val why = when {
             !PhoneRelaySettings.notifsEnabled -> "off"
@@ -196,7 +206,7 @@ object PhoneRelay {
 
     fun broadcastState() {
         val m = JsonMaps.toJson(stateMsg())
-        Hub.peers().filter { NotifWire.CAP_NOTIF_SINK in it.caps || NotifWire.CAP_CALL_SINK in it.caps }.forEach { Hub.send(it.id, m) }
+        ConnectionHub.peers().filter { NotifWire.CAP_NOTIF_SINK in it.caps || NotifWire.CAP_CALL_SINK in it.caps }.forEach { ConnectionHub.send(it.id, m) }
     }
 
     // ---- notifications in ----
@@ -347,7 +357,7 @@ object PhoneRelay {
                 iconFor(pn.pkg)?.let { send(p.id, NotifWire.icon(pn.pkg, it)) }
                 have += pn.pkg
             }
-            Hub.send(p.id, post)
+            ConnectionHub.send(p.id, post)
         }
     }
 
@@ -364,8 +374,8 @@ object PhoneRelay {
     /** Everything currently shown, quietly, to one computer that just connected. */
     private fun resyncPeer(peerId: String) {
         send(peerId, NotifWire.reset())
-        if (!PhoneRelaySettings.notifsEnabled || PhoneNotifListener.instance == null) return
-        val p = Hub.readySession(peerId)?.info() ?: return
+        if (!PhoneRelaySettings.notifsEnabled || PhoneNotificationListener.instance == null) return
+        val p = ConnectionHub.readySession(peerId)?.info() ?: return
         if (!wantsNotifs(p)) return
         val have = sentIcons.getOrPut(peerId) { HashSet() }
         active.values().sortedBy { it.sent.ts }.forEach { e ->
@@ -378,7 +388,7 @@ object PhoneRelay {
     private fun resyncAll() {
         active.clear(); gate.clear(); heldWhileLocked.clear()
         sendToSinks(NotifWire.reset())
-        PhoneNotifListener.instance?.snapshot()?.forEach { (sbn, imp) -> handlePosted(sbn, imp, quiet = true) }
+        PhoneNotificationListener.instance?.snapshot()?.forEach { (sbn, imp) -> handlePosted(sbn, imp, quiet = true) }
     }
 
     private fun clearAll(sendRemovals: Boolean) {
@@ -391,7 +401,7 @@ object PhoneRelay {
     // ---- commands from the computer ----
 
     private fun handle(peerId: String, cmd: NotifWire.Command) {
-        val peer = Hub.readySession(peerId)?.info() ?: return
+        val peer = ConnectionHub.readySession(peerId)?.info() ?: return
         when (cmd) {
             is NotifWire.Command.Subscribe -> {
                 val before = subs[peerId]
@@ -406,7 +416,7 @@ object PhoneRelay {
             is NotifWire.Command.CallAction -> if (NotifWire.CAP_CALL_SINK in peer.caps) CallWatcher.act(peerId, cmd.id, cmd.op, cmd.dev)
             is NotifWire.Command.Ring -> if (NotifWire.CAP_CALL_RING in peer.caps) CallWatcher.onRing(cmd.id, cmd.silencePhone)
             is NotifWire.Command.Dismiss -> withEntry(peerId, peer, cmd.key, "dismiss") { e ->
-                val ok = PhoneNotifListener.instance?.dismiss(e.sbnKey) == true
+                val ok = PhoneNotificationListener.instance?.dismiss(e.sbnKey) == true
                 if (ok) { active.remove(cmd.key); gate.forget(cmd.key); sendToSinksExcept(peerId, NotifWire.remove(cmd.key)) }
                 ok to (if (ok) null else "failed")
             }
@@ -429,7 +439,7 @@ object PhoneRelay {
 
     private fun sendToSinksExcept(peerId: String, m: Map<String, Any?>) {
         val json = JsonMaps.toJson(m)
-        notifSinks().filter { it.id != peerId }.forEach { Hub.send(it.id, json) }
+        notifSinks().filter { it.id != peerId }.forEach { ConnectionHub.send(it.id, json) }
         send(peerId, m)
     }
 
@@ -502,7 +512,7 @@ object PhoneRelay {
                     if (heldWhileLocked.isEmpty() || !PhoneRelaySettings.notifsEnabled) return@post
                     val held = HashSet(heldWhileLocked)
                     heldWhileLocked.clear()
-                    PhoneNotifListener.instance?.snapshot()?.filter { it.first.key in held }?.forEach { (sbn, imp) ->
+                    PhoneNotificationListener.instance?.snapshot()?.filter { it.first.key in held }?.forEach { (sbn, imp) ->
                         handlePosted(sbn, imp, quiet = true)
                     }
                 }

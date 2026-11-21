@@ -7,8 +7,8 @@ import org.junit.Test
 
 class EnabledServicesTest {
     private val pkg = "com.shazan.airbridge"
-    private val a = "$pkg/$pkg.AirBridgeInputService"
-    private val b = "$pkg/.AirBridgeTextService"
+    private val a = "$pkg/$pkg.ControlAccessibilityService"
+    private val b = "$pkg/.TypingAccessibilityService"
     private val other = "com.other/com.other.Reader"
 
     @Test fun removesOnlyOurEntries() {
@@ -36,7 +36,7 @@ class EnabledServicesTest {
 
     @Test fun restoreDoesNotDuplicateWhatTheUserTurnedOnMeanwhile() {
         // b was switched on again by hand, spelled the long way; only a is missing.
-        val now = "$other:$pkg/$pkg.AirBridgeTextService"
+        val now = "$other:$pkg/$pkg.TypingAccessibilityService"
         assertEquals("$now:$a", EnabledServices.restore(now, listOf(a, b)))
     }
 

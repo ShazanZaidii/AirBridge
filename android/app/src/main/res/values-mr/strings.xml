@@ -467,12 +467,12 @@
     <string name="aw_notif_waiting">ब्राउझरची प्रतीक्षा</string>
     <string name="aw_running">AirWeb चालू आहे</string>
     <string name="pp_title">पेमेंट ॲप्स</string>
-    <string name="pp_switch">UPI ॲप उघडे असताना कंट्रोल बंद ठेवा</string>
-    <string name="pp_switch_sub">एखादी ॲक्सेसिबिलिटी सेवा चालू असेल तर Paytm, PhonePe, Google Pay आणि BHIM पेमेंट करू देत नाहीत. हे ॲप्स समोर असताना किंवा एक मिनिट कोणतेही डिव्हाइस जोडलेले नसताना AirBridge आपल्या दोन्ही सेवा बंद करतो आणि गरज पडल्यावर पुन्हा चालू करतो.</string>
+    <string name="pp_switch">पेमेंट ॲप उघडे असताना रिमोट कंट्रोल थांबवा</string>
+    <string name="pp_switch_sub">बँकिंग आणि पेमेंट ॲप्स, जसे की Paytm, PhonePe आणि Google Pay, कोणतीही accessibility सेवा चालू असेल तर पेमेंट घेण्यास नकार देतात, आणि रिमोट कंट्रोलही अशीच एक सेवा आहे. हे चालू ठेवल्यास, असे ॲप समोर येताच AirBridge रिमोट कंट्रोल बंद करते आणि तुम्ही बाहेर पडताच पुन्हा चालू करते. एक मिनिट तुमचा कोणताही संगणक जोडलेला नसेल तरही ते रिमोट कंट्रोल बंद करते, आणि संगणक जोडला जाताच पुन्हा चालू करते.</string>
     <string name="pp_usage">वापर ॲक्सेस</string>
-    <string name="pp_usage_sub">यापैकी एखादे ॲप समोर आहे का हे कळण्यासाठीच.</string>
-    <string name="pp_secure">आपोआप पुन्हा चालू होते</string>
-    <string name="pp_secure_sub">संगणकावरून एकदा परवानगी द्यावी लागते: adb shell pm grant com.shazan.airbridge android.permission.WRITE_SECURE_SETTINGS. त्याशिवाय पेमेंटनंतर कंट्रोल तुम्हाला स्वतः चालू करावा लागेल, आणि डिव्हाइस नसताना बंद करणे वगळले जाते.</string>
+    <string name="pp_usage_sub">कोणते ॲप समोर आहे हे AirBridge ला पाहू देते, फक्त पेमेंट ॲप ओळखण्यासाठी. याशिवाय तुम्ही पेमेंट ॲप उघडले हे AirBridge ला कळणार नाही, आणि तुमचे पेमेंट अडू शकते.</string>
+    <string name="pp_secure">नियंत्रण आपोआप पुन्हा चालू करा</string>
+    <string name="pp_secure_sub">एक विशेष परवानगी दिली तरच AirBridge ला रिमोट कंट्रोल स्वतः पुन्हा चालू करू देणे Android मान्य करतो, आणि ती फक्त संगणकच देऊ शकतो. यासाठी एकदाचे सेटअप लागते, सुमारे 10 मिनिटे. याशिवाय, प्रत्येक पेमेंटनंतर तुम्हाला रिमोट कंट्रोल स्वतः चालू करावे लागेल, आणि कोणताही संगणक जोडलेला नसताना AirBridge ते बंद करू शकणार नाही.</string>
     <string name="pp_copy">कमांड कॉपी करा</string>
     <string name="pp_copied">कमांड कॉपी केली</string>
     <string name="pp_notif_title">AirBridge कंट्रोल बंद आहे</string>

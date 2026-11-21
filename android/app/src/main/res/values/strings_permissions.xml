@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Settings → "Get AirBridge ready": the guided setup of every permission, with what each is for. -->
+    <string name="setup_title">Get AirBridge ready</string>
+    <string name="setup_sub">Set everything up in one guided go. We\'ll explain each step before it happens.</string>
+    <string name="setup_progress">%1$d of %2$d ready</string>
+    <string name="setup_done_title">Everything is set up</string>
+    <string name="setup_done_sub">AirBridge has every permission it needs.</string>
+    <string name="setup_review">Review</string>
+    <string name="setup_sheet_title">Here\'s what we\'ll set up</string>
+    <string name="setup_sheet_intro">You\'ll see a few pop-ups, then some Android settings pages. On each one, find AirBridge and switch it on. Skip anything you don\'t want. Nothing is turned on that you haven\'t chosen.</string>
+    <string name="setup_start">Start</string>
+    <string name="setup_step">Step %1$d of %2$d</string>
+    <string name="setup_open">Open settings</string>
+    <string name="setup_skip">Skip</string>
+    <string name="setup_what_to_do">What to do</string>
+    <string name="setup_quick_title">Quick permissions</string>
+    <string name="setup_quick_why">Phone, contacts, call logs, notifications and nearby devices: for calls, caller names and finding your computer.</string>
+    <string name="setup_notif_title">Notification access</string>
+    <string name="setup_notif_why">Shows your phone\'s notifications and calls on your computer.</string>
+    <string name="setup_notif_how">Tap AirBridge, then switch on notification access.</string>
+    <string name="setup_usage_why">Notices when a payment app opens, so remote control can pause for it.</string>
+    <string name="setup_usage_how">Tap AirBridge, then switch on usage access.</string>
+    <string name="setup_overlay_why">Shows the clipboard bubble over other apps.</string>
+    <string name="setup_overlay_how">Tap AirBridge, then switch on “Allow display over other apps”.</string>
+    <string name="setup_dnd_why">Lets your computer turn Do Not Disturb on and off.</string>
+    <string name="setup_dnd_how">Tap AirBridge, then switch on Do Not Disturb access.</string>
+    <string name="setup_write_why">Lets your computer\'s brightness keys change this phone\'s brightness.</string>
+    <string name="setup_write_how">Tap AirBridge, then switch on “Allow modifying system settings”.</string>
+    <string name="setup_a11y_why">Lets your computer move the pointer, tap and type on this phone.</string>
+    <string name="setup_a11y_how">Tap %1$s, then switch it on. Want to type from your computer? Switch on %2$s as well.</string>
+    <string name="perm_all_done">Everything is allowed</string>
+    <string name="perm_all_partial">Some switches are still off</string>
+    <string name="setup_continue">Continue</string>
+    <string name="setup_optional">Optional</string>
+    <string name="setup_quick_how">Tap Allow on each pop-up that appears.</string>
+    <string name="setup_a11y_find">Android may not scroll there for you. If you don\'t see it, scroll all the way down to “%1$s” (some phones say “%2$s”) and look for AirBridge.</string>
+    <string name="setup_a11y_group_a">Installed apps</string>
+    <string name="setup_a11y_group_b">Downloaded apps</string>
+    <string name="setup_label_for">What it\'s for</string>
+    <string name="setup_label_skip">If you skip it</string>
+    <string name="setup_quick_skip">Calls can\'t be shown or answered on your computer, callers show up without a name, and your computer can\'t find this phone nearby.</string>
+    <string name="setup_notif_skip">Your computer won\'t show this phone\'s notifications, and calls may appear without the caller\'s name.</string>
+    <string name="setup_usage_skip">AirBridge can\'t tell when a banking or payment app is open. Those apps refuse to pay while remote control is running, so your payments could be blocked.</string>
+    <string name="setup_overlay_skip">The clipboard bubble can\'t appear, and copied text isn\'t sent to your computer automatically.</string>
+    <string name="setup_dnd_skip">Your computer can\'t switch Do Not Disturb on or off for this phone.</string>
+    <string name="setup_write_skip">Your computer\'s brightness keys won\'t change this phone\'s brightness.</string>
+    <string name="setup_a11y_skip">Your computer can\'t move the pointer, tap or type on this phone, so remote control stays off.</string>
+    <string name="adv_title">Advanced</string>
+    <string name="adv_sub">Tips for phones that keep closing AirBridge in the background</string>
+</resources>

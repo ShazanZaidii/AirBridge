@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Settings → "Get AirBridge ready": the guided setup of every permission, with what each is for. -->
+    <string name="setup_title">AirBridge को तैयार करें</string>
+    <string name="setup_sub">सब कुछ एक गाइडेड सेटअप में करें। हर कदम से पहले हम बताएँगे कि वह क्या है।</string>
+    <string name="setup_progress">%2$d में से %1$d तैयार</string>
+    <string name="setup_done_title">सब कुछ सेट है</string>
+    <string name="setup_done_sub">AirBridge के पास हर वह अनुमति है जो वह इस्तेमाल कर सकता है।</string>
+    <string name="setup_review">देखें</string>
+    <string name="setup_sheet_title">हम यह सेट करेंगे</string>
+    <string name="setup_sheet_intro">आपको कुछ पॉप-अप दिखेंगे, फिर Android की कुछ सेटिंग्स पेज। हर पेज पर AirBridge ढूँढकर उसे चालू करें। जो न चाहिए उसे छोड़ दें। जो आपने नहीं चुना, वह कुछ भी चालू नहीं होगा।</string>
+    <string name="setup_start">शुरू करें</string>
+    <string name="setup_step">कदम %1$d / %2$d</string>
+    <string name="setup_open">सेटिंग्स खोलें</string>
+    <string name="setup_skip">छोड़ें</string>
+    <string name="setup_what_to_do">क्या करना है</string>
+    <string name="setup_quick_title">त्वरित अनुमतियाँ</string>
+    <string name="setup_quick_why">फ़ोन, संपर्क, कॉल लॉग, सूचनाएँ और आस-पास के डिवाइस: कॉल, कॉल करने वाले का नाम और आपका कंप्यूटर खोजने के लिए।</string>
+    <string name="setup_notif_title">सूचना एक्सेस</string>
+    <string name="setup_notif_why">आपके फ़ोन की सूचनाएँ और कॉल आपके कंप्यूटर पर दिखाता है।</string>
+    <string name="setup_notif_how">AirBridge पर टैप करें, फिर सूचना एक्सेस चालू करें।</string>
+    <string name="setup_usage_why">पेमेंट ऐप खुलने का पता लगाता है, ताकि रिमोट कंट्रोल उसके लिए रुक सके।</string>
+    <string name="setup_usage_how">AirBridge पर टैप करें, फिर उपयोग एक्सेस चालू करें।</string>
+    <string name="setup_overlay_why">क्लिपबोर्ड बबल को दूसरे ऐप्स के ऊपर दिखाता है।</string>
+    <string name="setup_overlay_how">AirBridge पर टैप करें, फिर “दूसरे ऐप्स के ऊपर दिखाने की अनुमति” चालू करें।</string>
+    <string name="setup_dnd_why">आपके कंप्यूटर को ‘परेशान न करें’ चालू-बंद करने देता है।</string>
+    <string name="setup_dnd_how">AirBridge पर टैप करें, फिर ‘परेशान न करें’ एक्सेस चालू करें।</string>
+    <string name="setup_write_why">आपके कंप्यूटर की ब्राइटनेस कुंजियों को इस फ़ोन की ब्राइटनेस बदलने देता है।</string>
+    <string name="setup_write_how">AirBridge पर टैप करें, फिर “सिस्टम सेटिंग्स बदलने की अनुमति” चालू करें।</string>
+    <string name="setup_a11y_why">आपके कंप्यूटर को इस फ़ोन पर पॉइंटर चलाने, टैप करने और टाइप करने देता है।</string>
+    <string name="setup_a11y_how">%1$s पर टैप करें और उसे चालू करें। कंप्यूटर से टाइप करना चाहते हैं? %2$s भी चालू करें।</string>
+    <string name="perm_all_done">सब कुछ अनुमत है</string>
+    <string name="perm_all_partial">कुछ स्विच अभी बंद हैं</string>
+    <string name="setup_continue">जारी रखें</string>
+    <string name="setup_optional">वैकल्पिक</string>
+    <string name="setup_quick_how">जो भी पॉप-अप आए, उस पर “अनुमति दें” पर टैप करें।</string>
+    <string name="setup_a11y_find">हो सकता है Android आपको सीधे वहाँ न ले जाए। न दिखे तो सबसे नीचे “%1$s” (कुछ फ़ोन में “%2$s”) तक स्क्रोल करें और AirBridge ढूँढें।</string>
+    <string name="setup_a11y_group_a">इंस्टॉल किए गए ऐप्स</string>
+    <string name="setup_a11y_group_b">डाउनलोड किए गए ऐप्स</string>
+    <string name="setup_label_for">यह किस काम का है</string>
+    <string name="setup_label_skip">छोड़ने पर क्या होगा</string>
+    <string name="setup_quick_skip">आपके कंप्यूटर पर कॉल दिखाए या उठाए नहीं जा सकेंगे, कॉल करने वाले का नाम नहीं दिखेगा, और आपका कंप्यूटर इस फ़ोन को आस-पास नहीं ढूँढ पाएगा।</string>
+    <string name="setup_notif_skip">आपका कंप्यूटर इस फ़ोन की सूचनाएँ नहीं दिखाएगा, और कॉल बिना नाम के दिख सकते हैं।</string>
+    <string name="setup_usage_skip">AirBridge को पता नहीं चलेगा कि कोई बैंकिंग या पेमेंट ऐप खुला है। रिमोट कंट्रोल चलते समय ऐसे ऐप भुगतान करने से मना कर देते हैं, इसलिए आपके भुगतान रुक सकते हैं।</string>
+    <string name="setup_overlay_skip">क्लिपबोर्ड बबल नहीं दिखेगा, और कॉपी किया टेक्स्ट अपने आप कंप्यूटर पर नहीं जाएगा।</string>
+    <string name="setup_dnd_skip">आपका कंप्यूटर इस फ़ोन पर ‘परेशान न करें’ चालू या बंद नहीं कर पाएगा।</string>
+    <string name="setup_write_skip">आपके कंप्यूटर की ब्राइटनेस कुंजियाँ इस फ़ोन की ब्राइटनेस नहीं बदलेंगी।</string>
+    <string name="setup_a11y_skip">आपका कंप्यूटर इस फ़ोन पर पॉइंटर नहीं चला पाएगा, टैप या टाइप नहीं कर पाएगा, इसलिए रिमोट कंट्रोल बंद रहेगा।</string>
+    <string name="adv_title">उन्नत</string>
+    <string name="adv_sub">उन फ़ोन के लिए सुझाव जो AirBridge को बैकग्राउंड में बंद कर देते हैं</string>
+</resources>
