@@ -359,8 +359,9 @@ device whose clipboard holds an image or files sends it as an ordinary §6 trans
 - **Who gets it.** Only peers whose `hello.caps` contain `clip_media`. A peer without the cap would save the data as a
   normal download, so it must never be sent one.
 - **What is sent.** If the clipboard holds files, send the files. Otherwise, if it holds text, send the text (§5). Otherwise,
-  if it holds an image, send the image as one PNG named `clipboard.png`. Text wins over an image because rich copies (a
-  spreadsheet range, a web page) carry both.
+  if it holds an image, send the image as one file, as PNG named `clipboard.png` when the sender can produce it (a phone
+  sends the file it was given, with its own name and an `image/*` mime). Receivers accept any image type and convert it
+  if their clipboard needs another. Text wins over an image because rich copies (a spreadsheet range, a web page) carry both.
 - **Limits.** An image is at most 25 MiB. Files must be regular files (no folders), at most 20 of them and 100 MiB in
   total. Anything over a limit is not sent, and the sender shows a local notice.
 - **Not sent.** Clips flagged as concealed, transient or sensitive, clips that came from another device, and whatever this
