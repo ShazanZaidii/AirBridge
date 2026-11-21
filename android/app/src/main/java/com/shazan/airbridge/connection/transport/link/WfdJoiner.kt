@@ -30,8 +30,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 class JoinFailed(val reason: String, val detail: String = "") : Exception("$reason $detail".trim())
 
 /**
- * Joins the peer's Wi-Fi Direct legacy group as a local-only Wi-Fi network (T1, the design notes
- * §2, §4): `WifiNetworkSpecifier(ssid, wpa2)` → `requestNetwork(TRANSPORT_WIFI, no INTERNET)`. The process is never
+ * Joins the peer's Wi-Fi Direct legacy group as a local-only Wi-Fi network (topology T1): `WifiNetworkSpecifier(ssid, wpa2)` → `requestNetwork(TRANSPORT_WIFI, no INTERNET)`. The process is never
  * bound to the network; callers bind individual sockets with [Joined.network]`.socketFactory`.
  *
  * Android shows a one-time approval dialog per SSID + security type (API 33+); on API 29–32 it shows one per request
