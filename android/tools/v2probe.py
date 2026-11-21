@@ -18,6 +18,7 @@ Interactive commands (client): clip <text> | send <path> | sendclip <path> (as a
   key <hid> [text] | mkey <hid> [mods] | kd|ku <hid> [mods] | action <name> | mirror [w h fps] | mirror_stop | leave | unpair | quit
 
 State (device id + peer keys) is kept in ~/.airbridge-probe.json (override: AIRBRIDGE_PROBE_STATE).
+Received files go to ~/Downloads/AirBridge Transfers (override: AIRBRIDGE_PROBE_DOWNLOADS).
 """
 import argparse
 import asyncio
@@ -43,7 +44,7 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
 STATE_PATH = Path(os.environ.get("AIRBRIDGE_PROBE_STATE", Path.home() / ".airbridge-probe.json"))
-DOWNLOAD_DIR = Path.home() / "Downloads" / "AirBridge Transfers"
+DOWNLOAD_DIR = Path(os.environ.get("AIRBRIDGE_PROBE_DOWNLOADS", Path.home() / "Downloads" / "AirBridge Transfers"))
 CHUNK = 512 * 1024
 WINDOW = 8 * 1024 * 1024
 PORT_BASE = 47632

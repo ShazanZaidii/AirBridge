@@ -73,7 +73,9 @@ class ClipAutoPolicyTest {
     @Test fun skipRulesFromDescriptionBeforeReading() {
         val p = policy()
         assertEquals(Decision.Skipped(Skip.SENSITIVE), p.onChange(0, ClipMeta(sensitive = true), true, true))
-        assertEquals(Decision.Skipped(Skip.FILES), p.onChange(10, ClipMeta(fileList = true), true, true))
+        // A file list or an image is no longer skipped: it is read and sent as a clipboard transfer (docs/protocol.md 5.1).
+        assertEquals(Decision.Wait(400), p.onChange(10, ClipMeta(fileList = true), true, true))
+        p.onTimer(10 + 400, true, true); p.onReadFailed()
         assertEquals(Decision.Skipped(Skip.REMOTE_DEVICE), p.onChange(20, ClipMeta(remoteDevice = true), true, true))
         assertEquals(Decision.Skipped(Skip.OWN_CLIP), p.onChange(30, ClipMeta(ownClip = true), true, true))
         // Unknown description (background) still proceeds.
@@ -85,7 +87,8 @@ class ClipAutoPolicyTest {
         p.changeAndFire(0)
         assertEquals(Decision.Skipped(Skip.SENSITIVE), p.onRead(ClipMeta(sensitive = true), "h", 3, max))
         p.changeAndFire(1_000)
-        assertEquals(Decision.Skipped(Skip.FILES), p.onRead(ClipMeta(fileList = true), null, 0, max))
+        // As text, a file list has no text: nothing to send on the text path.
+        assertEquals(Decision.Skipped(Skip.EMPTY), p.onRead(ClipMeta(fileList = true), null, 0, max))
         p.changeAndFire(2_000)
         assertEquals(Decision.Skipped(Skip.EMPTY), p.onRead(ClipMeta(), null, 0, max))
         p.changeAndFire(3_000)
@@ -139,5 +142,47 @@ class ClipAutoPolicyTest {
         assertNull(p.check(ClipMeta(), "x", 1, max))
         assertEquals(Skip.SENSITIVE, p.check(ClipMeta(sensitive = true), "x", 1, max))
         assertFalse(p.inFlight); assertFalse(p.pending)
+    }
+
+    // ---- images and files (docs/protocol.md 5.1)
+
+    @Test fun anImageOrFileListIsSent() {
+        val p = policy()
+        p.changeAndFire(0, ClipMeta(fileList = true))
+        assertEquals(Decision.Send, p.onReadMedia(ClipMeta(fileList = true), "img1"))
+        assertFalse(p.inFlight)
+    }
+
+    @Test fun mediaIsSkippedForTheSameReasonsAsText() {
+        val p = policy()
+        assertEquals(Skip.SENSITIVE, p.checkMedia(ClipMeta(fileList = true, sensitive = true), "m"))
+        assertEquals(Skip.REMOTE_DEVICE, p.checkMedia(ClipMeta(fileList = true, remoteDevice = true), "m"))
+        assertEquals(Skip.OWN_CLIP, p.checkMedia(ClipMeta(fileList = true, ownClip = true), "m"))
+        assertNull(p.checkMedia(ClipMeta(fileList = true), "m"))
+        assertNull(p.checkMedia(null, "m"))
+    }
+
+    @Test fun theSameMediaIsNotSentTwice() {
+        val p = policy()
+        p.onPushed("img1")
+        assertEquals(Skip.UNCHANGED, p.checkMedia(ClipMeta(fileList = true), "img1"))
+        assertNull(p.checkMedia(ClipMeta(fileList = true), "img2"))
+    }
+
+    @Test fun mediaJustReceivedIsNotSentBack() {
+        val p = policy()
+        p.onRemoteSet(1_000, "from-mac")
+        assertEquals(Skip.ECHO, p.checkMedia(ClipMeta(fileList = true), "from-mac"))
+        // and the change signal our own setPrimaryClip causes lands in the echo window
+        assertEquals(Decision.Skipped(Skip.ECHO), p.onChange(1_500, ClipMeta(fileList = true), true, true))
+    }
+
+    @Test fun readingMediaEndsTheInFlightRead() {
+        val p = policy()
+        p.changeAndFire(0)
+        assertTrue(p.inFlight)
+        p.onReadMedia(ClipMeta(fileList = true), "m")
+        assertFalse(p.inFlight)
+        assertFalse(p.pending)
     }
 }

@@ -7,6 +7,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.res.Resources
+import android.net.Uri
 import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
@@ -36,7 +37,8 @@ import kotlinx.coroutines.flow.StateFlow
  *  - a controller asked for `copy`              → the input half calls `ClipboardSync.pushNow("copy")`
  *  - our app gains focus with changed content   → [onAppFocused]
  *
- * Automatic sends never include content flagged sensitive, file lists, or what we just received.
+ * Automatic sends never include content flagged sensitive or what we just received. An image or files on the clipboard
+ * go to peers with `clip_media` as a clipboard transfer (docs/protocol.md 5.1), within the limits of [ClipMedia].
  * Logs carry only lengths and short hashes, never clipboard text.
  */
 object ClipboardSync {
@@ -230,7 +232,9 @@ object ClipboardSync {
     fun onFocusedRead(clip: ClipData?, reason: String) {
         readToken++ // cancels the pending timeouts
         val text = clip?.let { textOf(it) }
+        val media = if (text == null && clip != null) mediaOf(clip) else null
         if (reason == "auto") {
+            if (media != null && clip != null) { pushMedia(media, clip, "auto"); return }
             val bytes = text?.toByteArray(Charsets.UTF_8)?.size ?: 0
             val hash = text?.let { Protocol.sha256Hex(it) }
             val d = policy.onRead(clip?.let { metaOf(it.description, it) }, hash, bytes, Protocol.MAX_CLIP_BYTES)
@@ -241,6 +245,7 @@ object ClipboardSync {
         }
         when {
             text != null -> pushText(text, reason)
+            media != null && clip != null -> pushMedia(media, clip, reason)
             reason != "copy" -> { policy.clearPending(); syncPending(); ConnectionHub.toast(ConnectionHub.app.getString(com.shazan.airbridge.R.string.cs_no_text)) }
         }
     }
@@ -250,7 +255,12 @@ object ClipboardSync {
         if (!activity.hasWindowFocus() || !autoEnabled) return
         val clip = readClip() ?: return
         val text = textOf(clip)
-        val hash = text?.let { Protocol.sha256Hex(it) }
+        if (text == null) {
+            val media = mediaOf(clip) ?: return
+            if (policy.checkMedia(metaOf(clip.description, clip), mediaHash(media, clip)) == null) pushMedia(media, clip, "foreground")
+            return
+        }
+        val hash = text.let { Protocol.sha256Hex(it) }
         val skip = policy.check(metaOf(clip.description, clip), hash, text?.toByteArray(Charsets.UTF_8)?.size ?: 0, Protocol.MAX_CLIP_BYTES)
         if (skip == null && text != null) pushText(text, "foreground")
     }
@@ -270,6 +280,15 @@ object ClipboardSync {
         if (isFileList(clip.description, item)) null
         else item.coerceToText(ConnectionHub.app)?.toString()?.takeIf { it.isNotEmpty() }
     } catch (e: Exception) { null }
+
+    /** The content URIs of a clip that holds an image or files and no text, or null. */
+    private fun mediaOf(clip: ClipData): List<Uri>? {
+        if (!isFileList(clip.description, clip.getItemAt(0))) return null
+        return (0 until clip.itemCount).mapNotNull { i -> clip.getItemAt(i).uri?.takeIf { it.scheme == "content" } }.takeIf { it.isNotEmpty() }
+    }
+
+    private fun mediaHash(uris: List<Uri>, clip: ClipData) =
+        Protocol.sha256Hex(uris.joinToString("|") + "|" + (clip.description.takeIf { it.mimeTypeCount > 0 }?.getMimeType(0) ?: ""))
 
     /** The clip description, if readable (null in the background on stock Android). */
     private fun describe(): ClipMeta? = try {
@@ -320,6 +339,47 @@ object ClipboardSync {
         Log.i(TAG, "sent ($reason) len=${text.length} hash=${hash.take(8)} to $n peer(s)")
         if (force) ConnectionHub.toast(if (n == 1) ConnectionHub.app.getString(com.shazan.airbridge.R.string.cs_copied_to, targets.first().peerName) else ConnectionHub.app.resources.getQuantityString(com.shazan.airbridge.R.plurals.cs_copied_n, n, n))
         return n
+    }
+
+    /**
+     * Send the image or files in [clip] to every ready peer with `clip_media`, as a clipboard transfer (docs/protocol.md
+     * 5.1). The content URIs stay readable because this runs while we hold focus. Main thread.
+     * @return number of peers it was sent to.
+     */
+    private fun pushMedia(uris: List<Uri>, clip: ClipData, reason: String): Int {
+        val force = reason in FORCED
+        val hash = mediaHash(uris, clip)
+        if (reason == "auto") {
+            val d = policy.onReadMedia(metaOf(clip.description, clip), hash)
+            syncPending()
+            Log.i(TAG, "auto: media ${uris.size} item(s) hash=${hash.take(8)} → $d")
+            if (d != ClipAutoPolicy.Decision.Send) return 0
+        } else if (!force && policy.isDuplicate(hash)) return 0
+        val targets = ConnectionHub.readySessions().filter { "clip_media" in it.peerCaps }
+        if (targets.isEmpty()) {
+            if (force) ConnectionHub.toast(ConnectionHub.app.getString(com.shazan.airbridge.R.string.sh_no_devices))
+            return 0
+        }
+        targets.forEach { it.xfer.send(uris, clip = true) }
+        policy.onPushed(hash); syncPending()
+        Log.i(TAG, "sent media ($reason) ${uris.size} item(s) hash=${hash.take(8)} to ${targets.size} peer(s)")
+        return targets.size
+    }
+
+    /**
+     * A clipboard transfer from another device finished (docs/protocol.md 5.1): put its image or files on this phone's
+     * clipboard. Labelled as our own so it is not sent straight back. Any thread.
+     */
+    fun setMedia(items: List<Pair<Uri, String?>>) {
+        if (items.isEmpty()) return
+        ConnectionHub.main.post {
+            policy.onRemoteSet(now(), Protocol.sha256Hex(items.joinToString("|") { it.first.toString() }))
+            try {
+                val clip = ClipData(OWN_LABEL, arrayOf(items[0].second ?: "application/octet-stream"), ClipData.Item(items[0].first))
+                for (i in 1 until items.size) clip.addItem(ConnectionHub.app.contentResolver, ClipData.Item(items[i].first))
+                cm.setPrimaryClip(clip)
+            } catch (e: Exception) { Log.w(TAG, "setPrimaryClip (media)", e) }
+        }
     }
 
     /** Share sheet: send text to one peer. */
