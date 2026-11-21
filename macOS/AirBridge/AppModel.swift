@@ -204,6 +204,18 @@ import UserNotifications
         pb.clearContents()
         pb.writeObjects(urls as [NSURL])
         ClipboardSync.shared.noteOwnWrite()
+        // A received picture also goes on the clipboard as an image, so it pastes into apps that want the picture itself.
+        if let first = urls.first, ClipboardImages.isImage(first) {
+            let change = pb.changeCount
+            Task.detached(priority: .userInitiated) {
+                guard let png = ClipboardImages.pngData(for: first) else { return }
+                await MainActor.run {
+                    if ClipboardImages.addPNG(png, to: NSPasteboard.general, expectedChange: change) {
+                        ClipboardSync.shared.noteOwnWrite()
+                    }
+                }
+            }
+        }
 
         let content = UNMutableNotificationContent()
         content.title = "AirBridge"
