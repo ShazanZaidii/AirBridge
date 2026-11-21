@@ -1,0 +1,45 @@
+<Window x:Class="AirBridge.NetworkCheckWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Can't find a device?" Width="440" Height="640" MinWidth="380" MinHeight="420"
+        Background="{StaticResource AB.Background}" WindowStartupLocation="CenterScreen">
+    <ScrollViewer Style="{StaticResource AB.ScrollViewer}">
+        <StackPanel Margin="20,16,20,20">
+            <TextBlock Style="{StaticResource AB.Text.Title}" Text="Can't find a device?"/>
+            <TextBlock Style="{StaticResource AB.Text.Caption}" Margin="0,2,0,14"
+                       Text="What this PC can do for other devices to find it, and a way to find them without mDNS."/>
+
+            <!-- the checks -->
+            <Border Background="{StaticResource AB.Card}" CornerRadius="16" Padding="16" Margin="0,0,0,12">
+                <StackPanel x:Name="Checks"/>
+            </Border>
+
+            <!-- firewall fix -->
+            <Border x:Name="FirewallCard" Visibility="Collapsed" Background="{StaticResource AB.Card}" CornerRadius="16" Padding="16" Margin="0,0,0,12">
+                <StackPanel>
+                    <TextBlock Style="{StaticResource AB.Text}" FontWeight="SemiBold" Text="Let AirBridge through Windows Firewall"/>
+                    <TextBlock Style="{StaticResource AB.Text.Caption}" Margin="0,4,0,10"
+                               Text="Windows blocks other devices from reaching this PC until it is allowed. This adds two rules (AirBridge's ports and mDNS) and asks Windows for permission once."/>
+                    <Button x:Name="FixButton" Content="Allow in Firewall" Style="{StaticResource AB.Button.Primary}" Click="Fix_Click"/>
+                    <TextBlock x:Name="FixStatus" Style="{StaticResource AB.Text.Caption}" Margin="0,8,0,0" AutomationProperties.LiveSetting="Polite"/>
+                </StackPanel>
+            </Border>
+
+            <!-- scan -->
+            <Border Background="{StaticResource AB.Card}" CornerRadius="16" Padding="16" Margin="0,0,0,12">
+                <StackPanel>
+                    <TextBlock Style="{StaticResource AB.Text}" FontWeight="SemiBold" Text="Look for devices another way"/>
+                    <TextBlock Style="{StaticResource AB.Text.Caption}" Margin="0,4,0,10"
+                               Text="Tries every address on this network directly, which works even when the network blocks the usual announcements. Takes a few seconds."/>
+                    <Button x:Name="ScanButton" Content="Scan this network" Style="{StaticResource AB.Button.Secondary}" Click="Scan_Click"/>
+                    <ProgressBar x:Name="ScanBar" Style="{StaticResource AB.Progress}" IsIndeterminate="True" Margin="0,10,0,0" Visibility="Collapsed"/>
+                    <TextBlock x:Name="ScanResult" Style="{StaticResource AB.Text.Caption}" Margin="0,8,0,0" AutomationProperties.LiveSetting="Polite"/>
+                </StackPanel>
+            </Border>
+
+            <TextBlock Style="{StaticResource AB.Text.Section}" Text="Still nothing?"/>
+            <TextBlock Style="{StaticResource AB.Text.Caption}" Margin="2,0,0,0"
+                       Text="School, college and office Wi-Fi often stops devices from seeing each other. Put both devices on the same phone hotspot or home Wi-Fi, or connect by address. VPNs can also hide the local network."/>
+        </StackPanel>
+    </ScrollViewer>
+</Window>

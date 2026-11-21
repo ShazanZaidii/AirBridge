@@ -19,6 +19,7 @@ namespace AirBridge
         public static ClipboardManager? ClipboardMonitor { get; private set; }
 
         private TaskbarIcon? _trayIcon;
+        private Timer? _quietTrim;
         private Window? _hiddenClipboardWindow;
         private readonly CancellationTokenSource _ipcCts = new();
 
@@ -30,13 +31,14 @@ namespace AirBridge
             {
                 if (TryHandleShareActivation()) return;
 
-                string[] files = e.Args.Where(a => !string.IsNullOrWhiteSpace(a)).ToArray();
+                string[] files = e.Args.Where(a => !string.IsNullOrWhiteSpace(a) && !a.StartsWith("--", StringComparison.Ordinal)).ToArray();
                 _singleInstanceMutex = new Mutex(true, IpcManager.MutexName, out bool createdNew);
                 if (!createdNew)
                 {
                     _singleInstanceMutex.Dispose();
                     _singleInstanceMutex = null;
                     if (files.Length > 0) IpcManager.HandOffLaunchingIfNeeded(files);
+                    else IpcManager.TrySend(new[] { IpcManager.ShowMainToken }, 1000); // started again from the Start menu: show the window
                     Shutdown();
                     return;
                 }
@@ -68,17 +70,15 @@ namespace AirBridge
             ClipboardMonitor.LocalTextChanged += text => Peers?.Clipboard.OnLocalText(text);
             ClipboardMonitor.Start(_hiddenClipboardWindow);
 
-            _trayIcon = new TaskbarIcon
-            {
-                ToolTipText = "AirBridge",
-                PopupActivation = PopupActivationMode.LeftOrRightClick,
-            };
+            _trayIcon = new TaskbarIcon { ToolTipText = "AirBridge" };
+            _trayIcon.TrayLeftMouseUp += (_, _) => TrayPopupWindow.Toggle();
+            _trayIcon.TrayRightMouseUp += (_, _) => TrayPopupWindow.Toggle();
+            _trayIcon.TrayMouseDoubleClick += (_, _) => { TrayPopupWindow.CloseIfOpen(); ShowMainWindow(); };
             try
             {
                 if (Environment.ProcessPath is string exe) _trayIcon.Icon = System.Drawing.Icon.ExtractAssociatedIcon(exe);
             }
             catch (Exception ex) { Log.Warn($"Tray icon load failed: {ex.Message}"); }
-            _trayIcon.TrayPopup = new TrayPopupControl();
 
             // 2. Input half.
             try
@@ -112,7 +112,31 @@ namespace AirBridge
             }
             catch (Exception ex) { Log.Error("Drop shelf / transfer cards failed to start", ex); }
 
+            // A tray app sits all day: every few minutes, when nothing is moving, give the memory back.
+            _quietTrim = new Timer(_ =>
+            {
+                try
+                {
+                    if (Peers == null || Peers.Transfers.Snapshot().Count > 0 || AirBridge.AirWeb.AirWebHost.Session is { ActiveTransfers: > 0 }) return;
+                    UiKit.TrimMemory();
+                }
+                catch { }
+            }, null, TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(5));
+
             if (pendingFiles.Length > 0) ShowSendWindow(pendingFiles);
+            else if (!Environment.GetCommandLineArgs().Contains("--background")) ShowMainWindow(); // opened by hand: show it; at login: stay in the tray
+        }
+
+        /// <summary>Opens the AirBridge window (any thread), or brings the open one forward.</summary>
+        public static void ShowMainWindow()
+        {
+            Current?.Dispatcher.BeginInvoke(new Action(() =>
+            {
+                var w = Current.Windows.OfType<MainWindow>().FirstOrDefault();
+                if (w == null) { w = new MainWindow(); w.Show(); }
+                if (w.WindowState == WindowState.Minimized) w.WindowState = WindowState.Normal;
+                w.Activate();
+            }));
         }
 
         /// <summary>Packaged share-target activation: hand the files to the main instance and exit.</summary>
@@ -169,6 +193,8 @@ namespace AirBridge
 
         protected override void OnExit(ExitEventArgs e)
         {
+            _quietTrim?.Dispose();
+            try { AirBridge.AirWeb.AirWebHost.Stop(); } catch { }
             try { Peers?.Dispose(); } catch (Exception ex) { Log.Error("Network shutdown failed", ex); }
             try { Interceptor?.Stop(); } catch (Exception ex) { Log.Error("Interceptor stop failed", ex); }
             ClipboardMonitor?.Stop();

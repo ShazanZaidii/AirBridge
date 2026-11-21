@@ -9,17 +9,17 @@
     -->
 
     <!-- colours -->
-    <Color x:Key="AB.C.Background">#0F172A</Color>
-    <Color x:Key="AB.C.Card">#1B2336</Color>
-    <Color x:Key="AB.C.Muted">#272F42</Color>
-    <Color x:Key="AB.C.Secondary">#334155</Color>
-    <Color x:Key="AB.C.Border">#475569</Color>
-    <Color x:Key="AB.C.Foreground">#F8FAFC</Color>
-    <Color x:Key="AB.C.MutedForeground">#94A3B8</Color>
-    <Color x:Key="AB.C.Accent">#22C55E</Color>
-    <Color x:Key="AB.C.OnAccent">#0F172A</Color>
-    <Color x:Key="AB.C.Destructive">#EF4444</Color>
-    <Color x:Key="AB.C.Warning">#F59E0B</Color>
+    <Color x:Key="AB.C.Background">#0F0F11</Color>
+    <Color x:Key="AB.C.Card">#CC1B1B1E</Color>
+    <Color x:Key="AB.C.Muted">#27272B</Color>
+    <Color x:Key="AB.C.Secondary">#34343A</Color>
+    <Color x:Key="AB.C.Border">#45454C</Color>
+    <Color x:Key="AB.C.Foreground">#F4F4F6</Color>
+    <Color x:Key="AB.C.MutedForeground">#A1A1A8</Color>
+    <Color x:Key="AB.C.Accent">#5B9DFF</Color>
+    <Color x:Key="AB.C.OnAccent">#0F0F11</Color>
+    <Color x:Key="AB.C.Destructive">#FF7A7A</Color>
+    <Color x:Key="AB.C.Warning">#FFC53D</Color>
 
     <SolidColorBrush x:Key="AB.Background" Color="{StaticResource AB.C.Background}"/>
     <SolidColorBrush x:Key="AB.Card" Color="{StaticResource AB.C.Card}"/>
@@ -29,12 +29,19 @@
     <SolidColorBrush x:Key="AB.Foreground" Color="{StaticResource AB.C.Foreground}"/>
     <SolidColorBrush x:Key="AB.MutedForeground" Color="{StaticResource AB.C.MutedForeground}"/>
     <SolidColorBrush x:Key="AB.Accent" Color="{StaticResource AB.C.Accent}"/>
-    <SolidColorBrush x:Key="AB.AccentSoft" Color="#2622C55E"/>
+    <SolidColorBrush x:Key="AB.AccentSoft" Color="#265B9DFF"/>
     <SolidColorBrush x:Key="AB.OnAccent" Color="{StaticResource AB.C.OnAccent}"/>
     <SolidColorBrush x:Key="AB.Destructive" Color="{StaticResource AB.C.Destructive}"/>
     <SolidColorBrush x:Key="AB.Warning" Color="{StaticResource AB.C.Warning}"/>
     <SolidColorBrush x:Key="AB.HoverOverlay" Color="#14FFFFFF"/>
     <SolidColorBrush x:Key="AB.PressOverlay" Color="#24FFFFFF"/>
+
+    <!-- the one small splash of green: a connected dot. Never a fill, never text. -->
+    <Color x:Key="AB.C.Success">#46C38A</Color>
+    <SolidColorBrush x:Key="AB.Success" Color="{StaticResource AB.C.Success}"/>
+    <!-- white primary button, as on the phone and the Mac -->
+    <SolidColorBrush x:Key="AB.Primary" Color="#F4F4F6"/>
+    <SolidColorBrush x:Key="AB.RowHover" Color="#0FFFFFFF"/>
 
     <!-- type -->
     <FontFamily x:Key="AB.Font">Segoe UI Variable Text, Segoe UI</FontFamily>
@@ -119,7 +126,7 @@
     </Style>
 
     <Style x:Key="AB.Button.Primary" TargetType="Button" BasedOn="{StaticResource AB.Button}">
-        <Setter Property="Background" Value="{StaticResource AB.Accent}"/>
+        <Setter Property="Background" Value="{StaticResource AB.Primary}"/>
         <Setter Property="Foreground" Value="{StaticResource AB.OnAccent}"/>
     </Style>
 
@@ -225,10 +232,119 @@
         <Setter Property="Maximum" Value="1"/>
     </Style>
 
+    <!-- Dialog content area. The windows now use the normal (dark) title bar instead of a transparent borderless
+         shape, which WPF draws in software and which costs memory on every redraw. -->
     <Style x:Key="AB.Window.Card" TargetType="Border">
-        <Setter Property="Background" Value="{StaticResource AB.Background}"/>
-        <Setter Property="BorderBrush" Value="{StaticResource AB.Secondary}"/>
-        <Setter Property="BorderThickness" Value="1"/>
-        <Setter Property="CornerRadius" Value="16"/>
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="CornerRadius" Value="0"/>
+    </Style>
+    <!-- Action tile: icon over a short label (the Mac's ActionTile). -->
+    <Style x:Key="AB.Tile" TargetType="Button" BasedOn="{StaticResource AB.Button}">
+        <Setter Property="Background" Value="{StaticResource AB.Card}"/>
+        <Setter Property="Padding" Value="4,10"/>
+        <Setter Property="FontWeight" Value="Normal"/>
+        <Setter Property="FontSize" Value="12"/>
+        <Setter Property="MinHeight" Value="64"/>
+    </Style>
+
+    <!-- A full-width row that is one button: icon tile, two lines, a pencil. -->
+    <Style x:Key="AB.Button.Row" TargetType="Button">
+        <Setter Property="FontFamily" Value="{StaticResource AB.Font}"/>
+        <Setter Property="Foreground" Value="{StaticResource AB.Foreground}"/>
+        <Setter Property="Background" Value="{StaticResource AB.Card}"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="Padding" Value="10,8"/>
+        <Setter Property="MinHeight" Value="48"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+        <Setter Property="VerticalContentAlignment" Value="Center"/>
+        <Setter Property="FocusVisualStyle" Value="{StaticResource AB.FocusVisual}"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Grid SnapsToDevicePixels="True">
+                        <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="12"/>
+                        <Border x:Name="Hover" Background="{StaticResource AB.RowHover}" CornerRadius="12" Opacity="0"/>
+                        <ContentPresenter Margin="{TemplateBinding Padding}" HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                          VerticalAlignment="{TemplateBinding VerticalContentAlignment}"/>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Hover" Property="Opacity" Value="1"/></Trigger>
+                        <Trigger Property="IsPressed" Value="True"><Setter TargetName="Hover" Property="Opacity" Value="1"/><Setter TargetName="Bd" Property="Opacity" Value="0.85"/></Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- Small rounded pill button for secondary tools. -->
+    <Style x:Key="AB.Button.Pill" TargetType="Button" BasedOn="{StaticResource AB.Button}">
+        <Setter Property="Background" Value="{StaticResource AB.Card}"/>
+        <Setter Property="FontWeight" Value="Normal"/>
+        <Setter Property="FontSize" Value="12"/>
+        <Setter Property="MinHeight" Value="32"/>
+    </Style>
+
+    <!-- A quiet text link button (no box). -->
+    <Style x:Key="AB.Button.Link" TargetType="Button">
+        <Setter Property="FontFamily" Value="{StaticResource AB.Font}"/>
+        <Setter Property="FontSize" Value="12"/>
+        <Setter Property="Foreground" Value="{StaticResource AB.MutedForeground}"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="MinHeight" Value="28"/>
+        <Setter Property="Padding" Value="6,0"/>
+        <Setter Property="FocusVisualStyle" Value="{StaticResource AB.FocusVisual}"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="6" Padding="{TemplateBinding Padding}">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource AB.RowHover}"/>
+                            <Setter Property="Foreground" Value="{StaticResource AB.Foreground}"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- A switch (CheckBox look): a pill with a sliding knob. White when on. -->
+    <Style x:Key="AB.Switch" TargetType="CheckBox">
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="FocusVisualStyle" Value="{StaticResource AB.FocusVisual}"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="CheckBox">
+                    <Grid Width="40" Height="22" Background="Transparent">
+                        <Border x:Name="Track" CornerRadius="11" Background="{StaticResource AB.Secondary}"/>
+                        <Ellipse x:Name="Knob" Width="16" Height="16" Fill="{StaticResource AB.MutedForeground}" HorizontalAlignment="Left" Margin="3,0,0,0"/>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="Track" Property="Background" Value="{StaticResource AB.Primary}"/>
+                            <Setter TargetName="Knob" Property="Fill" Value="{StaticResource AB.OnAccent}"/>
+                            <Setter TargetName="Knob" Property="HorizontalAlignment" Value="Right"/>
+                            <Setter TargetName="Knob" Property="Margin" Value="0,0,3,0"/>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.45"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- Thin dark scrollbar: the default grey one looks wrong on graphite. -->
+    <Style x:Key="AB.ScrollViewer" TargetType="ScrollViewer">
+        <Setter Property="VerticalScrollBarVisibility" Value="Auto"/>
+        <Setter Property="HorizontalScrollBarVisibility" Value="Disabled"/>
+        <Setter Property="Focusable" Value="False"/>
     </Style>
 </ResourceDictionary>

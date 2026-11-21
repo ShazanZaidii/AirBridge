@@ -31,6 +31,8 @@ namespace AirBridge
         public SendWindow(string[] paths)
         {
             InitializeComponent();
+            UiKit.Dark(this);
+            UiKit.Glass(this);
             _files = paths.Where(File.Exists).ToArray();
             int folders = paths.Count(Directory.Exists);
             TitleText.Text = _files.Length == 1 ? $"Send {Path.GetFileName(_files[0])}" : $"Send {_files.Length} files";
@@ -55,6 +57,14 @@ namespace AirBridge
         }
 
         private void OnStateChanged() => Dispatcher.BeginInvoke(new Action(() => { if (!_sending) PopulateTargets(); }));
+
+        /// <summary>The other device has no AirBridge: share these files through AirWeb (same link, same pool as any other AirWeb session).</summary>
+        private void AirWeb_Click(object sender, RoutedEventArgs e)
+        {
+            if (_files.Length == 0) return;
+            AirBridge.AirWeb.AirWebHost.Show(_files);
+            Close();
+        }
 
         private void Window_MouseDown(object sender, MouseButtonEventArgs e)
         {

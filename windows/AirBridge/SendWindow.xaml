@@ -2,9 +2,8 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Send via AirBridge" Height="470" Width="360"
-        WindowStartupLocation="CenterScreen" WindowStyle="None" ResizeMode="NoResize"
-        AllowsTransparency="True" Background="Transparent" Topmost="True"
-        MouseLeftButtonDown="Window_MouseDown">
+        WindowStartupLocation="CenterScreen" ResizeMode="NoResize"
+        Background="{StaticResource AB.Background}" Topmost="True">
     <Border Style="{StaticResource AB.Window.Card}">
         <Grid Margin="20">
             <Grid.RowDefinitions>
@@ -24,12 +23,23 @@
             </ScrollViewer>
 
             <!-- §10.1: bring up a Wi-Fi Direct link to the phone first, then send on it (falls back to the current connection). -->
-            <CheckBox Grid.Row="2" x:Name="FastBox" Margin="4,8,4,0" Foreground="{StaticResource AB.Foreground}" Cursor="Hand"
+            <StackPanel Grid.Row="2">
+                <CheckBox x:Name="FastBox" Margin="4,8,4,0" Foreground="{StaticResource AB.Foreground}" Cursor="Hand"
                       VerticalContentAlignment="Center" IsEnabled="False"
                       ToolTip="Phones only: the PC hosts a Wi-Fi Direct network the phone joins for this transfer. Works without a shared Wi-Fi."
                       AutomationProperties.Name="Send fast over Wi-Fi Direct">
                 <TextBlock Style="{StaticResource AB.Text}" Text="Send fast (Wi-Fi Direct)"/>
             </CheckBox>
+                <!-- no AirBridge on the other device: through its browser -->
+                <Button x:Name="AirWebButton" Style="{StaticResource AB.Button.Link}" HorizontalAlignment="Left" Margin="-2,6,0,0" Click="AirWeb_Click"
+                        ToolTip="For a phone or computer without AirBridge: it opens a page in its browser to download these files"
+                        AutomationProperties.Name="Send through AirWeb to any browser">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Style="{StaticResource AB.Glyph}" Text="&#xE774;" FontSize="12" Margin="0,0,8,0" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"/>
+                        <TextBlock Style="{StaticResource AB.Text.Caption}" Text="Device without AirBridge? Use AirWeb" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"/>
+                    </StackPanel>
+                </Button>
+            </StackPanel>
 
             <TextBlock Grid.Row="3" x:Name="StatusText" Style="{StaticResource AB.Text.Caption}" Foreground="{StaticResource AB.Warning}"
                        TextAlignment="Center" Margin="0,8,0,0" AutomationProperties.LiveSetting="Polite"/>

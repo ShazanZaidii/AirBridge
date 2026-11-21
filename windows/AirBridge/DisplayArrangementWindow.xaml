@@ -286,6 +286,14 @@
                                   Checked="SwapCmdCtrl_Changed" Unchecked="SwapCmdCtrl_Changed">
                             <TextBlock TextWrapping="Wrap" Text="When a Mac controls this PC, use Cmd as Ctrl (and Ctrl as Win)"/>
                         </CheckBox>
+                        <TextBlock Style="{StaticResource Hint}" Text="Edge glow" Margin="0,16,0,8"/>
+                        <WrapPanel x:Name="EdgeSwatches"/>
+                        <StackPanel Orientation="Horizontal" Margin="0,2,0,0">
+                            <TextBox x:Name="EdgeHex" Width="92" MaxLength="7" VerticalContentAlignment="Center"
+                                     AutomationProperties.Name="Edge glow colour as a hex code"
+                                     LostFocus="EdgeHex_Commit" KeyDown="EdgeHex_KeyDown"/>
+                            <Button x:Name="EdgeReset" Content="Reset" Style="{StaticResource AB.Button.Ghost}" Margin="8,0,0,0" Click="EdgeReset_Click"/>
+                        </StackPanel>
                     </StackPanel>
                 </Border>
             </Grid>

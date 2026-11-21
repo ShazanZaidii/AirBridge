@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<!-- Self-check for the reinstall rules (stale paired entries) and the battery wire (§14). Pure logic, runs on any OS:
+	     dotnet run (project AirBridge.StaleTests) (exit code 0 = all passed). -->
+	<PropertyGroup>
+		<OutputType>Exe</OutputType>
+		<TargetFramework>net8.0</TargetFramework>
+		<RollForward>Major</RollForward>
+		<Nullable>enable</Nullable>
+		<ImplicitUsings>disable</ImplicitUsings>
+		<TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+	</PropertyGroup>
+	<ItemGroup>
+		<Compile Include="../AirBridge/Net/StaleDevices.cs" Link="Shared/StaleDevices.cs" />
+		<Compile Include="../AirBridge/Net/DeviceBatteryCore.cs" Link="Shared/DeviceBatteryCore.cs" />
+	</ItemGroup>
+</Project>

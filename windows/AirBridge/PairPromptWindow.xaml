@@ -2,13 +2,9 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="AirBridge pairing request" Width="380" SizeToContent="Height"
-        WindowStartupLocation="CenterScreen" WindowStyle="None" AllowsTransparency="True" Background="Transparent"
-        Topmost="True" ShowInTaskbar="True" ResizeMode="NoResize"
-        MouseLeftButtonDown="Window_MouseDown">
-    <Border Style="{StaticResource AB.Window.Card}" Margin="12">
-        <Border.Effect>
-            <DropShadowEffect Color="Black" BlurRadius="24" Opacity="0.45" Direction="270" ShadowDepth="6"/>
-        </Border.Effect>
+        WindowStartupLocation="CenterScreen" Background="{StaticResource AB.Background}"
+        Topmost="True" ShowInTaskbar="True" ResizeMode="NoResize">
+    <Border Style="{StaticResource AB.Window.Card}">
         <StackPanel Margin="24">
             <Grid Margin="0,0,0,16">
                 <Grid.ColumnDefinitions>
