@@ -277,13 +277,14 @@ namespace AirBridge.Input
                 case "key_state": return; // never subject to the lease; nothing to show on Windows
                 case "ctl_busy": return;  // controller-side message, handled by the Controller
                 case "mirror_start":
-                    // No Windows mirror source yet: decline explicitly so the sink doesn't wait.
-                    Send(peer, Msg.Of("mirror_stop"));
-                    return;
-                case "mirror_info":
                 case "mirror_key":
                 case "mirror_ack":
                 case "mirror_stop":
+                    // We are the source (§8.7). Without a working capture and encoder MirrorSource answers mirror_start with
+                    // mirror_stop and an error, so the sink never waits.
+                    MirrorSource.Handle(peer, t, m);
+                    return;
+                case "mirror_info":
                     return;
                 case "ptr_move":
                 case "ptr_abs":
@@ -302,7 +303,7 @@ namespace AirBridge.Input
             {
                 case "ptr_move": Move(peer, Msg.Num(m, "dx") ?? 0, Msg.Num(m, "dy") ?? 0); break;
                 case "ptr_abs":
-                    if (Msg.Num(m, "x") is double ax && Msg.Num(m, "y") is double ay) MoveAbs(ax, ay);
+                    if (Msg.Num(m, "x") is double ax && Msg.Num(m, "y") is double ay) MoveAbs(peer, ax, ay);
                     break;
                 case "ptr_scroll": Scroll(Msg.Num(m, "dx") ?? 0, Msg.Num(m, "dy") ?? 0, Msg.Bool(m, "px") ?? false); break;
                 case "ptr_btn":
@@ -476,18 +477,24 @@ namespace AirBridge.Input
         }
 
         /// <summary>
-        /// ptr_abs (§8.2): x/y ∈ [0,1] normalised to the primary display (Windows is never a mirror source, so the
-        /// "mirrored display" case does not arise). No gain. Injected as an absolute virtual-desk move.
+        /// ptr_abs (§8.2): x/y ∈ [0,1] normalised to the mirrored display when <paramref name="peer"/> is the screen-mirror
+        /// sink (§8.7), otherwise to the primary display. No gain. Injected as an absolute virtual-desk move.
         /// </summary>
-        private void MoveAbs(double x, double y)
+        private void MoveAbs(string peer, double x, double y)
         {
             if (double.IsNaN(x) || double.IsNaN(y)) return;
-            RefreshMonitors(force: false);
-            if (_mons.Count == 0) return;
-            var prim = _mons.FirstOrDefault(mm => mm.Primary) ?? _mons[0];
-            var b = prim.Bounds;
-            double px = b.Left + Math.Clamp(x, 0, 1) * (b.Width - 1);
-            double py = b.Top + Math.Clamp(y, 0, 1) * (b.Height - 1);
+            double left, top, width, height;
+            if (MirrorSource.MirroredDisplay(peer) is { } md) { left = md.Left; top = md.Top; width = md.Width; height = md.Height; }
+            else
+            {
+                RefreshMonitors(force: false);
+                if (_mons.Count == 0) return;
+                var prim = _mons.FirstOrDefault(mm => mm.Primary) ?? _mons[0];
+                var b = prim.Bounds;
+                left = b.Left; top = b.Top; width = b.Width; height = b.Height;
+            }
+            double px = left + Math.Clamp(x, 0, 1) * (width - 1);
+            double py = top + Math.Clamp(y, 0, 1) * (height - 1);
             _cx = px + 0.5; _cy = py + 0.5; _havePos = true;
             MoveCursorTo((int)Math.Round(px), (int)Math.Round(py));
         }

@@ -124,6 +124,7 @@ namespace AirBridge
         {
             try
             {
+                MirrorSource.PeerGone(peerId);
                 _controller.OnSessionEnded(peerId);
                 _target.OnSessionEnded(peerId);
             }
@@ -137,6 +138,7 @@ namespace AirBridge
             {
                 PeerDirectory.Update(peers);
                 PhoneMirrorHub.PeersChanged(peers);
+                MirrorSource.PeersChanged(peers);
                 _controller.OnPeersChanged(peers);
                 _target.OnPeersChanged(peers);
             }
