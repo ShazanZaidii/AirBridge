@@ -1,7 +1,7 @@
 package com.shazan.airbridge.connection.transport.link
 
 /*
- * Per-peer Wi-Fi Direct link state machine (PROTOCOL §10.1, the design notes §3/§4/§6.4).
+ * Per-peer Wi-Fi Direct link state machine (docs/protocol.md §10.1).
  * Pure Kotlin (no Android types) so it is unit-testable with a fake environment; LinkManager supplies
  * the real one (Wi-Fi join, WebSocket dial, ConnectionHub/WsClient hooks, the airbridge-net scheduler thread).
  *

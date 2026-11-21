@@ -60,8 +60,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * Hidden Wi-Fi Direct test screen (long-press the title in Settings) for device tests S-W2/S-W3/S-W4
- * (the design notes §6.5). Joins the network derived for a paired peer directly with
+ * Hidden Wi-Fi Direct test screen (long-press the title in Settings) for the Wi-Fi Direct device
+ * tests. Joins the network derived for a paired peer directly with
  * [WfdJoiner] (no `link_*` signalling), measures raw TCP throughput bound to that network, and shows the
  * `AirBridge.Link` log. Leaving the screen releases the network.
  */
