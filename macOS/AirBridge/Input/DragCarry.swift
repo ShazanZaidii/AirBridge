@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 import UniformTypeIdentifiers
 
@@ -64,6 +65,43 @@ nonisolated struct DragCarryController: Sendable {
     /// drag leaves an older file drag's contents in place) and it has file URLs.
     static func dragHasFiles(changeCountAtDown: Int, changeCountNow: Int, fileCount: Int) -> Bool {
         changeCountAtDown >= 0 && changeCountNow != changeCountAtDown && fileCount > 0
+    }
+}
+
+/// Where the frozen cursor rests while a file drag is carried to another device.
+///
+/// While the user is over the other device the Mac's cursor stays put, and the file drag is still held. If it rests
+/// against the very edge of the screen, macOS treats that as "drag to the edge" and switches Spaces left and right
+/// again and again. So the cursor is parked a little inside the screen, and the invisible drop catcher is widened to
+/// cover that spot (the release still lands on it and does nothing).
+nonisolated struct CarryPark: Equatable, Sendable {
+    /// How far inside the screen edge the cursor rests, in points.
+    static let inset: CGFloat = 36
+    /// How far the catcher reaches in from the edge (must go past `inset`).
+    static let depth: CGFloat = 84
+    /// The catcher is at least this long along the edge, around the cursor.
+    static let minAlong: CGFloat = 120
+
+    let point: CGPoint
+    let rect: CGRect
+
+    /// `vertical`: a left/right edge (it runs top to bottom); `atMin`: the left or top edge. `along` is the cursor's
+    /// position along the edge and `span` the stretch of the edge that leads to the target; all in global coordinates.
+    static func make(display r: CGRect, vertical: Bool, atMin: Bool, along: CGFloat, span: (CGFloat, CGFloat)) -> CarryPark {
+        let loLimit = vertical ? r.minY : r.minX
+        let hiLimit = vertical ? r.maxY : r.maxX
+        let a = min(max(along, loLimit + 1), hiLimit - 2)
+        let lo = max(loLimit, min(min(span.0, span.1), a - minAlong / 2))
+        let hi = min(hiLimit, max(max(span.0, span.1), a + minAlong / 2))
+        if vertical {
+            let x = atMin ? r.minX + inset : r.maxX - 1 - inset
+            let rx = atMin ? r.minX : r.maxX - depth
+            return CarryPark(point: CGPoint(x: x, y: a), rect: CGRect(x: rx, y: lo, width: depth, height: hi - lo))
+        } else {
+            let y = atMin ? r.minY + inset : r.maxY - 1 - inset
+            let ry = atMin ? r.minY : r.maxY - depth
+            return CarryPark(point: CGPoint(x: a, y: y), rect: CGRect(x: lo, y: ry, width: hi - lo, height: depth))
+        }
     }
 }
 
