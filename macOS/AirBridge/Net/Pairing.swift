@@ -6,6 +6,8 @@ nonisolated struct StoredPeer: Equatable, Sendable {
     let id: String
     var name: String
     var plat: String
+    /// The device's hardware fingerprint (`hello.hw`): the same physical device under an older install shares it.
+    var hw: String? = nil
 }
 
 /// Long-term peer keys (§3.3). Keychain generic passwords:
@@ -40,7 +42,10 @@ nonisolated final class PeerStore: @unchecked Sendable {
                 name = meta["name"] ?? name
                 plat = meta["plat"] ?? plat
             }
-            peers[id] = StoredPeer(id: id, name: name, plat: plat)
+            var hw: String?
+            if let g = item[kSecAttrGeneric as String] as? Data,
+               let meta = try? JSONSerialization.jsonObject(with: g) as? [String: String] { hw = meta["hw"] }
+            peers[id] = StoredPeer(id: id, name: name, plat: plat, hw: hw)
         }
     }
 
@@ -72,17 +77,17 @@ nonisolated final class PeerStore: @unchecked Sendable {
         return k
     }
 
-    func save(id: String, key: Data, name: String, plat: String) {
+    func save(id: String, key: Data, name: String, plat: String, hw: String? = nil) {
         lock.lock(); defer { lock.unlock() }
         loadIfNeeded()
         SecItemDelete(baseQuery(id) as CFDictionary)
         var add = baseQuery(id)
         add[kSecValueData as String] = key
-        add[kSecAttrGeneric as String] = meta(name: name, plat: plat)
+        add[kSecAttrGeneric as String] = meta(name: name, plat: plat, hw: hw)
         add[kSecAttrLabel as String] = "AirBridge – \(name)"
         let status = SecItemAdd(add as CFDictionary, nil)
         if status != errSecSuccess { NSLog("AirBridge: Keychain save failed (\(status))") }
-        peers[id] = StoredPeer(id: id, name: name, plat: plat)
+        peers[id] = StoredPeer(id: id, name: name, plat: plat, hw: hw)
         keys[id] = key
     }
 
@@ -93,10 +98,20 @@ nonisolated final class PeerStore: @unchecked Sendable {
         p.name = name
         peers[id] = p
         let attrs: [String: Any] = [
-            kSecAttrGeneric as String: meta(name: name, plat: p.plat),
+            kSecAttrGeneric as String: meta(name: name, plat: p.plat, hw: p.hw),
             kSecAttrLabel as String: "AirBridge – \(name)",
         ]
         SecItemUpdate(baseQuery(id) as CFDictionary, attrs as CFDictionary)
+    }
+
+    /// Remember the fingerprint of an already paired device (older entries have none).
+    func setHw(id: String, hw: String) {
+        lock.lock(); defer { lock.unlock() }
+        loadIfNeeded()
+        guard var p = peers[id], p.hw != hw else { return }
+        p.hw = hw
+        peers[id] = p
+        SecItemUpdate(baseQuery(id) as CFDictionary, [kSecAttrGeneric as String: meta(name: p.name, plat: p.plat, hw: hw)] as CFDictionary)
     }
 
     func delete(_ id: String) {
@@ -113,8 +128,10 @@ nonisolated final class PeerStore: @unchecked Sendable {
          kSecAttrAccount as String: id]
     }
 
-    private func meta(name: String, plat: String) -> Data {
-        (try? JSONSerialization.data(withJSONObject: ["name": name, "plat": plat])) ?? Data()
+    private func meta(name: String, plat: String, hw: String?) -> Data {
+        var m = ["name": name, "plat": plat]
+        if let hw, !hw.isEmpty { m["hw"] = hw }
+        return (try? JSONSerialization.data(withJSONObject: m)) ?? Data()
     }
 }
 

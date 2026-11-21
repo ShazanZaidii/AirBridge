@@ -44,6 +44,7 @@ struct DisplayArrangementView: View {
 
     @AppStorage(CaptureSettings.thresholdKey) private var threshold: Double = 100
     @AppStorage(CaptureSettings.requireOptionKey) private var requireOption = false
+    @AppStorage(CaptureSettings.edgeColorKey) private var edgeColorHex = CaptureSettings.defaultEdgeColorHex
     @AppStorage(CaptureSettings.edgeKey(.left)) private var leftOn = true
     @AppStorage(CaptureSettings.edgeKey(.right)) private var rightOn = true
     @AppStorage(CaptureSettings.edgeKey(.top)) private var topOn = true
@@ -77,7 +78,7 @@ struct DisplayArrangementView: View {
         let online = directory.peers.filter { $0.caps.contains("ctl_target") }
         var list = online.map { Item(id: $0.id, name: $0.name, online: true, platform: $0.platform) }
         let ids = Set(list.map(\.id))
-        for (id, p) in placements where p.edge != nil && !ids.contains(id) {
+        for (id, p) in placements where p.edge != nil && !ids.contains(id) && PeerStore.shared.hasKey(id) {
             list.append(Item(id: id, name: p.name.isEmpty ? "Device" : p.name, online: false))
         }
         return list.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
@@ -467,6 +468,20 @@ struct DisplayArrangementView: View {
 
     // MARK: crossing settings
 
+    private var edgeColorBinding: Binding<Color> {
+        Binding(
+            get: { Color(nsColor: CaptureSettings.color(fromHex: edgeColorHex)) },
+            set: { edgeColorHex = CaptureSettings.hex(NSColor($0)); previewEdge() }
+        )
+    }
+
+    /// A quick flash of the glow along the main screen's right edge, so the new colour can be judged.
+    private func previewEdge() {
+        let r = CGDisplayBounds(CGMainDisplayID())
+        let t = EdgeIndicator.thickness
+        EdgeIndicator.shared.flash(rect: CGRect(x: r.maxX - t, y: r.minY + r.height * 0.3, width: t, height: r.height * 0.4))
+    }
+
     private var strengthBinding: Binding<Int> {
         Binding(
             get: {
@@ -491,7 +506,15 @@ struct DisplayArrangementView: View {
                     .font(.callout)
             }
             .toggleStyle(.checkbox)
-            Text("Resting the cursor on an edge never crosses. Keep pushing outward for a moment: the blue bar on the edge fills, then the cursor moves over. Come back the same way, or press Control-Option-Command-Esc.")
+            HStack(spacing: Tok.sm) {
+                ColorPicker("Edge glow", selection: edgeColorBinding, supportsOpacity: false)
+                    .font(.callout)
+                if edgeColorHex.uppercased() != CaptureSettings.defaultEdgeColorHex {
+                    Button("Reset") { edgeColorHex = CaptureSettings.defaultEdgeColorHex; previewEdge() }
+                        .buttonStyle(.link)
+                }
+            }
+            Text("Resting the cursor on an edge never crosses. Keep pushing outward for a moment: the bar on the edge glows and fills, then the cursor moves over. Come back the same way, or press Control-Option-Command-Esc.")
                 .font(.caption)
                 .foregroundStyle(Tok.mutedFg)
                 .fixedSize(horizontal: false, vertical: true)

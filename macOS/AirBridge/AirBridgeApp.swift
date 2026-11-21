@@ -42,6 +42,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         PeerManager.shared.start()
         ClipboardSync.shared.start()
         ShareInbox.purgeStale()
+        DropItems.purgeStale()
+        // The device pictures in the Batteries widget come from types AirBridge declares: make sure the system knows them.
+        LSRegisterURL(Bundle.main.bundleURL as CFURL, false)
+        // Finder's right-click menu: "Send with AirBridge" (Services). The file goes through the same dock as a drop.
+        NSApp.servicesProvider = self
+        NSUpdateDynamicServices()
         InputInterceptor.shared.start()
         DropDock.shared.start()
         PhoneNotifCenter.shared.start()
@@ -49,7 +55,17 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
 
     func applicationWillTerminate(_ notification: Notification) {
         AirWebWindow.shared.shutdown()
+        DevicePowerSources.shared.removeAll()
         PeerManager.shared.shutdown()
+    }
+
+    /// The "Send with AirBridge" service: the chosen files, handled like a drop on the menu bar icon.
+    @objc func sendWithAirBridge(_ pboard: NSPasteboard, userData: String, error: AutoreleasingUnsafeMutablePointer<NSString>) {
+        guard !DropItems.fileURLs(pboard).isEmpty else {
+            error.pointee = "Choose files or folders to send." as NSString
+            return
+        }
+        _ = DropDock.shared.dropOnIcon(pboard)
     }
 
     @objc func handleURLEvent(_ event: NSAppleEventDescriptor, withReplyEvent replyEvent: NSAppleEventDescriptor) {
@@ -419,6 +435,7 @@ struct MenuView: View {
     @AppStorage(PhoneNotifSettings.showNotifsKey) private var showPhoneNotifs = true
     @AppStorage(PhoneNotifSettings.showCallsKey) private var showPhoneCalls = true
     @AppStorage(PhoneNotifSettings.soundsKey) private var phoneSounds = true
+    @AppStorage(DevicePowerSources.showKey) private var showPhoneBattery = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -684,7 +701,28 @@ struct MenuView: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
             ForEach(model.devices.sorted { $0.connected && !$1.connected }) { d in deviceRow(d) }
+            if let offer = model.staleOffer { staleBanner(offer) }
         }
+    }
+
+    /// Entries left behind by earlier installs of a device that is connected now: the user decides, nothing is guessed.
+    private func staleBanner(_ offer: StaleOffer) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(offer.ids.count == 1
+                 ? "1 older entry named “\(offer.name)” may be an earlier install of this device."
+                 : "\(offer.ids.count) older entries named “\(offer.name)” may be earlier installs of this device.")
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 8) {
+                Button("Remove old") { PeerManager.shared.resolveStale(offer, remove: true) }
+                Button("Keep") { PeerManager.shared.resolveStale(offer, remove: false) }
+            }
+            .controlSize(.small)
+        }
+        .padding(8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: Theme.radius).fill(Color.primary.opacity(0.05)))
+        .accessibilityElement(children: .contain)
     }
 
     private func deviceRow(_ d: DeviceRow) -> some View {
@@ -825,6 +863,9 @@ struct MenuView: View {
             RingModeSetting().disabled(!showPhoneCalls).opacity(showPhoneCalls ? 1 : 0.45)
             SettingToggleRow(icon: "speaker.wave.2", title: "Sounds", hint: "Play a sound for phone notifications",
                              isOn: $phoneSounds, enabled: showPhoneNotifs || showPhoneCalls)
+            SettingToggleRow(icon: "battery.75percent", title: "Phone battery", hint: "List it in the Batteries widget",
+                             isOn: $showPhoneBattery)
+                .onChange(of: showPhoneBattery) { _, _ in DevicePowerSources.shared.refresh() }
         }
         .fixedSize(horizontal: false, vertical: true)
         .padding(.top, Theme.xs)

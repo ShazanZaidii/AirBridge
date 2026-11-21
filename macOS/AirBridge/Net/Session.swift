@@ -59,6 +59,8 @@ nonisolated final class Session: @unchecked Sendable {
     private(set) var peerId = ""
     private(set) var peerName = "Unknown"
     private(set) var peerPlat = ""
+    /// The peer's hardware fingerprint (`hello.hw`), if it sent one: the same physical device across reinstalls.
+    private(set) var peerHw: String?
     private(set) var peerCaps: Set<String> = []
     private(set) var screenW = 0
     private(set) var screenH = 0
@@ -333,6 +335,9 @@ nonisolated final class Session: @unchecked Sendable {
             }
         case "clip":
             ClipboardSync.receive(msg, from: peerId)
+        case "dev_battery":
+            // The phone's battery level, listed in macOS's own battery list (Devices/DevicePowerSources.swift).
+            DevicePowerSources.shared.receive(from: peerId, msg)
         case _ where t.hasPrefix("xfer_"):
             transfers?.handle(t, msg)
         case _ where t.hasPrefix("notif_") || t.hasPrefix("call_"):
@@ -368,6 +373,7 @@ nonisolated final class Session: @unchecked Sendable {
         remoteNonce = nonce
         peerName = String((msg.str("name") ?? "Unknown").prefix(100))
         peerPlat = String((msg.str("plat") ?? "").prefix(20))
+        peerHw = msg.str("hw").map { String($0.prefix(64)) }.flatMap { $0.isEmpty ? nil : $0 }
         peerCaps = Set((msg["caps"] as? [Any])?.compactMap { $0 as? String } ?? [])
         if let screen = msg["screen"] as? [String: Any] {
             screenW = screen.int("w") ?? 0
@@ -477,7 +483,7 @@ nonisolated final class Session: @unchecked Sendable {
                 finishClient(.badHost("Host failed pairing verification"))
                 return
             }
-            PeerStore.shared.save(id: peerId, key: k, name: peerName, plat: peerPlat)
+            PeerStore.shared.save(id: peerId, key: k, name: peerName, plat: peerPlat, hw: peerHw)
             becomeReady()
 
         case (.client, _, "auth_fail"):
@@ -526,7 +532,7 @@ nonisolated final class Session: @unchecked Sendable {
     }
 
     private func completePairing(_ k: Data) {
-        PeerStore.shared.save(id: peerId, key: k, name: peerName, plat: peerPlat)
+        PeerStore.shared.save(id: peerId, key: k, name: peerName, plat: peerPlat, hw: peerHw)
         Pairing.shared.succeeded()
         send(["t": "pair_ok", "proof": Proto.pairAckProof(k, transcript).base64EncodedString()])
         becomeReady()

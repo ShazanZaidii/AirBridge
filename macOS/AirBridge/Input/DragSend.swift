@@ -4,7 +4,7 @@ import Foundation
 /// transfer (§6). Files go as they are; folders (and packages such as .app bundles) are zipped first with
 /// `ditto`, which keeps resource forks and permissions, into a temporary folder that is removed afterwards.
 nonisolated enum DragSend {
-    static func send(_ urls: [URL], to peer: String) {
+    static func send(_ urls: [URL], to peer: String, staged: [URL] = []) {
         guard !urls.isEmpty else { return }
         DispatchQueue.global(qos: .userInitiated).async {
             let temp = FileManager.default.temporaryDirectory
@@ -21,7 +21,10 @@ nonisolated enum DragSend {
                 if let zip = zipFolder(u, into: temp) { out.append(zip) }
                 else { InputLog.shared.log("drag: could not zip \(u.lastPathComponent); skipped") }
             }
-            let cleanup: () -> Void = { if usedTemp { try? FileManager.default.removeItem(at: temp) } }
+            let cleanup: () -> Void = {
+                if usedTemp { try? FileManager.default.removeItem(at: temp) }
+                DropItems.removeTempLater(staged) // copies of short-lived files (see DropItems.stageVolatile)
+            }
             guard !out.isEmpty else { cleanup(); return }
             InputLog.shared.log("drag: sending \(out.count) item(s) to \(peer)")
             PeerManager.shared.sendFiles(out, to: peer, cleanup: cleanup)

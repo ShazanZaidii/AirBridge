@@ -136,8 +136,16 @@ Client                                   Host
  "nonce":"<base64 16 random bytes>",
  "pk":"<base64 65-byte uncompressed P-256 public key>",
  "screen":{"w":1080,"h":2400},
- "paired":true}
+ "paired":true,
+ "hw":"<32 hex chars>"}
 ```
+
+- `hw` (optional) — a fingerprint of the physical device that survives reinstalling the app: a hash of the hardware id
+  (Android: the per-device `ANDROID_ID`; Mac: the platform UUID), never the id itself. `id` is new on every install, so
+  a device that remembers peers by `id` alone keeps one dead entry per reinstall. A peer that stores `hw` with a pairing
+  can recognise "the same device under a new `id`" (same `hw`, different `id`) and replace the old entry; two devices
+  that merely share a name have different `hw` values and are both kept. Never replace an entry that is connected, and
+  never match without an `hw`: entries paired before `hw` existed are offered to the user for removal, not removed.
 
 - `v` must be `2`. Otherwise reply `{"t":"auth_fail","reason":"version"}` and close.
 - `caps` (capabilities) — subset of:
@@ -1171,3 +1179,16 @@ K→S {"t":"call_action","id":"c4-mxk2b0","op":"route","dev":"phone:bt:AA:BB:CC:
 - Moving the call onto the computer itself is not a phone route: the computer connects as the phone's hands-free unit
   (§13.4). The phone's own call screen also lists the computer as a Bluetooth device, so the user can move the audio
   there (or back) from the phone too; the next `call_state` reports it as the `computer:true` route.
+
+## 14. Device battery on the computer
+
+A phone that wants its battery shown on a computer (the Mac lists it in the system's battery list, so it appears in the
+Batteries widget) sends `dev_battery` to every ready peer that advertised the `battery_sink` cap:
+
+```json
+{"t":"dev_battery","pct":87,"charging":true}
+```
+
+`pct` is 0–100. It is sent once when the peer becomes ready and again whenever `pct` or `charging` changes (never for
+temperature or voltage changes). The sink shows the entry only while that peer is connected and removes it on
+disconnect. Nothing else about the phone is sent.

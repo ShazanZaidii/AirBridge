@@ -8,7 +8,6 @@ final class EdgeIndicator {
     static let shared = EdgeIndicator()
 
     nonisolated static let thickness: CGFloat = 4
-    private static let color = NSColor(srgbRed: 0x5B / 255, green: 0x9D / 255, blue: 0xFF / 255, alpha: 1) // accent (blue, as on the phone)
 
     private var panel: NSPanel?
     private var flashSerial = 0
@@ -20,8 +19,25 @@ final class EdgeIndicator {
         let p = ensurePanel()
         flashSerial += 1
         p.setFrame(Self.cocoaRect(rect), display: false)
-        p.alphaValue = CGFloat(0.12 + 0.68 * max(0, min(1, level)))
-        if !p.isVisible { p.orderFrontRegardless() }
+        applyColor(p)
+        setAlpha(p, CGFloat(0.12 + 0.68 * max(0, min(1, level))))
+        p.orderFrontRegardless()
+    }
+
+    /// Sets the alpha now and cancels any fade still running: a fade-out that was started a moment ago would otherwise
+    /// finish after this and leave the bar invisible while it is on screen (the glow "going to sleep").
+    private func setAlpha(_ p: NSPanel, _ a: CGFloat) {
+        NSAnimationContext.runAnimationGroup({ ctx in
+            ctx.duration = 0
+            ctx.allowsImplicitAnimation = false
+            p.animator().alphaValue = a
+        })
+        p.alphaValue = a
+    }
+
+    /// The glow colour the user picked (Displays window), read on every use so a change shows at once.
+    private func applyColor(_ p: NSPanel) {
+        p.contentView?.layer?.backgroundColor = CaptureSettings.edgeColor().cgColor
     }
 
     func flash(rect: CGRect) {
@@ -29,8 +45,9 @@ final class EdgeIndicator {
         flashSerial += 1
         let serial = flashSerial
         p.setFrame(Self.cocoaRect(rect), display: false)
-        p.alphaValue = 1
-        if !p.isVisible { p.orderFrontRegardless() }
+        applyColor(p)
+        setAlpha(p, 1)
+        p.orderFrontRegardless()
         if reduceMotion {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
                 guard let self, self.flashSerial == serial else { return }
@@ -86,7 +103,7 @@ final class EdgeIndicator {
         p.animationBehavior = .none
         let v = NSView()
         v.wantsLayer = true
-        v.layer?.backgroundColor = Self.color.cgColor
+        v.layer?.backgroundColor = CaptureSettings.edgeColor().cgColor
         v.layer?.cornerRadius = Self.thickness / 2
         v.autoresizingMask = [.width, .height]
         p.contentView = v

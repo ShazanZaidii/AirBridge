@@ -69,6 +69,7 @@ nonisolated final class Controller: @unchecked Sendable {
     private var carryURLs: [URL] = []
     private var dragPbAtDown = -1                 // drag pasteboard changeCount when the left button went down
     private var dragFiles: [URL]?                 // files of the current local drag, once known
+    private var dragStaged: [URL] = []            // folders holding copies of short-lived files of this drag (screenshot thumbnail...)
     private var dragFilesCheckedAt: CFAbsoluteTime = 0
     private var catcherShown = false
     private var buttonUpSince: CFAbsoluteTime?    // carrying, but the left button is physically up
@@ -247,6 +248,7 @@ nonisolated final class Controller: @unchecked Sendable {
             localButtons.removeAll()
             dragging = false
             dragPbAtDown = -1
+            releaseStaged()
             dragFiles = nil
             resetCharge()
             return pass
@@ -283,6 +285,7 @@ nonisolated final class Controller: @unchecked Sendable {
             if b == 0 {
                 // §8.8: a file drag writes the drag pasteboard after this point; remember where it stood.
                 dragPbAtDown = NSPasteboard(name: .drag).changeCount
+                releaseStaged()
                 dragFiles = nil
                 dragFilesCheckedAt = 0
             }
@@ -352,9 +355,13 @@ nonisolated final class Controller: @unchecked Sendable {
         guard let r = g.display(at: p) else { return nil }
         var best: (Candidate, Double)?
         for edge in ScreenEdge.allCases where cfg.enabled(edge) && g.isOuter(p, of: r, edge) {
-            guard let (id, pl) = Layout.shared.assignment(for: edge),
-                  peers.contains(where: { $0.id == id && $0.caps.contains("ctl_target")
-                                          && (!drag || DragCarryController.eligible($0.caps)) }) else { continue }
+            guard let (id, pl) = Layout.shared.assignment(for: edge) else { diagnoseEdge(edge, "no device is placed on this edge (Displays window)"); continue }
+            guard let who = peers.first(where: { $0.id == id }) else { diagnoseEdge(edge, "the device placed on this edge is not connected"); continue }
+            guard who.caps.contains("ctl_target") else {
+                diagnoseEdge(edge, "\(peerName(id)) is connected but is not offering control (on Android: AirBridge Universal Control must be on in Accessibility)")
+                continue
+            }
+            guard !drag || DragCarryController.eligible(who.caps) else { diagnoseEdge(edge, "\(peerName(id)) can't take dropped files"); continue }
             if let until = refusedUntil[id], CFAbsoluteTimeGetCurrent() < until { continue }
             let span = g.span(edge, pl.start, pl.end)
             let along = edge.isVertical ? p.y : p.x
@@ -431,8 +438,20 @@ nonisolated final class Controller: @unchecked Sendable {
         let urls = (pb.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL]) ?? []
         guard DragCarryController.dragHasFiles(changeCountAtDown: dragPbAtDown, changeCountNow: changed,
                                                fileCount: urls.count) else { return nil }
-        dragFiles = urls
-        return urls
+        // A file that lives in a temporary folder (the screenshot thumbnail) is gone when the drag ends: copy it now.
+        let staged = DropItems.stageVolatile(urls)
+        if !staged.failed.isEmpty { InputLog.shared.log("drag: could not copy \(staged.errors.joined(separator: "; "))") }
+        dragFiles = staged.files
+        dragStaged = staged.temp
+        return staged.files
+    }
+
+    /// The drag ended without a drop on the target: its staged copies are not needed.
+    private func releaseStaged() {
+        guard !dragStaged.isEmpty else { return }
+        let dirs = dragStaged
+        dragStaged = []
+        DispatchQueue.global(qos: .utility).async { for d in dirs { try? FileManager.default.removeItem(at: d) } }
     }
 
     /// The strip under a cursor pinned at `edge`: the indicator bar, a little thicker, flush with the outer edge.
@@ -487,6 +506,17 @@ nonisolated final class Controller: @unchecked Sendable {
         guard abs(level - shownLevel) >= 0.03 else { return }
         shownLevel = level
         DispatchQueue.main.async { EdgeIndicator.shared.update(rect: bar, level: level) }
+    }
+
+    private var edgeDiagAt: [ScreenEdge: CFAbsoluteTime] = [:]
+
+    /// Why pushing on this edge does nothing, written to the input log at most every 20 s per edge. With this, an edge
+    /// that stopped glowing says why (most often: the phone's control service is off, so it no longer offers control).
+    private func diagnoseEdge(_ edge: ScreenEdge, _ why: String) {
+        let now = CFAbsoluteTimeGetCurrent()
+        if let t = edgeDiagAt[edge], now - t < 20 { return }
+        edgeDiagAt[edge] = now
+        InputLog.shared.log("edge \(edge.rawValue): inert, \(why)")
     }
 
     private func resetCharge() {
@@ -671,7 +701,8 @@ nonisolated final class Controller: @unchecked Sendable {
         flushMoves()
         guard case let .drop(peer, id) = carry.release() else { return false }
         PeerBus.shared.send(to: peer, ["t": "drag_drop", "id": id])
-        DragSend.send(carryURLs, to: peer)
+        DragSend.send(carryURLs, to: peer, staged: dragStaged)
+        dragStaged = [] // the transfer owns them now
         InputLog.shared.log("drag: dropped \(carryURLs.count) item(s) on \(peerName(peer))")
         carryURLs = []
         buttonUpSince = nil

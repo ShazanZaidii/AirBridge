@@ -46,7 +46,8 @@ nonisolated struct HUDCard: Identifiable, Equatable, Sendable {
 /// The transfer HUD's cards and how they change. Pure value type: the owner feeds it transfer reports and
 /// the clock, and carries out what it returns (start a send, run a cleanup).
 nonisolated struct HUDState: Equatable, Sendable {
-    static let undoDelay: TimeInterval = 3
+    /// Sends start at once (a drop or a drag onto a device means "send"); a running transfer can still be cancelled.
+    static let undoDelay: TimeInterval = 0
     /// Finished cards hide after this when the auto-hide setting is on.
     static let autoHideAfter: TimeInterval = 5
     /// Cards for transfers the user cancelled here go away on their own after this.
