@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Direct Share: dynamic per-peer shortcuts (DirectShare.kt) carry this category. -->
 <shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
-    <share-target android:targetClass="com.shazan.airbridge.ShareActivity">
+    <share-target android:targetClass="com.shazan.airbridge.share.ShareActivity">
         <data android:mimeType="*/*" />
         <category android:name="com.shazan.airbridge.category.SHARE_TARGET" />
     </share-target>

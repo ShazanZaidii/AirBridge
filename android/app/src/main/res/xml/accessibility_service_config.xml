@@ -2,9 +2,9 @@
 <!--
   Do NOT widen this file: changing a service's capabilities makes Android switch it off after an
   update and makes banking/UPI apps flag it. Anything that needs screen content belongs in
-  AirBridgeTextService.
+  TypingAccessibilityService.
 
-  Core service "AirBridge Universal Control" (AirBridgeInputService): cursor overlay, gestures
+  Core service "AirBridge Universal Control" (ControlAccessibilityService): cursor overlay, gestures
   (dispatchGesture) and global actions only. It cannot read the screen and receives no events.
   Guarded by AccessibilityConfigTest.
 -->

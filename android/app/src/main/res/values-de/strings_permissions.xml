@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Settings → "Get AirBridge ready": the guided setup of every permission, with what each is for. -->
+    <string name="setup_title">AirBridge startklar machen</string>
+    <string name="setup_sub">Alles in einem geführten Durchgang einrichten. Wir erklären jeden Schritt, bevor er kommt.</string>
+    <string name="setup_progress">%1$d von %2$d bereit</string>
+    <string name="setup_done_title">Alles ist eingerichtet</string>
+    <string name="setup_done_sub">AirBridge hat jede Berechtigung, die es nutzen kann.</string>
+    <string name="setup_review">Ansehen</string>
+    <string name="setup_sheet_title">Das richten wir ein</string>
+    <string name="setup_sheet_intro">Du siehst ein paar Pop-ups, dann einige Android-Einstellungsseiten. Such dort jeweils AirBridge und schalte es ein. Überspringe, was du nicht willst. Nichts wird eingeschaltet, was du nicht gewählt hast.</string>
+    <string name="setup_start">Start</string>
+    <string name="setup_step">Schritt %1$d von %2$d</string>
+    <string name="setup_open">Einstellungen öffnen</string>
+    <string name="setup_skip">Überspringen</string>
+    <string name="setup_what_to_do">Was zu tun ist</string>
+    <string name="setup_quick_title">Schnelle Berechtigungen</string>
+    <string name="setup_quick_why">Telefon, Kontakte, Anrufliste, Benachrichtigungen und Geräte in der Nähe: für Anrufe, Anrufernamen und das Finden deines Computers.</string>
+    <string name="setup_notif_title">Benachrichtigungszugriff</string>
+    <string name="setup_notif_why">Zeigt die Benachrichtigungen und Anrufe deines Handys auf deinem Computer.</string>
+    <string name="setup_notif_how">Tippe auf AirBridge und schalte den Benachrichtigungszugriff ein.</string>
+    <string name="setup_usage_why">Erkennt, wenn eine Zahlungs-App geöffnet wird, damit die Fernsteuerung dafür pausieren kann.</string>
+    <string name="setup_usage_how">Tippe auf AirBridge und schalte den Nutzungszugriff ein.</string>
+    <string name="setup_overlay_why">Zeigt die Zwischenablage-Blase über anderen Apps.</string>
+    <string name="setup_overlay_how">Tippe auf AirBridge und schalte „Anzeige über anderen Apps zulassen“ ein.</string>
+    <string name="setup_dnd_why">Lässt deinen Computer „Nicht stören“ ein- und ausschalten.</string>
+    <string name="setup_dnd_how">Tippe auf AirBridge und schalte den Zugriff auf „Nicht stören“ ein.</string>
+    <string name="setup_write_why">Lässt die Helligkeitstasten deines Computers die Helligkeit dieses Handys ändern.</string>
+    <string name="setup_write_how">Tippe auf AirBridge und schalte „Ändern von Systemeinstellungen zulassen“ ein.</string>
+    <string name="setup_a11y_why">Lässt deinen Computer den Zeiger bewegen, tippen und schreiben auf diesem Handy.</string>
+    <string name="setup_a11y_how">Tippe auf %1$s und schalte es ein. Du willst vom Computer aus tippen? Schalte auch %2$s ein.</string>
+    <string name="perm_all_done">Alles ist erlaubt</string>
+    <string name="perm_all_partial">Einige Schalter sind noch aus</string>
+    <string name="setup_continue">Weiter</string>
+    <string name="setup_optional">Optional</string>
+    <string name="setup_quick_how">Tippe bei jedem Pop-up auf „Zulassen“.</string>
+    <string name="setup_a11y_find">Android scrollt vielleicht nicht von selbst dorthin. Wenn du es nicht siehst, scrolle ganz nach unten zu „%1$s“ (manche Handys sagen „%2$s“) und suche AirBridge.</string>
+    <string name="setup_a11y_group_a">Installierte Apps</string>
+    <string name="setup_a11y_group_b">Heruntergeladene Apps</string>
+    <string name="setup_label_for">Wofür es gut ist</string>
+    <string name="setup_label_skip">Wenn du es überspringst</string>
+    <string name="setup_quick_skip">Anrufe können auf deinem Computer nicht angezeigt oder angenommen werden, Anrufer erscheinen ohne Namen, und dein Computer findet dieses Handy nicht in der Nähe.</string>
+    <string name="setup_notif_skip">Dein Computer zeigt die Benachrichtigungen dieses Handys nicht an, und Anrufe erscheinen eventuell ohne den Namen des Anrufers.</string>
+    <string name="setup_usage_skip">AirBridge erkennt nicht, wann eine Banking- oder Zahlungs-App geöffnet ist. Diese Apps verweigern Zahlungen, solange die Fernsteuerung läuft – deine Zahlungen könnten also blockiert werden.</string>
+    <string name="setup_overlay_skip">Die Zwischenablage-Blase kann nicht erscheinen, und kopierter Text wird nicht automatisch an deinen Computer gesendet.</string>
+    <string name="setup_dnd_skip">Dein Computer kann „Nicht stören“ auf diesem Handy nicht ein- oder ausschalten.</string>
+    <string name="setup_write_skip">Die Helligkeitstasten deines Computers ändern die Helligkeit dieses Handys nicht.</string>
+    <string name="setup_a11y_skip">Dein Computer kann auf diesem Handy weder den Zeiger bewegen noch tippen oder schreiben – die Fernsteuerung bleibt aus.</string>
+    <string name="adv_title">Erweitert</string>
+    <string name="adv_sub">Tipps für Handys, die AirBridge im Hintergrund immer wieder beenden</string>
+</resources>

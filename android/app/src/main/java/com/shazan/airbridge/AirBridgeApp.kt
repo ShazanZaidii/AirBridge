@@ -4,14 +4,16 @@ import android.app.Activity
 import android.app.Application
 import android.content.Context
 import android.os.Bundle
-import com.shazan.airbridge.input.InputRouter
-import com.shazan.airbridge.input.NetHooks
-import com.shazan.airbridge.net.ClipboardSync
-import com.shazan.airbridge.net.Hub
-import com.shazan.airbridge.net.Identity
-import com.shazan.airbridge.net.Notifs
-import com.shazan.airbridge.net.PairStore
-import com.shazan.airbridge.net.Saver
+import com.shazan.airbridge.app.Notifs
+import com.shazan.airbridge.clipboard.ClipboardSync
+import com.shazan.airbridge.clipboard.bubble.BubbleController
+import com.shazan.airbridge.connection.ConnectionHub
+import com.shazan.airbridge.connection.Identity
+import com.shazan.airbridge.connection.pairing.PairStore
+import com.shazan.airbridge.control.InputRouter
+import com.shazan.airbridge.control.NetHooks
+import com.shazan.airbridge.control.RemoteControlSetup
+import com.shazan.airbridge.transfer.Saver
 
 class AirBridgeApp : Application() {
     override fun onCreate() {
@@ -20,13 +22,13 @@ class AirBridgeApp : Application() {
         PairStore.init(this)
         Notifs.init(this)
         RemoteControlSetup.init(this)
-        Hub.init(this)
+        ConnectionHub.init(this)
         // Phone notifications / calls on the computer (§13): off until turned on in Settings.
         com.shazan.airbridge.phone.PhoneRelay.init(this)
         // Input half: routes control messages from PeerBus even before the accessibility service is on.
         InputRouter.install(this)
         // OEM gesture switches the trackpad turned off and could not put back (crash / kill).
-        com.shazan.airbridge.input.OsGestureGuard.restore(this)
+        com.shazan.airbridge.control.trackpad.OsGestureGuard.restore(this)
         // Accessibility services off while a UPI app is in front (Paytm refuses to pay otherwise); repairs a pause a kill left.
         com.shazan.airbridge.payment.PaymentPause.ensureRunning(this)
         NetHooks.clipboardPush = { reason -> ClipboardSync.pushNow(reason) }

@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Settings → "Get AirBridge ready": the guided setup of every permission, with what each is for. -->
+    <string name="setup_title">AirBridge તૈયાર કરો</string>
+    <string name="setup_sub">બધું એક માર્ગદર્શિત સેટઅપમાં કરો. દરેક પગલા પહેલાં અમે સમજાવીશું.</string>
+    <string name="setup_progress">%2$d માંથી %1$d તૈયાર</string>
+    <string name="setup_done_title">બધું સેટ છે</string>
+    <string name="setup_done_sub">AirBridge પાસે વાપરી શકાય તે બધી પરવાનગીઓ છે.</string>
+    <string name="setup_review">જુઓ</string>
+    <string name="setup_sheet_title">અમે આ સેટ કરીશું</string>
+    <string name="setup_sheet_intro">તમને થોડા પૉપ-અપ દેખાશે, પછી Androidના કેટલાક સેટિંગ્સ પેજ. દરેકમાં AirBridge શોધીને ચાલુ કરો. જે ન જોઈએ તે છોડી દો. તમે પસંદ ન કર્યું હોય તે કંઈ ચાલુ થશે નહીં.</string>
+    <string name="setup_start">શરૂ કરો</string>
+    <string name="setup_step">પગલું %1$d / %2$d</string>
+    <string name="setup_open">સેટિંગ્સ ખોલો</string>
+    <string name="setup_skip">છોડો</string>
+    <string name="setup_what_to_do">શું કરવું</string>
+    <string name="setup_quick_title">ઝડપી પરવાનગીઓ</string>
+    <string name="setup_quick_why">ફોન, સંપર્કો, કૉલ લૉગ, સૂચનાઓ અને નજીકના ઉપકરણો: કૉલ, કૉલરનું નામ અને તમારું કમ્પ્યુટર શોધવા માટે.</string>
+    <string name="setup_notif_title">સૂચના ઍક્સેસ</string>
+    <string name="setup_notif_why">તમારા ફોનની સૂચનાઓ અને કૉલ તમારા કમ્પ્યુટર પર બતાવે છે.</string>
+    <string name="setup_notif_how">AirBridge પર ટૅપ કરો, પછી સૂચના ઍક્સેસ ચાલુ કરો.</string>
+    <string name="setup_usage_why">પેમેન્ટ ઍપ ખુલે ત્યારે જાણી લે છે, જેથી રિમોટ કંટ્રોલ તેના માટે અટકી શકે.</string>
+    <string name="setup_usage_how">AirBridge પર ટૅપ કરો, પછી વપરાશ ઍક્સેસ ચાલુ કરો.</string>
+    <string name="setup_overlay_why">ક્લિપબોર્ડ બબલ બીજી ઍપ્સની ઉપર બતાવે છે.</string>
+    <string name="setup_overlay_how">AirBridge પર ટૅપ કરો, પછી “બીજી ઍપ્સની ઉપર બતાવવાની મંજૂરી” ચાલુ કરો.</string>
+    <string name="setup_dnd_why">તમારા કમ્પ્યુટરને ‘ખલેલ પાડશો નહીં’ ચાલુ-બંધ કરવા દે છે.</string>
+    <string name="setup_dnd_how">AirBridge પર ટૅપ કરો, પછી ‘ખલેલ પાડશો નહીં’ ઍક્સેસ ચાલુ કરો.</string>
+    <string name="setup_write_why">તમારા કમ્પ્યુટરની બ્રાઇટનેસ કીથી આ ફોનની બ્રાઇટનેસ બદલવા દે છે.</string>
+    <string name="setup_write_how">AirBridge પર ટૅપ કરો, પછી “સિસ્ટમ સેટિંગ્સ બદલવાની મંજૂરી” ચાલુ કરો.</string>
+    <string name="setup_a11y_why">તમારા કમ્પ્યુટરને આ ફોન પર પૉઇન્ટર ખસેડવા, ટૅપ કરવા અને ટાઇપ કરવા દે છે.</string>
+    <string name="setup_a11y_how">%1$s પર ટૅપ કરીને ચાલુ કરો. કમ્પ્યુટરથી ટાઇપ કરવું છે? %2$s પણ ચાલુ કરો.</string>
+    <string name="perm_all_done">બધું મંજૂર છે</string>
+    <string name="perm_all_partial">કેટલાક સ્વિચ હજી બંધ છે</string>
+    <string name="setup_continue">ચાલુ રાખો</string>
+    <string name="setup_optional">વૈકલ્પિક</string>
+    <string name="setup_quick_how">જે પૉપ-અપ આવે તેમાં “મંજૂરી આપો” પર ટૅપ કરો.</string>
+    <string name="setup_a11y_find">Android કદાચ જાતે ત્યાં સુધી સ્ક્રોલ ન કરે. ન દેખાય તો સૌથી નીચે “%1$s” (કેટલાક ફોનમાં “%2$s”) સુધી સ્ક્રોલ કરી AirBridge શોધો.</string>
+    <string name="setup_a11y_group_a">ઇન્સ્ટૉલ કરેલી ઍપ્સ</string>
+    <string name="setup_a11y_group_b">ડાઉનલોડ કરેલી ઍપ્સ</string>
+    <string name="setup_label_for">આ શેના માટે છે</string>
+    <string name="setup_label_skip">છોડી દો તો શું થશે</string>
+    <string name="setup_quick_skip">તમારા કમ્પ્યુટર પર કૉલ બતાવી કે ઉપાડી શકાશે નહીં, કૉલરનું નામ દેખાશે નહીં, અને તમારું કમ્પ્યુટર નજીકમાં આ ફોન શોધી શકશે નહીં.</string>
+    <string name="setup_notif_skip">તમારું કમ્પ્યુટર આ ફોનની સૂચનાઓ બતાવશે નહીં, અને કૉલ નામ વગર દેખાઈ શકે છે.</string>
+    <string name="setup_usage_skip">AirBridge જાણી શકશે નહીં કે બેંકિંગ કે પેમેન્ટ ઍપ ખુલ્લી છે. રિમોટ કંટ્રોલ ચાલતું હોય ત્યારે આવી ઍપ્સ ચુકવણી કરવાની ના પાડે છે, તેથી તમારી ચુકવણી અટકી શકે છે.</string>
+    <string name="setup_overlay_skip">ક્લિપબોર્ડ બબલ દેખાશે નહીં, અને કૉપિ કરેલો ટેક્સ્ટ આપમેળે કમ્પ્યુટર પર જશે નહીં.</string>
+    <string name="setup_dnd_skip">તમારું કમ્પ્યુટર આ ફોન પર ‘ખલેલ પાડશો નહીં’ ચાલુ કે બંધ કરી શકશે નહીં.</string>
+    <string name="setup_write_skip">તમારા કમ્પ્યુટરની બ્રાઇટનેસ કી આ ફોનની બ્રાઇટનેસ બદલશે નહીં.</string>
+    <string name="setup_a11y_skip">તમારું કમ્પ્યુટર આ ફોન પર પૉઇન્ટર ખસેડી, ટૅપ કે ટાઇપ કરી શકશે નહીં, તેથી રિમોટ કંટ્રોલ બંધ રહેશે.</string>
+    <string name="adv_title">ઍડવાન્સ્ડ</string>
+    <string name="adv_sub">જે ફોન AirBridgeને બૅકગ્રાઉન્ડમાં બંધ કરી દે છે તેમના માટે સૂચનો</string>
+</resources>

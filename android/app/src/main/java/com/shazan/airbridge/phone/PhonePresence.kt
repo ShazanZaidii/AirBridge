@@ -10,7 +10,8 @@ import android.os.SystemClock
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import androidx.core.content.ContextCompat
-import com.shazan.airbridge.AirBridgeTextService
+import com.shazan.airbridge.control.accessibility.TypingAccessibilityService
+import com.shazan.airbridge.phone.notifications.NotifWire
 
 /**
  * "Is the user on the phone?" for the computers' ring decision (§13.4). Screen on/off and unlocks come from
@@ -81,7 +82,7 @@ object PhonePresence {
 
     private fun locked(): Boolean = try { app.getSystemService(KeyguardManager::class.java)?.isKeyguardLocked == true } catch (_: Throwable) { false }
 
-    fun snapshot(): NotifWire.Presence = tracker.snapshot(locked(), AirBridgeTextService.isRunning)
+    fun snapshot(): NotifWire.Presence = tracker.snapshot(locked(), TypingAccessibilityService.isRunning)
 
     /** Sends the current state to the computers that decide where calls ring, when it is worth it. */
     fun publish(force: Boolean = false) {

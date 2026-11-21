@@ -21,13 +21,14 @@ import android.provider.Settings
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
-import com.shazan.airbridge.AirBridgeInputService
-import com.shazan.airbridge.AirBridgeService
-import com.shazan.airbridge.AirBridgeTextService
 import com.shazan.airbridge.R
-import com.shazan.airbridge.net.Hub
-import com.shazan.airbridge.net.Notifs
-import com.shazan.airbridge.net.PeerStatus
+import com.shazan.airbridge.app.AirBridgeService
+import com.shazan.airbridge.app.Notifs
+import com.shazan.airbridge.connection.ConnectionHub
+import com.shazan.airbridge.connection.PeerStatus
+import com.shazan.airbridge.control.accessibility.ControlAccessibilityService
+import com.shazan.airbridge.control.accessibility.TypingAccessibilityService
+import kotlin.coroutines.resume
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -42,7 +43,6 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeoutOrNull
-import kotlin.coroutines.resume
 
 /**
  * UPI apps (Paytm shows "Suspicious App Detected: remove the app or disable its Accessibility permission")
@@ -135,7 +135,7 @@ object PaymentPause {
     fun canSwitchSecurely(ctx: Context): Boolean =
         ctx.checkSelfPermission(Manifest.permission.WRITE_SECURE_SETTINGS) == PackageManager.PERMISSION_GRANTED
 
-    private fun connected(): Boolean = Hub.status.value.values.any { it == PeerStatus.CONNECTED }
+    private fun connected(): Boolean = ConnectionHub.status.value.values.any { it == PeerStatus.CONNECTED }
 
     /** Start the watcher (idempotent) and repair a switch-off that a kill or reboot left behind. */
     fun ensureRunning(ctx: Context) {
@@ -163,7 +163,7 @@ object PaymentPause {
             override fun onChange(selfChange: Boolean) { wake.trySend(Unit); pollWake.trySend(Unit) }
         }
         ctx.contentResolver.registerContentObserver(Settings.Secure.getUriFor(Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES), false, obs)
-        val watch = launch { Hub.status.collect { wake.trySend(Unit) } }
+        val watch = launch { ConnectionHub.status.collect { wake.trySend(Unit) } }
         try {
             var noDeviceSince = 0L
             // If the process was killed and restarted while no device was around, the minute has partly run already.
@@ -356,8 +356,8 @@ object PaymentPause {
             if (leftover(ctx).isEmpty() || all == removed) prefs(ctx).edit().remove(PREF_REMOVED).remove(PREF_REASON).apply()
         }
         // No way back by ourselves: turn them off, and tell the user how to turn them on once the payment is done.
-        val a = AirBridgeInputService.turnOff()
-        val b = AirBridgeTextService.turnOff()
+        val a = ControlAccessibilityService.turnOff()
+        val b = TypingAccessibilityService.turnOff()
         if (!a && !b) return@synchronized // not connected yet (process just started): try again on the next tick
         Log.i(TAG, "switched off for $app (user turns back on)")
         fallbackNotify = true
@@ -425,7 +425,7 @@ object PaymentPause {
     private fun notifyTurnBackOn(ctx: Context) {
         try {
             val pi = PendingIntent.getActivity(
-                ctx, NOTIF_ID, Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                ctx, NOTIF_ID, com.shazan.airbridge.control.accessibility.AccessibilityLink.intent(ctx).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
             val n = NotificationCompat.Builder(ctx, Notifs.CH_CONTROL)
@@ -439,82 +439,4 @@ object PaymentPause {
     }
 
     private fun prefs(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-}
-
-/**
- * What the coordinator does next, from the facts. Pure and unit-tested: the watcher sleeps (no timers) except
- * for the one-minute wait after the last device went away.
- */
-object IdleLogic {
-    sealed class Plan {
-        /** The switch is off: put back whatever we took out. */
-        data object Disabled : Plan()
-        /** A device is connected: services on (restore if they were off for lack of one) and watch for payment apps. */
-        data object Active : Plan()
-        /** Services were off for lack of a device, and the user switched them on by hand: leave them. */
-        data object AdoptManual : Plan()
-        /** Nothing to do until something changes. */
-        data object Sleep : Plan()
-        /** No device and services on: wait out the rest of the minute (woken early by a change). */
-        data object Wait : Plan()
-        /** The minute is over with no device: switch the services off. */
-        data object GoIdle : Plan()
-    }
-
-    fun decide(
-        enabled: Boolean, connected: Boolean, paused: Boolean, idleOff: Boolean, hasEntries: Boolean, noDeviceForMs: Long,
-        idleMs: Long = PaymentPause.IDLE_MS,
-    ): Plan = when {
-        !enabled -> Plan.Disabled
-        connected -> Plan.Active
-        idleOff -> if (hasEntries) Plan.AdoptManual else Plan.Sleep
-        // A payment app is in front: its end (resume) decides, it keeps them off if there is still no device.
-        paused -> Plan.Sleep
-        !hasEntries -> Plan.Sleep
-        noDeviceForMs >= idleMs -> Plan.GoIdle
-        else -> Plan.Wait
-    }
-}
-
-/** Packages whose apps refuse to pay while an accessibility service is on. */
-object PaymentApps {
-    val packages: Set<String> = setOf(
-        "net.one97.paytm",                              // Paytm
-        "com.phonepe.app",                              // PhonePe
-        "com.google.android.apps.nbu.paisa.user",       // Google Pay
-        "in.org.npci.upiapp",                           // BHIM
-    )
-
-    /** More packages to treat the same way (comma-separated pref `PAYMENT_PAUSE_EXTRA`: another UPI or bank app). */
-    @Volatile var extra: Set<String> = emptySet()
-
-    fun isPayment(pkg: String?): Boolean = pkg != null && (pkg in packages || pkg in extra)
-}
-
-/** Edits of the `enabled_accessibility_services` string ("a/b:c/.d"). Pure, unit-tested. */
-object EnabledServices {
-    fun split(s: String?): List<String> = s?.split(':')?.map { it.trim() }?.filter { it.isNotEmpty() }.orEmpty()
-
-    /** "pkg/.Cls" and "pkg/pkg.Cls" name the same service. */
-    fun normal(entry: String): String {
-        val pkg = entry.substringBefore('/')
-        val cls = entry.substringAfter('/', "")
-        return if (cls.startsWith(".")) "$pkg/$pkg$cls" else entry
-    }
-
-    fun ours(enabled: String?, pkg: String): List<String> = split(enabled).filter { it.substringBefore('/') == pkg }
-
-    /** [enabled] without the services of [pkg], and the entries that were taken out. */
-    fun remove(enabled: String?, pkg: String): Pair<String, List<String>> {
-        val all = split(enabled)
-        val (gone, kept) = all.partition { it.substringBefore('/') == pkg }
-        return kept.joinToString(":") to gone
-    }
-
-    /** [enabled] with [removed] added again where they are missing; the rest keeps its order. */
-    fun restore(enabled: String?, removed: List<String>): String {
-        val cur = split(enabled)
-        val have = cur.map(::normal).toSet()
-        return (cur + removed.filter { normal(it) !in have }).joinToString(":")
-    }
 }

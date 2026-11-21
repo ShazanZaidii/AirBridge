@@ -467,12 +467,12 @@
     <string name="aw_notif_waiting">બ્રાઉઝરની રાહ</string>
     <string name="aw_running">AirWeb ચાલી રહ્યું છે</string>
     <string name="pp_title">પેમેન્ટ એપ</string>
-    <string name="pp_switch">UPI એપ ખુલ્લી હોય ત્યારે કંટ્રોલ બંધ રાખો</string>
-    <string name="pp_switch_sub">કોઈ એક્સેસિબિલિટી સેવા ચાલુ હોય ત્યાં સુધી Paytm, PhonePe, Google Pay અને BHIM પેમેન્ટ કરવા દેતી નથી. આ એપ આગળ હોય, અથવા એક મિનિટ સુધી કોઈ ડિવાઇસ જોડાયેલું ન હોય, ત્યારે AirBridge પોતાની બંને સેવાઓ બંધ કરે છે અને જરૂર પડે ત્યારે ફરી ચાલુ કરે છે.</string>
+    <string name="pp_switch">પેમેન્ટ ઍપ ખુલ્લી હોય ત્યારે રિમોટ કંટ્રોલ રોકો</string>
+    <string name="pp_switch_sub">બેંકિંગ અને પેમેન્ટ ઍપ, જેમ કે Paytm, PhonePe અને Google Pay, કોઈ પણ accessibility સેવા ચાલુ હોય ત્યારે ચુકવણી લેવાની ના પાડે છે, અને રિમોટ કંટ્રોલ પણ એવી જ એક સેવા છે. આ ચાલુ હોય તો, આવી ઍપ આગળ આવે કે તરત AirBridge રિમોટ કંટ્રોલ બંધ કરે છે અને તમે નીકળો ત્યારે ફરી ચાલુ કરે છે. એક મિનિટ સુધી તમારું કોઈ કમ્પ્યુટર જોડાયેલું ન હોય ત્યારે પણ તે રિમોટ કંટ્રોલ બંધ કરે છે, અને કમ્પ્યુટર જોડાતાં ફરી ચાલુ કરે છે.</string>
     <string name="pp_usage">વપરાશ એક્સેસ</string>
-    <string name="pp_usage_sub">ફક્ત એ જાણવા માટે કે આમાંથી કોઈ એપ આગળ છે કે નહીં.</string>
-    <string name="pp_secure">જાતે ફરી ચાલુ થાય છે</string>
-    <string name="pp_secure_sub">કમ્પ્યુટરથી એક વાર પરવાનગી આપવી પડે છે: adb shell pm grant com.shazan.airbridge android.permission.WRITE_SECURE_SETTINGS. તેના વગર પેમેન્ટ પછી કંટ્રોલ તમારે જાતે ચાલુ કરવો પડશે, અને ડિવાઇસ ન હોય ત્યારે બંધ કરવાનું છોડી દેવાય છે.</string>
+    <string name="pp_usage_sub">AirBridgeને જોવા દે છે કે કઈ ઍપ આગળ છે, ફક્ત પેમેન્ટ ઍપ ઓળખવા માટે. તેના વગર AirBridge જાણી નહીં શકે કે તમે પેમેન્ટ ઍપ ખોલી છે, અને તમારી ચુકવણી અટકી શકે છે.</string>
+    <string name="pp_secure">નિયંત્રણ આપમેળે ફરી ચાલુ કરો</string>
+    <string name="pp_secure_sub">Android AirBridgeને રિમોટ કંટ્રોલ જાતે ફરી ચાલુ કરવા ત્યારે જ દે છે જ્યારે તેને એક ખાસ પરવાનગી મળે, અને એ ફક્ત કમ્પ્યુટર જ આપી શકે. આ માટે એક વારનું સેટઅપ કરવું પડે, લગભગ 10 મિનિટ. તેના વગર, દરેક ચુકવણી પછી તમારે રિમોટ કંટ્રોલ જાતે ચાલુ કરવું પડશે, અને કોઈ કમ્પ્યુટર જોડાયેલું ન હોય ત્યારે AirBridge તેને બંધ નહીં કરી શકે.</string>
     <string name="pp_copy">કમાન્ડ કૉપિ કરો</string>
     <string name="pp_copied">કમાન્ડ કૉપિ થયો</string>
     <string name="pp_notif_title">AirBridge કંટ્રોલ બંધ છે</string>
