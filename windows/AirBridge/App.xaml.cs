@@ -25,6 +25,9 @@ namespace AirBridge
 
         protected override void OnStartup(StartupEventArgs e)
         {
+            // A throwaway child process: can this PC capture its screen and encode H.264? (docs/protocol.md 8.7, see MirrorPlatformFactory)
+            // It runs before anything else, so a crash in graphics or Media Foundation code never touches the real app.
+            if (e.Args.Contains("--mirror-selftest")) { Environment.Exit(Input.WindowsMirrorSelfTest.Run()); return; }
             base.OnStartup(e);
             InstallExceptionHandlers();
             try
