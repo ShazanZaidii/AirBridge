@@ -108,10 +108,38 @@ namespace AirBridge.Input
         public IMirrorCapture? CreateCapture(MirrorDisplay display, int w, int h, int fps, Action<ICapturedFrame> onFrame, Action<string> onStopped) => null;
     }
 
-    /// <summary>Makes the real Windows platform, or one that declines. Replaced by the capture and encoder code.</summary>
+    /// <summary>
+    /// Makes the real Windows platform, or one that declines. First it runs <c>AirBridge.exe --mirror-selftest</c> as a separate
+    /// process: it grabs the real screen and encodes it with the real encoder. If that crashes, hangs or fails, only the throwaway
+    /// process is affected and mirror_source is simply not advertised.
+    /// </summary>
     public static class MirrorPlatformFactory
     {
-        public static IMirrorPlatform Create() =>
-            new UnavailableMirrorPlatform("mirror_codec", "Screen mirroring from this PC is not available in this build.");
+        public static IMirrorPlatform Create()
+        {
+            static IMirrorPlatform No(string why) => new UnavailableMirrorPlatform("mirror_codec", why);
+            if (!OperatingSystem.IsWindows() || Environment.OSVersion.Version.Build < 17763) return No("Screen mirroring needs Windows 10 version 1809 or newer.");
+            string? exe = Environment.ProcessPath;
+            if (string.IsNullOrEmpty(exe)) return No("Screen mirroring could not start its self-test.");
+            try
+            {
+                var psi = new ProcessStartInfo(exe, "--mirror-selftest") { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true };
+                using var p = Process.Start(psi);
+                if (p == null) return No("Screen mirroring could not start its self-test.");
+                var read = System.Threading.Tasks.Task.Run(() => p.StandardOutput.ReadToEnd());
+                if (!p.WaitForExit(8000))
+                {
+                    try { p.Kill(true); } catch { }
+                    return No("The screen-mirroring self-test did not finish.");
+                }
+                string said = read.Wait(1000) ? read.Result.Trim() : "";
+                if (p.ExitCode != 0) return No(said.Length > 0 ? said : $"The screen-mirroring self-test failed (exit {p.ExitCode}).");
+                AirBridge.Net.Log.Info("mirror: self-test passed (" + said + ")");
+            }
+            catch (Exception ex) { return No("The screen-mirroring self-test could not run: " + ex.Message); }
+            var start = Vortice.MediaFoundation.MediaFactory.MFStartup(false);
+            if (start.Failure) return No($"Media Foundation did not start (0x{start.Code:X8}).");
+            return new WindowsMirrorPlatform();
+        }
     }
 }
