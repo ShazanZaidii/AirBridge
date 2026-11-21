@@ -124,6 +124,12 @@ namespace AirBridge.Input
             lock (_gate) { if (_a != null && !ready.Contains(_a.Sink)) StopLocked(false, "sink disconnected"); }
         }
 
+        /// <summary>This peer's session is ending: stop at once if it is the sink.</summary>
+        public void PeerGone(string peer)
+        {
+            lock (_gate) { if (_a?.Sink == peer) StopLocked(false, "sink disconnected"); }
+        }
+
         /// <summary>Ends mirroring (app exit). Tells the sink.</summary>
         public void Shutdown() { lock (_gate) StopLocked(true, "shutdown"); }
 

@@ -221,6 +221,7 @@ namespace AirBridge.Net
             var caps = new JsonArray();
             foreach (var c in Protocol.Caps) caps.Add(c);
             if (Links.Settings.AdvertiseWfdHost) caps.Add(LinkWire.CapHost); // policy: LinkSettings.AdvertiseWfdHost
+            if (Input.MirrorSource.Available) caps.Add("mirror_source"); // §8.7: only when a self-test showed this PC can capture and encode
             h["caps"] = caps;
             h["nonce"] = Protocol.B64(nonce);
             h["pk"] = Protocol.B64(pk);
