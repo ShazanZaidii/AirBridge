@@ -5,7 +5,7 @@ import CoreGraphics
 /// Protocol v2 constants and wire helpers. See docs/protocol.md.
 nonisolated enum Proto {
     static let version = 2
-    static let appVersion = "2.0.0"
+    static let appVersion = "3.0.0"
     static let platform = "macos"
     static let ports: [UInt16] = Array(47632...47641)
     static let path = "/v2"
