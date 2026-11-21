@@ -1,6 +1,17 @@
 # AirBridge
 
-**An open-source AirDrop alternative for Android, Mac and Windows.** Share the clipboard, send files, use one keyboard and mouse across all your devices, see your phone's calls and notifications on your computer, and mirror your phone's screen. It all happens on your own network: no account, no cloud, no server in the middle.
+**Apple's ecosystem, open to every device.** On Apple devices, copying on one and pasting on another, sending files, sharing one keyboard and mouse, taking calls and mirroring the phone all just work, but only between Apple devices. AirBridge makes the same things work across Android, Mac and Windows. It is open source, runs on your own network, and needs no account and no cloud.
+
+| On Apple devices | With AirBridge |
+|---|---|
+| AirDrop | Send files between Android, Mac and Windows |
+| Universal Clipboard | One clipboard across all of them |
+| Universal Control | One keyboard and mouse for all of them |
+| iPhone Mirroring | Your phone's screen on your Mac, and your computer's screen on your phone |
+| Calls and notifications on the Mac | Your phone's calls and notifications on your Mac or PC |
+| Devices in the Batteries widget | Your phone's and PC's battery in the Mac's Notification Center |
+
+AirBridge is an independent project and is not affiliated with Apple. The Apple names above are used only to say what each feature is like.
 
 [Website](https://shazanzaidi.com/airbridge/) · [Releases](https://github.com/ShazanZaidii/AirBridge/releases) · [Protocol](docs/protocol.md) · [Report a problem](https://github.com/ShazanZaidii/AirBridge/issues)
 
@@ -54,7 +65,7 @@ To connect two devices, put them on the same Wi-Fi and open AirBridge on both. T
 ## Questions people ask
 
 **Is there an AirDrop alternative for Android and Mac?**
-Yes, this is one. It sends files between Android, macOS and Windows over your local network, and it also shares the clipboard, controls devices and shows calls.
+AirBridge does what AirDrop does between Android, macOS and Windows, over your local network, and goes further: it also shares the clipboard, shares one keyboard and mouse, shows your phone's calls and mirrors screens.
 
 **How do I copy on my Android phone and paste on my Mac?**
 Install AirBridge on both, pair them once, and copy as usual. The Mac receives the text. On Android the system limits background clipboard access, so if a copy doesn't arrive on its own, tap the floating bubble or the quick settings tile.

@@ -1,6 +1,6 @@
 # AirBridge
 
-> Open-source AirDrop alternative for Android, Mac and Windows. It shares the clipboard, sends files, lets one keyboard and mouse control several devices, shows a phone's calls and notifications on the computer, and mirrors the phone's screen. Everything runs on the local network: no account, no cloud, no server.
+> Apple's ecosystem, open to every device. AirBridge brings what only works between Apple devices (AirDrop-style file sharing, a shared clipboard, Universal Control-style keyboard and mouse sharing, phone mirroring, calls and notifications on the computer) to Android, Mac and Windows. Open source, runs on the local network, no account, no cloud, no server.
 
 AirBridge is three native apps (Android in Kotlin, macOS in Swift, Windows in C#) that speak one documented protocol. Licensed under the GNU AGPL v3. Android 8.0 or newer; macOS 26.1 or newer for the current source; Windows 10 (2004) or 11. Linux and iOS are not started. Released builds (August 2026, v2.1) are on the Releases page; the source in the repository is newer.
 
