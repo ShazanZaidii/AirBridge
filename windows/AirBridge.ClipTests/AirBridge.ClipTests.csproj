@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<!-- Self-check for clipboard images and files (docs/protocol.md 5.1): limits, picture detection and the cache folder.
+	     Pure logic, runs on any OS: dotnet run (project AirBridge.ClipTests) (exit code 0 = all passed). -->
+	<PropertyGroup>
+		<OutputType>Exe</OutputType>
+		<TargetFramework>net8.0</TargetFramework>
+		<RollForward>Major</RollForward>
+		<Nullable>enable</Nullable>
+		<ImplicitUsings>disable</ImplicitUsings>
+		<TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+	</PropertyGroup>
+	<ItemGroup>
+		<Compile Include="../AirBridge/Net/ClipboardMedia.cs" Link="Shared/ClipboardMedia.cs" />
+	</ItemGroup>
+</Project>

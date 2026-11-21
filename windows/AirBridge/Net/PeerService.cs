@@ -407,6 +407,9 @@ namespace AirBridge.Net
             App.ShowPairPrompt(a);
         }
 
+        /// <summary>A clipboard transfer (§5.1) finished: put it on the clipboard, quietly.</summary>
+        internal void OnClipboardReceived(List<string> paths) => Clipboard.OnReceivedMedia(paths);
+
         internal void OnFilesReceived(string peerName, List<string> paths)
         {
             Clipboard.SetFileDropList(paths);
