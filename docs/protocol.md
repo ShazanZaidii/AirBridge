@@ -151,6 +151,7 @@ Client                                   Host
 - `v` must be `2`. Otherwise reply `{"t":"auth_fail","reason":"version"}` and close.
 - `caps` (capabilities) — subset of:
   - `clip` – sends/accepts clipboard
+  - `clip_media` – can put a received clipboard image or file list on its clipboard (§5.1)
   - `xfer` – sends/accepts file transfers
   - `ctl_source` – can control others (has a physical pointer that can leave the screen)
   - `ctl_target` – can be controlled (shows a virtual cursor, injects input)
@@ -345,6 +346,31 @@ An active attacker cannot pair (confirm digits mismatch) nor hijack an existing 
 - Android floating bubble: it exists only for manual pushes. It is **hidden** while the phone is under a control
   lease (§8.6) or while the trackpad/mirror screen is open (copies are automatic there), and comes back when
   that ends.
+
+### 5.1 Clipboard images and files (`clip_media`)
+
+A device that advertises the cap `clip_media` can put a received clipboard image or file list on its own clipboard. A
+device whose clipboard holds an image or files sends it as an ordinary §6 transfer with one extra field:
+
+```json
+{"t":"xfer_offer","id":7,"clip":true,"files":[{"i":0,"name":"clipboard.png","size":482113,"mime":"image/png"}],"total":482113}
+```
+
+- **Who gets it.** Only peers whose `hello.caps` contain `clip_media`. A peer without the cap would save the data as a
+  normal download, so it must never be sent one.
+- **What is sent.** If the clipboard holds files, send the files. Otherwise, if it holds text, send the text (§5). Otherwise,
+  if it holds an image, send the image as one PNG named `clipboard.png`. Text wins over an image because rich copies (a
+  spreadsheet range, a web page) carry both.
+- **Limits.** An image is at most 25 MiB. Files must be regular files (no folders), at most 20 of them and 100 MiB in
+  total. Anything over a limit is not sent, and the sender shows a local notice.
+- **Not sent.** Clips flagged as concealed, transient or sensitive, clips that came from another device, and whatever this
+  device itself just put on its clipboard.
+- **Receiver.** Accepts as in §6.1, but keeps the data in a private cache folder instead of the downloads folder, shows no
+  "received file" notice, and after `xfer_complete` puts the content on the clipboard: one file with an `image/*` mime
+  becomes an image on the clipboard, anything else becomes a file list. The receiver remembers what it set so that it does
+  not send it back. Cached data may be deleted after a day.
+- `clip: true` is ignored by peers that do not know it, which is why the cap exists: peers add it to `hello.caps` only
+  when they implement this section.
 
 ---
 
