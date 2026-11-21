@@ -73,7 +73,7 @@ namespace AirBridge.Input
         /// <summary>Topmost, click-through, never-activated layered window. Positioned in physical pixels.</summary>
         private sealed class IndicatorWindow : Window
         {
-            private static readonly Color Accent = Color.FromRgb(0x22, 0xC5, 0x5E); // design system accent
+            private string _hex = "";
             private readonly Border _bar;
             private readonly DispatcherTimer _decay;
             private IRect _placed;
@@ -92,7 +92,7 @@ namespace AirBridge.Input
                 IsHitTestVisible = false;
                 Width = 4; Height = 4; Left = -32000; Top = -32000;
                 Title = "AirBridge edge";
-                _bar = new Border { Background = new SolidColorBrush(Accent), CornerRadius = new CornerRadius(2), Opacity = 0 };
+                _bar = new Border { Background = Brushes.Transparent, CornerRadius = new CornerRadius(2), Opacity = 0 };
                 Content = _bar;
                 SourceInitialized += (_, _) =>
                 {
@@ -137,8 +137,19 @@ namespace AirBridge.Input
                 _bar.BeginAnimation(OpacityProperty, a);
             }
 
+            /// <summary>The glow colour the user picked (Displays window), read on every use so a change shows at once.</summary>
+            private void ApplyColor()
+            {
+                string hex = Layout.EdgeColorHex();
+                if (hex == _hex) return;
+                _hex = hex;
+                try { _bar.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString(hex)); }
+                catch (Exception) { _bar.Background = new SolidColorBrush(Color.FromRgb(0x5B, 0x9D, 0xFF)); }
+            }
+
             public void ShowCharge(IRect r, double level)
             {
+                ApplyColor();
                 Place(r);
                 To(0.15 + 0.75 * Math.Clamp(level, 0, 1), 90);
                 _decay.Stop();
@@ -148,6 +159,7 @@ namespace AirBridge.Input
             public void ShowFlash(IRect r)
             {
                 _decay.Stop();
+                ApplyColor();
                 Place(r);
                 int gen = ++_gen;
                 if (!Animate)

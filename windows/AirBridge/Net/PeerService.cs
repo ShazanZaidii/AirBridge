@@ -1,4 +1,6 @@
 using System;
+using System.IO;
+using AirBridge.Input;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
@@ -43,6 +45,7 @@ namespace AirBridge.Net
         private int _pending;
         private Timer? _serverRetry;
         private readonly Timer _netDebounce;
+        private PcBatterySharer? _battery;
         private volatile IPAddress? _bestAddress;
         private (int W, int H) _screen;
         private bool _started;
@@ -93,6 +96,7 @@ namespace AirBridge.Net
             _server = new Server(this);
             _client = new Client(this);
             _netDebounce = new Timer(_ => OnNetworkChanged(), null, Timeout.Infinite, Timeout.Infinite);
+            DeviceBatteryStore.Changed += RaiseState;
         }
 
         // ================================================================== lifecycle
@@ -106,6 +110,10 @@ namespace AirBridge.Net
             _screen = Win32.PrimaryScreenPixels();
             _bestAddress = NetUtil.BestAddress();
             PeerBus.Transport = this;
+            // Screen placements left behind by devices that are no longer paired (every reinstall used to leave one).
+            var paired = Store.All().Select(p => p.Id).ToHashSet();
+            if (paired.Count > 0) Layout.Prune(paired);
+            _battery = new PcBatterySharer(Peers, Send);
             Secrets.Changed += RaiseState;
             Store.Changed += RaiseState;
             Discovery.Changed += () => { _client.WakeAll(clearSuspension: false); RaiseState(); };
@@ -145,6 +153,7 @@ namespace AirBridge.Net
                 _bestAddress = NetUtil.BestAddress();
                 Log.Info($"Network changed; best address now {_bestAddress}");
                 Discovery.Restart();
+                Discovery.Boost();
                 _client.WakeAll(clearSuspension: true);
                 RaiseState();
             }
@@ -217,8 +226,12 @@ namespace AirBridge.Net
             h["pk"] = Protocol.B64(pk);
             if (_screen.W > 0 && _screen.H > 0) h["screen"] = new JsonObject { ["w"] = _screen.W, ["h"] = _screen.H };
             if (paired is bool p) h["paired"] = p;
+            if (Net.Identity.Hw is string hw) h["hw"] = hw;
             return h;
         }
+
+        /// <summary>Our hello for a "who is there?" probe (<see cref="NetworkScan.PeekAsync"/>): never leads to a session.</summary>
+        internal JsonObject BuildHelloForPeek(byte[] nonce, byte[] pk) => BuildHello(null, nonce, pk);
 
         internal void OnSessionReady(Session s)
         {
@@ -244,8 +257,83 @@ namespace AirBridge.Net
                 r.Name = s.PeerName;
                 r.Plat = s.PeerPlat;
                 if (s.Role == SessionRole.Outbound) { r.Addr = s.RemoteAddress; r.Port = s.RemotePort; }
+                if (s.PeerHw != null) r.Hw = s.PeerHw;
             });
+            TidyOlderEntries(s);
+            _battery?.SendTo(s.ToPeerInfo());
             NotifyPeers();
+        }
+
+        // ================================================================== entries left by reinstalls
+
+        /// <summary>Older entries that look like earlier installs of a device that just connected, offered to the user.</summary>
+        public sealed record StaleOffer(string Name, IReadOnlyList<string> Ids);
+        private volatile StaleOffer? _staleOffer;
+        public StaleOffer? PendingStaleOffer => _staleOffer;
+        private static readonly string DismissedPath = System.IO.Path.Combine(Log.Dir, "stale-dismissed.json");
+
+        private static HashSet<string> LoadDismissed()
+        {
+            try { if (File.Exists(DismissedPath)) return System.Text.Json.JsonSerializer.Deserialize<HashSet<string>>(File.ReadAllText(DismissedPath)) ?? new(); }
+            catch (Exception ex) { Log.Warn($"stale-dismissed.json unreadable: {ex.Message}"); }
+            return new();
+        }
+
+        private static void SaveDismissed(HashSet<string> d)
+        {
+            try { Directory.CreateDirectory(Log.Dir); File.WriteAllText(DismissedPath, System.Text.Json.JsonSerializer.Serialize(d)); }
+            catch (Exception ex) { Log.Warn($"Could not save stale-dismissed.json: {ex.Message}"); }
+        }
+
+        private List<StaleDevices.Entry> StoredEntries() =>
+            Store.All().Select(p => new StaleDevices.Entry(p.Id, p.Name, p.Plat, p.Hw)).ToList();
+
+        /// <summary>A device just connected. If it is the same physical device as older entries (same fingerprint) those entries
+        /// are dead: replace them, and the screen placement you gave the device moves to its new id. Older entries from before
+        /// fingerprints existed can't be proven, so the user is asked about them once instead.</summary>
+        private void TidyOlderEntries(Session s)
+        {
+            string? id = s.PeerId;
+            if (id == null || s.PeerHw is not string hw || Store.Get(id) == null) return;
+            var connected = ReadySessions().Select(x => x.PeerId!).ToHashSet();
+            var gone = StaleDevices.Superseded(id, hw, StoredEntries(), connected);
+            foreach (var e in gone)
+            {
+                Layout.Migrate(e.Id, id);
+                _client.StopLoop(e.Id);
+                Store.Remove(e.Id);
+                Log.Info($"Paired entry {e.Id} is an earlier install of {s.PeerName}: removed");
+            }
+            if (gone.Count > 0) App.Notify("AirBridge", $"{s.PeerName} was reinstalled: its old entry was replaced.");
+            var me = new StaleDevices.Entry(id, s.PeerName, s.PeerPlat, hw);
+            var maybe = StaleDevices.Candidates(me, StoredEntries(), connected, LoadDismissed());
+            _staleOffer = maybe.Count == 0 ? null : new StaleOffer(s.PeerName, maybe.Select(e => e.Id).ToList());
+        }
+
+        /// <summary>The user's answer to the stale-entry offer: remove those entries (their screen placement moves to the device
+        /// that is connected now) or keep them and don't ask again.</summary>
+        public void ResolveStale(bool remove)
+        {
+            var o = _staleOffer;
+            if (o == null) return;
+            if (remove)
+            {
+                string? current = ReadySessions().FirstOrDefault(x => x.PeerName == o.Name && x.PeerHw != null)?.PeerId;
+                foreach (var id in o.Ids)
+                {
+                    if (current != null) Layout.Migrate(id, current);
+                    _client.StopLoop(id);
+                    Store.Remove(id);
+                }
+            }
+            else
+            {
+                var d = LoadDismissed();
+                foreach (var id in o.Ids) d.Add(id);
+                SaveDismissed(d);
+            }
+            _staleOffer = null;
+            RaiseState();
         }
 
         internal void OnSessionEnded(Session s)
@@ -258,6 +346,7 @@ namespace AirBridge.Net
                 if (s.PeerId != null && _ready.TryGetValue(s.PeerId, out var cur) && cur == s)
                 {
                     _ready.Remove(s.PeerId);
+                    DeviceBatteryStore.Clear(s.PeerId);
                     changed = true;
                 }
             }
@@ -427,6 +516,17 @@ namespace AirBridge.Net
         }
 
         /// <summary>User clicked Forget: send unpair if connected, then delete locally (§3.5).</summary>
+        /// <summary>The user renamed this PC: save it, announce the new name over mDNS and tell every connected device.</summary>
+        public void RenameSelf(string name)
+        {
+            Identity.Rename(name);
+            Discovery.Restart();
+            var msg = Protocol.Msg("name");
+            msg["name"] = Identity.Name;
+            Broadcast(msg);
+            RaiseState();
+        }
+
         public void Forget(string peerId)
         {
             _client.StopLoop(peerId);
@@ -437,6 +537,7 @@ namespace AirBridge.Net
                 s.Close(null, terminal: true); // queued unpair is flushed before the close handshake
             }
             Store.Remove(peerId);
+            Layout.Remove(peerId);
             Log.Info($"Forgot peer {peerId}");
         }
 

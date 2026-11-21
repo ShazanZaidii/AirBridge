@@ -20,6 +20,8 @@ namespace AirBridge
     {
         private static readonly string UserTag = SafeUserSid();
         public static readonly string MutexName = @"Local\AirBridge_v2_Single_Instance_" + UserTag;
+        /// <summary>Sent instead of file paths by a second launch: "show your window".</summary>
+        public const string ShowMainToken = "@show-main";
         private static readonly string PipeName = "AirBridge_v2_Files_" + UserTag;
 
         private static readonly List<string> Buffer = new();
@@ -84,6 +86,7 @@ namespace AirBridge
                     using var timeout = new CancellationTokenSource(5000);
                     string? payload = await reader.ReadLineAsync(timeout.Token).ConfigureAwait(false);
                     if (string.IsNullOrEmpty(payload)) return;
+                    if (payload == ShowMainToken) { App.ShowMainWindow(); return; }
                     lock (Buffer) Buffer.AddRange(payload.Split('|', StringSplitOptions.RemoveEmptyEntries));
                     BatchTimer.Stop();
                     BatchTimer.Start();

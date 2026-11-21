@@ -21,6 +21,8 @@ namespace AirBridge
         public PairPromptWindow(PairApproval approval)
         {
             InitializeComponent();
+            UiKit.Dark(this);
+            UiKit.Glass(this);
             _approval = approval;
             string who = $"{approval.PeerName} ({PairApproval.PlatLabel(approval.Plat)})";
             Title = $"{who} wants to pair";

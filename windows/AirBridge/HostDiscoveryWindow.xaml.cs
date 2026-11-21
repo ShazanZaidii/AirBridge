@@ -25,10 +25,13 @@ namespace AirBridge
         public HostDiscoveryWindow()
         {
             InitializeComponent();
+            UiKit.Dark(this);
+            UiKit.Glass(this);
             Loaded += (_, _) =>
             {
-                App.Peers?.Discovery.Query();
+                App.Peers?.Discovery.Boost();
                 Refresh();
+                _ = ScanIfNothingAppears();
             };
             if (App.Peers != null) App.Peers.StateChanged += OnStateChanged;
             Closed += (_, _) =>
@@ -37,6 +40,27 @@ namespace AirBridge
                 _confirmTcs?.TrySetResult(false); // closing the window cancels a pending confirmation
             };
             AddressBox.TextChanged += (_, _) => AddressHint.Visibility = AddressBox.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        /// <summary>If no device has announced itself after a few seconds, look for them directly (no multicast needed).</summary>
+        private async System.Threading.Tasks.Task ScanIfNothingAppears()
+        {
+            try
+            {
+                await System.Threading.Tasks.Task.Delay(6000);
+                var peers = App.Peers;
+                if (!IsLoaded || peers == null || peers.Discovery.Hosts().Count > 0) return;
+                var found = await NetworkScan.ScanAsync(peers.Discovery.Hosts().Select(h => h.Id).ToHashSet(), default);
+                peers.Discovery.AddSwept(found);
+            }
+            catch { }
+        }
+
+        private void Help_Click(object sender, RoutedEventArgs e)
+        {
+            var w = Application.Current.Windows.OfType<NetworkCheckWindow>().FirstOrDefault();
+            if (w == null) { w = new NetworkCheckWindow(); w.Show(); }
+            w.Activate();
         }
 
         private void OnStateChanged() => Dispatcher.BeginInvoke(new Action(Refresh));

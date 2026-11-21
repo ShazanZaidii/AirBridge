@@ -96,6 +96,8 @@ namespace AirBridge.Net
         public string? PeerId { get; private set; }
         public string PeerName { get; private set; } = "";
         public string PeerPlat { get; private set; } = "";
+        /// <summary>The peer's hardware fingerprint (<c>hello.hw</c>), if it sent one: the same physical device across reinstalls.</summary>
+        public string? PeerHw { get; private set; }
         public IReadOnlySet<string> PeerCaps { get; private set; } = new HashSet<string>();
         public int ScreenW { get; private set; }
         public int ScreenH { get; private set; }
@@ -504,6 +506,7 @@ namespace AirBridge.Net
             PeerId = id;
             PeerName = Protocol.Str(o, "name") ?? "Unknown";
             PeerPlat = Protocol.Str(o, "plat") ?? "";
+            PeerHw = Protocol.Str(o, "hw") is { Length: > 0 } hwv ? (hwv.Length > 64 ? hwv[..64] : hwv) : null;
             _peerNonce = nonce;
             _t = Role == SessionRole.Outbound
                 ? HandshakeCrypto.Transcript(_myNonce, nonce, _svc.Identity.Id, id, _myPk, peerPk!)
@@ -638,7 +641,7 @@ namespace AirBridge.Net
 
         private void FinishHostPairing(byte[] key, string mode)
         {
-            _svc.Store.Upsert(PeerId!, PeerName, PeerPlat, key, dial: false, null, 0);
+            _svc.Store.Upsert(PeerId!, PeerName, PeerPlat, key, dial: false, null, 0, PeerHw);
             var ok = Protocol.Msg("pair_ok");
             ok["proof"] = Protocol.B64(HandshakeCrypto.PairAckProof(key, _t!));
             CryptographicOperations.ZeroMemory(key);
@@ -742,7 +745,7 @@ namespace AirBridge.Net
                         Fail("host_bad_proof");
                         return;
                     }
-                    _svc.Store.Upsert(hostId, PeerName, PeerPlat, _pendingKey, dial: true, RemoteAddress, RemotePort);
+                    _svc.Store.Upsert(hostId, PeerName, PeerPlat, _pendingKey, dial: true, RemoteAddress, RemotePort, PeerHw);
                     Log.Info($"Paired with host {PeerName} ({hostId})");
                     BecomeReady();
                     break;
@@ -824,6 +827,10 @@ namespace AirBridge.Net
                     break;
                 case "clip":
                     _svc.Clipboard.OnRemoteClip(this, o);
+                    break;
+                case DeviceBatteryWire.Type:
+                    // A phone's battery level (§14): shown in the device list, gone when it disconnects.
+                    if (DeviceBatteryWire.Parse(o) is { } level && PeerId != null) DeviceBatteryStore.Set(PeerId, level);
                     break;
                 case "bye":
                     ByeReason = Protocol.Str(o, "reason") ?? "";

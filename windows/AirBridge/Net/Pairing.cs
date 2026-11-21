@@ -215,6 +215,8 @@ namespace AirBridge.Net
         public string? Addr { get; set; }
         public int Port { get; set; }
         public long PairedAt { get; set; }
+        /// <summary>The device's hardware fingerprint (<c>hello.hw</c>): the same physical device under an older install shares it.</summary>
+        public string? Hw { get; set; }
     }
 
     /// <summary>Paired peers in %LOCALAPPDATA%\AirBridge\peers.json; keys protected with DPAPI.</summary>
@@ -253,7 +255,7 @@ namespace AirBridge.Net
             catch (Exception ex) { Log.Error($"Cannot unprotect key for {id}", ex); return null; }
         }
 
-        public void Upsert(string id, string name, string plat, byte[] key, bool dial, string? addr, int port)
+        public void Upsert(string id, string name, string plat, byte[] key, bool dial, string? addr, int port, string? hw = null)
         {
             string prot = Convert.ToBase64String(ProtectedData.Protect(key, Entropy, DataProtectionScope.CurrentUser));
             lock (_gate)
@@ -265,6 +267,7 @@ namespace AirBridge.Net
                     Dial = dial || (old?.Dial ?? false),
                     Addr = addr ?? old?.Addr, Port = port != 0 ? port : old?.Port ?? 0,
                     PairedAt = Protocol.NowMs(),
+                    Hw = hw ?? old?.Hw,
                 };
                 SaveLocked();
             }
@@ -308,7 +311,7 @@ namespace AirBridge.Net
 
         private static PeerRecord Clone(PeerRecord p) => new()
         {
-            Id = p.Id, Name = p.Name, Plat = p.Plat, Key = p.Key, Dial = p.Dial, Addr = p.Addr, Port = p.Port, PairedAt = p.PairedAt,
+            Id = p.Id, Name = p.Name, Plat = p.Plat, Key = p.Key, Dial = p.Dial, Addr = p.Addr, Port = p.Port, PairedAt = p.PairedAt, Hw = p.Hw,
         };
     }
 }

@@ -13,11 +13,37 @@
 		<RuntimeIdentifiers>win-x86;win-x64;win-arm64</RuntimeIdentifiers>
 	</PropertyGroup>
 
+	<!-- Small and light, so it runs on an old or low-memory PC next to everything else. -->
+	<PropertyGroup>
+		<!-- no ICU: the culture data is a good part of a small app's memory; names and dates here need only invariant rules -->
+		<InvariantGlobalization>true</InvariantGlobalization>
+		<!-- no background GC thread, no profile-guided re-JIT: fewer threads and less heap held back -->
+		<ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
+		<ServerGarbageCollector>false</ServerGarbageCollector>
+		<TieredPGO>false</TieredPGO>
+		<!-- only English resources of the packages (the app has its own) -->
+		<SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+		<GenerateDocumentationFile>false</GenerateDocumentationFile>
+		<DebugType>none</DebugType>
+		<!-- precompiled code starts faster and JITs less, which also saves memory (published builds) -->
+		<PublishReadyToRun Condition="'$(RuntimeIdentifier)' != ''">true</PublishReadyToRun>
+	</PropertyGroup>
+	<ItemGroup>
+		<!-- the GC returns memory to Windows sooner instead of keeping a large free heap -->
+		<RuntimeHostConfigurationOption Include="System.GC.ConserveMemory" Value="7" />
+		<RuntimeHostConfigurationOption Include="System.GC.RetainVM" Value="false" />
+	</ItemGroup>
+
 	<ItemGroup>
 		<Content Include="icon.ico">
 			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
 		</Content>
 		<Resource Include="icon.ico" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<!-- the browser page: identical to the phone's and the Mac's -->
+		<EmbeddedResource Include="AirWeb\airweb.html" LogicalName="airweb.html" />
 	</ItemGroup>
 
 	<ItemGroup>

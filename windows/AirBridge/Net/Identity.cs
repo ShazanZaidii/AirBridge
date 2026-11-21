@@ -17,6 +17,26 @@ namespace AirBridge.Net
         private static readonly string FilePath = System.IO.Path.Combine(Log.Dir, "identity.json");
 
         public string Id { get; }
+
+        /// <summary>
+        /// A fingerprint of this PC that survives reinstalling or resetting AirBridge (a hash of Windows' machine id, never the
+        /// id itself). <see cref="Id"/> changes whenever the app's data is cleared, so a device that remembers only the id keeps a
+        /// stale entry per reset; with this it can tell "same PC, new install" from "a different PC with the same name".
+        /// </summary>
+        public static string? Hw { get; } = ComputeHw();
+
+        private static string? ComputeHw()
+        {
+            try
+            {
+                using var k = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Cryptography");
+                var guid = k?.GetValue("MachineGuid") as string;
+                if (string.IsNullOrWhiteSpace(guid)) return null;
+                var hash = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes("airbridge-hw|" + guid));
+                return Convert.ToHexString(hash, 0, 16).ToLowerInvariant();
+            }
+            catch { return null; }
+        }
         public string Name { get; private set; }
         private bool _customName;
 

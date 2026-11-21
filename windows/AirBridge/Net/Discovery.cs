@@ -22,6 +22,7 @@ namespace AirBridge.Net
 
         private sealed class Instance
         {
+            public string? Key;             // this instance's own key
             public string? Target;          // key of the SRV target
             public DomainName? TargetName;
             public int Port;
@@ -39,6 +40,13 @@ namespace AirBridge.Net
         private ServiceDiscovery? _sd;
         private Timer? _queryTimer;
         private int _port;
+        private int _queryRound;
+        // Hosts found by a network scan (no multicast needed), and where each mDNS answer came from.
+        private readonly Dictionary<string, DiscoveredHost> _swept = new();
+        private readonly Dictionary<string, IPAddress> _sourceOf = new();                 // instance key -> sender of its answer
+
+        /// <summary>How many mDNS answers have been seen (for the network check).</summary>
+        public int AnswersSeen { get; private set; }
 
         /// <summary>Raised (any thread) when the set of discovered hosts changes.</summary>
         public event Action? Changed;
@@ -49,7 +57,8 @@ namespace AirBridge.Net
         {
             _port = advertisePort;
             Restart();
-            _queryTimer = new Timer(_ => { Query(); Prune(); }, null, TimeSpan.FromSeconds(3), TimeSpan.FromSeconds(45));
+            // Ask often at first (the first answers decide whether a phone shows up in the list at all), then settle down.
+            _queryTimer = new Timer(_ => QueryRound(), null, TimeSpan.FromSeconds(1), Timeout.InfiniteTimeSpan);
         }
 
         /// <summary>Starts advertising on a (new) port.</summary>
@@ -92,6 +101,36 @@ namespace AirBridge.Net
             Query();
         }
 
+        private static readonly int[] QueryDelaysSec = { 2, 3, 5, 8, 12, 20, 30 };
+
+        private void QueryRound()
+        {
+            try { Query(); Prune(); } catch { }
+            int next = _queryRound < QueryDelaysSec.Length ? QueryDelaysSec[_queryRound] : 45;
+            _queryRound++;
+            try { _queryTimer?.Change(TimeSpan.FromSeconds(next), Timeout.InfiniteTimeSpan); } catch (ObjectDisposedException) { }
+        }
+
+        /// <summary>The network changed or the connect window opened: ask quickly again for a while.</summary>
+        public void Boost()
+        {
+            _queryRound = 0;
+            try { _queryTimer?.Change(TimeSpan.FromMilliseconds(300), Timeout.InfiniteTimeSpan); } catch (ObjectDisposedException) { }
+        }
+
+        /// <summary>Adds devices a network scan found; they are listed until they have not been seen for a while.</summary>
+        public void AddSwept(IEnumerable<DiscoveredHost> hosts)
+        {
+            bool changed = false;
+            lock (_gate)
+                foreach (var h in hosts)
+                {
+                    if (!_swept.TryGetValue(h.Id, out var old) || old.Port != h.Port || !old.Addresses.SequenceEqual(h.Addresses)) changed = true;
+                    _swept[h.Id] = h;
+                }
+            if (changed) Changed?.Invoke();
+        }
+
         public void Query()
         {
             try
@@ -116,9 +155,16 @@ namespace AirBridge.Net
                     if (inst.Txt.TryGetValue("v", out var v) && v != "2") continue;
                     var addrs = inst.Target != null && _hostAddrs.TryGetValue(inst.Target, out var set)
                         ? RankAddresses(set) : new List<IPAddress>();
+                    // No address record came (some responders skip it): the sender of the answer is where it is.
+                    if (addrs.Count == 0 && inst.Key != null && _sourceOf.TryGetValue(inst.Key, out var src)) addrs.Add(src);
                     var host = new DiscoveredHost(id, inst.Txt.GetValueOrDefault("name") ?? id,
                         inst.Txt.GetValueOrDefault("plat") ?? "", inst.Port, addrs, inst.LastSeen);
                     if (!result.TryGetValue(id, out var existing) || existing.LastSeen < host.LastSeen) result[id] = host;
+                }
+                foreach (var sw in _swept.Values)
+                {
+                    if (sw.Id == _identity.Id) continue;
+                    if (!result.TryGetValue(sw.Id, out var existing) || existing.Addresses.Count == 0) result[sw.Id] = sw;
                 }
                 return result.Values.OrderBy(h => h.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
             }
@@ -153,7 +199,10 @@ namespace AirBridge.Net
             txt.Strings.Add("name=" + _identity.Name);
             txt.Strings.Add("plat=" + Protocol.Platform);
             profile.Resources.Add(txt);
-            foreach (var addr in NetUtil.LocalIPv4Addresses())
+            // Only addresses another device can actually reach: never the Hyper-V / WSL / VM / VPN adapters' (a phone that
+            // picks the first record would otherwise try 172.x.x.x of a virtual switch and fail to connect).
+            var reachable = NetUtil.LocalIPv4Addresses(includeVirtual: false);
+            foreach (var addr in reachable.Count > 0 ? reachable : NetUtil.LocalIPv4Addresses())
                 profile.Resources.Add(AddressRecord.Create(hostName, addr));
             return profile;
         }
@@ -168,6 +217,8 @@ namespace AirBridge.Net
             try
             {
                 var msg = e.Message;
+                AnswersSeen++;
+                var from = (e.RemoteEndPoint as IPEndPoint)?.Address;
                 var records = msg.Answers.Concat(msg.AdditionalRecords).Concat(msg.AuthorityRecords).ToList();
                 bool changed = false;
                 var needSrv = new List<DomainName>();
@@ -186,7 +237,7 @@ namespace AirBridge.Net
                                 if (ptr.TTL == TimeSpan.Zero) { changed |= _instances.Remove(key); break; }
                                 if (!_instances.TryGetValue(key, out var inst))
                                 {
-                                    _instances[key] = inst = new Instance();
+                                    _instances[key] = inst = new Instance { Key = key };
                                     needSrv.Add(ptr.DomainName);
                                 }
                                 inst.LastSeen = now;
@@ -195,6 +246,7 @@ namespace AirBridge.Net
                             case SRVRecord srv when IsInstance(srv.Name.Labels):
                             {
                                 var inst = GetInstance(Key(srv.Name), now);
+                                if (from != null && from.AddressFamily == AddressFamily.InterNetwork && inst.Key != null) _sourceOf[inst.Key] = from;
                                 string target = Key(srv.Target);
                                 changed |= inst.Target != target || inst.Port != srv.Port;
                                 inst.Target = target;
@@ -251,7 +303,7 @@ namespace AirBridge.Net
 
         private Instance GetInstance(string key, DateTime now)
         {
-            if (!_instances.TryGetValue(key, out var inst)) _instances[key] = inst = new Instance();
+            if (!_instances.TryGetValue(key, out var inst)) _instances[key] = inst = new Instance { Key = key };
             inst.LastSeen = now;
             return inst;
         }
@@ -263,7 +315,9 @@ namespace AirBridge.Net
             {
                 var cutoff = DateTime.UtcNow - Expiry;
                 foreach (var key in _instances.Where(kv => kv.Value.LastSeen < cutoff).Select(kv => kv.Key).ToList())
-                    changed |= _instances.Remove(key);
+                { changed |= _instances.Remove(key); _sourceOf.Remove(key); }
+                foreach (var id in _swept.Where(kv => kv.Value.LastSeen < DateTime.UtcNow - TimeSpan.FromMinutes(10)).Select(kv => kv.Key).ToList())
+                    changed |= _swept.Remove(id);
             }
             if (changed) Changed?.Invoke();
         }
@@ -305,9 +359,9 @@ namespace AirBridge.Net
     /// <summary>Local interface/address helpers.</summary>
     public static class NetUtil
     {
-        private static readonly string[] VirtualMarkers = { "hyper-v", "vethernet", "wsl", "virtualbox", "vmware", "vmnet", "docker", "loopback" };
+        private static readonly string[] VirtualMarkers = { "hyper-v", "vethernet", "wsl", "virtualbox", "vmware", "vmnet", "docker", "loopback", "tap-windows", "wireguard", "tailscale", "zerotier", "vpn", "nordlynx", "anyconnect", "bluetooth" };
 
-        /// <summary>Hyper-V/WSL/VM adapters (the hotspot "Wi-Fi Direct Virtual Adapter" is intentionally NOT excluded).</summary>
+        /// <summary>Hyper-V/WSL/VM/VPN adapters (the hotspot "Wi-Fi Direct Virtual Adapter" is intentionally NOT excluded).</summary>
         public static bool IsVirtualAdapter(NetworkInterface n)
         {
             string s = (n.Name + " " + n.Description).ToLowerInvariant();
@@ -336,8 +390,9 @@ namespace AirBridge.Net
         }
 
         /// <summary>Usable local IPv4 addresses, best first: default-gateway adapter, then physical, then others.</summary>
-        public static List<IPAddress> LocalIPv4Addresses() =>
+        public static List<IPAddress> LocalIPv4Addresses(bool includeVirtual = true) =>
             Candidates()
+                .Where(c => includeVirtual || !IsVirtualAdapter(c.Nic))
                 .OrderBy(c => IsVirtualAdapter(c.Nic) ? 2 : 0)
                 .ThenBy(c => c.Gateway ? 0 : 1)
                 .ThenBy(c => c.Nic.NetworkInterfaceType is NetworkInterfaceType.Ethernet or NetworkInterfaceType.Wireless80211 ? 0 : 1)

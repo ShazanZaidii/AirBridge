@@ -21,25 +21,38 @@ namespace AirBridge
     {
         private string? _qrData;
         private int _refreshQueued;
+        private bool _addOpen, _addTouched;
+
+        /// <summary>The popup (or window) asks its host to close it.</summary>
+        public event Action? RequestClose;
+        /// <summary>True inside a normal window: no "open in a window" button.</summary>
+        public bool Embedded { get; set; }
 
         public TrayPopupControl()
         {
             InitializeComponent();
-            IsVisibleChanged += (_, e) =>
+            Loaded += (_, _) =>
             {
-                if ((bool)e.NewValue)
-                {
-                    App.Peers?.Secrets.OnQrShown();
-                    App.Peers?.Discovery.Query();
-                    Refresh();
-                }
+                OpenWindowButton.Visibility = Embedded ? Visibility.Collapsed : Visibility.Visible;
+                App.Peers?.Secrets.OnQrShown();
+                App.Peers?.Discovery.Boost();
+                Refresh();
+                _ = CheckFirewallAsync();
             };
+            Unloaded += (_, _) => Detach();
             if (App.Peers != null)
             {
                 App.Peers.StateChanged += QueueRefresh;
                 App.Peers.TransfersChanged += QueueRefresh;
             }
-            Loaded += (_, _) => Refresh();
+            AirBridge.AirWeb.AirWebHost.StateChanged += QueueRefresh;
+        }
+
+        /// <summary>Lets go of the services' events, so a thrown-away popup can be freed (it is built on demand).</summary>
+        public void Detach()
+        {
+            if (App.Peers != null) { App.Peers.StateChanged -= QueueRefresh; App.Peers.TransfersChanged -= QueueRefresh; }
+            AirBridge.AirWeb.AirWebHost.StateChanged -= QueueRefresh;
         }
 
         /// <summary>Any thread: coalesces bursts into one refresh on the dispatcher.</summary>
@@ -52,30 +65,53 @@ namespace AirBridge
         private Brush Res(string key) => (Brush)FindResource(key);
         private Style St(string key) => (Style)FindResource(key);
 
+        private async System.Threading.Tasks.Task CheckFirewallAsync()
+        {
+            try
+            {
+                var ok = await FirewallHelper.IsConfiguredAsync();
+                if (!IsLoaded) return;
+                FirewallBand.Visibility = ok == false ? Visibility.Visible : Visibility.Collapsed;
+            }
+            catch { }
+        }
+
         private void Refresh()
         {
             var peers = App.Peers;
             if (peers == null) return;
-            if (!IsVisible && IsLoaded) return; // re-rendered when shown
+            if (!IsLoaded && !IsVisible) { /* first paint happens in Loaded */ }
 
-            DeviceNameText.Text = $"This PC · {peers.Identity.Name}";
-            DropShelfText.Text = AirBridge.Drop.DropSettings.ShelfEnabled ? "Hide drop shelf" : "Show drop shelf";
-            CardAutoHideText.Text = AirBridge.Drop.DropSettings.AutoHideFinished ? "Keep finished transfer cards" : "Hide finished transfer cards after 5 s";
+            DeviceNameText.Text = peers.Port != 0 && peers.BestAddress != null ? $"{peers.BestAddress}:{peers.Port}" : "";
+            if (RenameEdit.Visibility != Visibility.Visible) RenameName.Text = peers.Identity.Name;
+            var aw = AirBridge.AirWeb.AirWebHost.Session;
+            AirWebRow.Visibility = aw != null ? Visibility.Visible : Visibility.Collapsed;
+            if (aw != null) { int n = aw.Peers.Count; AirWebRowSub.Text = n == 0 ? "No one connected yet" : n == 1 ? "1 device connected" : $"{n} devices connected"; }
             int unseen = Phone.PhoneNotifHub.Unseen;
-            PhoneNotifsText.Text = unseen > 0 ? $"Phone notifications ({unseen} new)…" : "Phone notifications…";
-            PhoneNotifsButton.Visibility = Phone.PhoneNotifHub.SourcePhones().Count > 0 || Phone.PhoneNotifHub.Store.Count > 0
-                ? Visibility.Visible : Visibility.Collapsed;
-            PhoneNotifsToggleText.Text = Phone.PhoneSettings.ShowNotifs ? "Hide phone notifications" : "Show phone notifications";
-            PhoneCallsToggleText.Text = Phone.PhoneSettings.ShowCalls ? "Hide phone calls" : "Show phone calls";
+            bool anyPhoneNotifs = Phone.PhoneNotifHub.SourcePhones().Count > 0 || Phone.PhoneNotifHub.Store.Count > 0;
+            PhoneNotifsText.Text = unseen > 0 ? $"{unseen} new" : "Notifications";
+            PhoneNotifsButton.IsEnabled = anyPhoneNotifs;
+            PhoneNotifsButton.Opacity = anyPhoneNotifs ? 1 : 0.45;
+            AirWebDot.Visibility = AirBridge.AirWeb.AirWebHost.IsOn ? Visibility.Visible : Visibility.Collapsed;
+
+            DropShelfSwitch.IsChecked = AirBridge.Drop.DropSettings.ShelfEnabled;
+            AutoHideSwitch.IsChecked = AirBridge.Drop.DropSettings.AutoHideFinished;
+            NotifsSwitch.IsChecked = Phone.PhoneSettings.ShowNotifs;
+            CallsSwitch.IsChecked = Phone.PhoneSettings.ShowCalls;
             RingModeText.Text = Phone.PhoneSettings.RingMode switch
             {
-                Phone.RingMode.Always => "Ring on this PC: Always",
-                Phone.RingMode.Never => "Ring on this PC: Never",
-                _ => "Ring on this PC: Smart",
+                Phone.RingMode.Always => "Always",
+                Phone.RingMode.Never => "Never",
+                _ => "Smart",
             };
-            RingModeButton.Visibility = Phone.PhoneSettings.ShowCalls ? Visibility.Visible : Visibility.Collapsed;
+            RingRow.Visibility = Phone.PhoneSettings.ShowCalls ? Visibility.Visible : Visibility.Collapsed;
+            StartupRow.Visibility = Startup.Supported ? Visibility.Visible : Visibility.Collapsed;
+            if (Startup.Supported) StartupSwitch.IsChecked = Startup.Enabled;
+            GlassRow.Visibility = UiKit.GlassSupported ? Visibility.Visible : Visibility.Collapsed;
+            GlassSwitch.IsChecked = UiSettings.Glass;
+
             bool online = peers.Port != 0 && peers.BestAddress != null;
-            StatusDot.Fill = online ? Res("AB.Accent") : Res("AB.Warning");
+            StatusDot.Fill = online ? Res("AB.Success") : Res("AB.Warning");
             StatusText.Text = online ? "Online" : peers.Port == 0 ? "Starting" : "No network";
 
             // control / lease status
@@ -83,32 +119,40 @@ namespace AirBridge
             ControlBand.Visibility = control == null ? Visibility.Collapsed : Visibility.Visible;
             ControlText.Text = control ?? "";
 
-            // QR
-            string? uri = peers.PairingUri;
-            if (uri == null)
-            {
-                QrCodeImage.Source = null;
-                _qrData = null;
-                QrPlaceholder.Text = peers.Port == 0 ? "Starting…" : "No network connection";
-                QrPlaceholder.Visibility = Visibility.Visible;
-            }
-            else if (uri != _qrData)
-            {
-                _qrData = uri;
-                QrCodeImage.Source = RenderQr(uri);
-                QrPlaceholder.Visibility = Visibility.Collapsed;
-            }
-            QrCodeImage.Opacity = peers.PairingLocked ? 0.25 : 1;
-            LockedText.Visibility = peers.PairingLocked ? Visibility.Visible : Visibility.Collapsed;
-            AddressText.Text = online ? $"{peers.BestAddress}:{peers.Port}" : "";
-
             // devices
             PeersPanel.Children.Clear();
             var paired = peers.PairedPeers();
             var joinCapable = peers.Peers().Where(x => x.Caps.Contains(LinkWire.CapJoin)).Select(x => x.Id).ToHashSet();
             if (paired.Count == 0)
-                PeersPanel.Children.Add(new TextBlock { Text = "No paired devices yet. Scan the code below with your phone to start.", Style = St("AB.Text.Caption"), Margin = new Thickness(2, 0, 0, 0) });
-            foreach (var p in paired) PeersPanel.Children.Add(BuildPeerRow(p, p.Id == peers.ControlPeerId, peers.Links.StatusFor(p.Id), joinCapable.Contains(p.Id)));
+                PeersPanel.Children.Add(new TextBlock { Text = "No devices yet. Use Add device below.", Style = St("AB.Text.Caption"), Margin = new Thickness(2, 0, 0, 0) });
+            foreach (var p in paired.OrderByDescending(x => x.Connected).ThenBy(x => x.Name, StringComparer.CurrentCultureIgnoreCase))
+                PeersPanel.Children.Add(BuildPeerRow(p, p.Id == peers.ControlPeerId, peers.Links.StatusFor(p.Id), joinCapable.Contains(p.Id)));
+            if (peers.PendingStaleOffer is { } offer) PeersPanel.Children.Add(BuildStaleBanner(offer, peers));
+
+            // Add a device opens by itself when nothing is paired, and otherwise only when asked.
+            if (!_addTouched) _addOpen = paired.Count == 0;
+            AddPanel.Visibility = _addOpen ? Visibility.Visible : Visibility.Collapsed;
+            if (_addOpen)
+            {
+                string? uri = peers.PairingUri;
+                if (uri == null)
+                {
+                    QrCodeImage.Source = null;
+                    _qrData = null;
+                    QrPlaceholder.Text = peers.Port == 0 ? "Starting…" : "No network connection";
+                    QrPlaceholder.Visibility = Visibility.Visible;
+                }
+                else if (uri != _qrData)
+                {
+                    _qrData = uri;
+                    QrCodeImage.Source = UiKit.RenderQr(uri, 6);
+                    QrPlaceholder.Visibility = Visibility.Collapsed;
+                }
+                QrCodeImage.Opacity = peers.PairingLocked ? 0.25 : 1;
+                LockedText.Visibility = peers.PairingLocked ? Visibility.Visible : Visibility.Collapsed;
+                AddressText.Text = online ? $"{peers.BestAddress}:{peers.Port}" : "";
+            }
+            else { QrCodeImage.Source = null; _qrData = null; } // not kept in memory while closed
 
             // transfers
             var transfers = peers.Transfers.Snapshot();
@@ -132,12 +176,12 @@ namespace AirBridge
             tile.Children.Add(new TextBlock { Style = St("AB.Glyph"), Text = (string)FindResource(HostDiscoveryWindow.PeerGlyphKey(p.Plat)) });
             tile.Children.Add(new Ellipse
             {
-                Width = 10, Height = 10, Fill = p.Connected ? Res("AB.Accent") : Res("AB.Border"), Stroke = Res("AB.Card"), StrokeThickness = 2,
+                Width = 10, Height = 10, Fill = p.Connected ? Res("AB.Success") : Res("AB.Border"), Stroke = Res("AB.Card"), StrokeThickness = 2,
                 HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(0, 0, -2, -2),
             });
             grid.Children.Add(tile);
 
-            string state = p.Connected ? "Connected" : "Offline";
+            string state = p.Connected ? "Connected" : p.IsHost ? "Not connected" : "Waiting for it to connect";
             string role = p.Plat switch { "android" or "ios" => "phone", _ => p.IsHost ? "computer · you connect to it" : "computer" };
             var text = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(10, 0, 6, 0) };
             var nameLine = new StackPanel { Orientation = Orientation.Horizontal };
@@ -152,7 +196,8 @@ namespace AirBridge
                 nameLine.Children.Add(badge);
             }
             text.Children.Add(nameLine);
-            text.Children.Add(new TextBlock { Text = $"{state} · {role}", Style = St("AB.Text.Caption"), Foreground = p.Connected ? Res("AB.Accent") : Res("AB.MutedForeground"), TextWrapping = TextWrapping.NoWrap, TextTrimming = TextTrimming.CharacterEllipsis });
+            string battery = p.Connected && DeviceBatteryStore.Get(p.Id) is { } b ? $" · {b.Pct}%{(b.Charging ? " charging" : "")}" : "";
+            text.Children.Add(new TextBlock { Text = $"{state} · {role}{battery}", Style = St("AB.Text.Caption"), Foreground = p.Connected ? Res("AB.Foreground") : Res("AB.MutedForeground"), TextWrapping = TextWrapping.NoWrap, TextTrimming = TextTrimming.CharacterEllipsis });
             // Wi-Fi Direct "Fast link" chip (§10.1): shown for phones that can join one, or while a link is not Off.
             if ((p.Connected && joinCapable) || link.Phase != LinkPhase.Off)
                 text.Children.Add(BuildLinkChip(link));
@@ -191,6 +236,31 @@ namespace AirBridge
             grid.Children.Add(actions);
             AutomationProperties.SetName(row, $"{p.Name}, {state}{(hasLease ? ", in control" : "")}");
             return row;
+        }
+
+        /// <summary>Entries left behind by earlier installs of a device that is connected now: the user decides, nothing is guessed.</summary>
+        private UIElement BuildStaleBanner(PeerService.StaleOffer offer, PeerService peers)
+        {
+            var box = new Border { Background = Res("AB.Card"), CornerRadius = new CornerRadius(10), Padding = new Thickness(10, 8, 10, 8), Margin = new Thickness(0, 0, 0, 6) };
+            var sp = new StackPanel();
+            sp.Children.Add(new TextBlock
+            {
+                Text = offer.Ids.Count == 1
+                    ? $"1 older entry named “{offer.Name}” may be an earlier install of this device."
+                    : $"{offer.Ids.Count} older entries named “{offer.Name}” may be earlier installs of this device.",
+                Style = St("AB.Text.Caption"), TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 6),
+            });
+            var buttons = new StackPanel { Orientation = Orientation.Horizontal };
+            var remove = new Button { Content = "Remove old", Style = St("AB.Button.Secondary"), Margin = new Thickness(0, 0, 8, 0) };
+            remove.Click += (_, _) => peers.ResolveStale(remove: true);
+            var keep = new Button { Content = "Keep", Style = St("AB.Button.Ghost") };
+            keep.Click += (_, _) => peers.ResolveStale(remove: false);
+            buttons.Children.Add(remove);
+            buttons.Children.Add(keep);
+            sp.Children.Add(buttons);
+            box.Child = sp;
+            AutomationProperties.SetName(box, "Older entries of a device that is connected now");
+            return box;
         }
 
         private UIElement BuildLinkChip(LinkStatusView link)
@@ -283,26 +353,7 @@ namespace AirBridge
             return row;
         }
 
-        private static BitmapImage RenderQr(string data)
-        {
-            using var generator = new QRCodeGenerator();
-            using var qrData = generator.CreateQrCode(data, QRCodeGenerator.ECCLevel.M);
-            var png = new PngByteQRCode(qrData).GetGraphic(10);
-            var image = new BitmapImage();
-            using var stream = new MemoryStream(png);
-            image.BeginInit();
-            image.CacheOption = BitmapCacheOption.OnLoad;
-            image.StreamSource = stream;
-            image.EndInit();
-            image.Freeze();
-            return image;
-        }
-
-        private void ClosePopup()
-        {
-            if (VisualTreeHelper.GetParent(this) is Popup popup) popup.IsOpen = false;
-            if (Parent is Popup p2) p2.IsOpen = false;
-        }
+        private void ClosePopup() => RequestClose?.Invoke();
 
         private static void ShowSingle<T>(Func<T> create) where T : Window
         {
@@ -339,6 +390,90 @@ namespace AirBridge
                 ClosePopup();
                 App.ShowSendWindow(files);
             }
+        }
+
+        private void OpenNetworkCheck_Click(object sender, RoutedEventArgs e)
+        {
+            ClosePopup();
+            ShowSingle(() => new NetworkCheckWindow());
+        }
+
+        private void AirWeb_Click(object sender, RoutedEventArgs e)
+        {
+            ClosePopup();
+            AirBridge.AirWeb.AirWebHost.Show();
+        }
+
+        private void SendFiles_Click(object sender, RoutedEventArgs e)
+        {
+            var dlg = new Microsoft.Win32.OpenFileDialog { Multiselect = true, Title = "Choose files to send" };
+            ClosePopup();
+            if (dlg.ShowDialog() == true && dlg.FileNames.Length > 0) App.ShowSendWindow(dlg.FileNames);
+        }
+
+        private void AddDevice_Click(object sender, RoutedEventArgs e)
+        {
+            _addTouched = true;
+            _addOpen = !_addOpen;
+            if (_addOpen) App.Peers?.Secrets.OnQrShown();
+            Refresh();
+        }
+
+        private void OpenWindow_Click(object sender, RoutedEventArgs e)
+        {
+            ClosePopup();
+            App.ShowMainWindow();
+        }
+
+        private void SettingsToggle_Click(object sender, RoutedEventArgs e)
+        {
+            bool open = SettingsPanel.Visibility != Visibility.Visible;
+            SettingsPanel.Visibility = open ? Visibility.Visible : Visibility.Collapsed;
+            SettingsChevron.Text = open ? "\uE70E" : "\uE70D";
+        }
+
+        /// <summary>The name row was clicked: edit in place.</summary>
+        private void RenameRow_Click(object sender, RoutedEventArgs e)
+        {
+            var peers = App.Peers;
+            if (peers == null) return;
+            NameBox.Text = peers.Identity.Name;
+            RenameRow.Visibility = Visibility.Collapsed;
+            RenameEdit.Visibility = Visibility.Visible;
+            NameBox.Focus();
+            NameBox.SelectAll();
+        }
+
+        private void NameBox_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Key == Key.Enter) { NameSave_Click(sender, e); e.Handled = true; }
+            else if (e.Key == Key.Escape) { NameCancel_Click(sender, e); e.Handled = true; }
+        }
+
+        private void NameSave_Click(object sender, RoutedEventArgs e)
+        {
+            var peers = App.Peers;
+            string name = NameBox.Text.Trim();
+            if (peers != null && name.Length > 0 && name != peers.Identity.Name) peers.RenameSelf(name);
+            NameCancel_Click(sender, e);
+        }
+
+        private void NameCancel_Click(object sender, RoutedEventArgs e)
+        {
+            RenameEdit.Visibility = Visibility.Collapsed;
+            RenameRow.Visibility = Visibility.Visible;
+            Keyboard.ClearFocus();
+            Refresh();
+        }
+
+        private void StopAirWeb_Click(object sender, RoutedEventArgs e) => AirBridge.AirWeb.AirWebHost.Stop();
+
+        private void ToggleGlass_Click(object sender, RoutedEventArgs e) => UiSettings.Glass = GlassSwitch.IsChecked == true;
+
+        private void ToggleStartup_Click(object sender, RoutedEventArgs e)
+        {
+            Startup.Enabled = StartupSwitch.IsChecked == true;
+            Refresh();
         }
 
         private void ToggleDropShelf_Click(object sender, RoutedEventArgs e)

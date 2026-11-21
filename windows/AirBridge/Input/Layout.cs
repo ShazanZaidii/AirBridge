@@ -33,6 +33,9 @@ namespace AirBridge.Input
         public string CaptureStrength { get; set; } = "firm";
         /// <summary>Controller side: crossing additionally requires holding Alt while pushing.</summary>
         public bool CaptureRequireAlt { get; set; } = false;
+        /// <summary>Controller side: the colour of the glow on an edge while pushing ("#RRGGBB"); blue like the phone's accent by default.</summary>
+        public string EdgeColor { get; set; } = DefaultEdgeColor;
+        public const string DefaultEdgeColor = "#5B9DFF";
         /// <summary>Controller side: edges ("left"/"right"/"top"/"bottom") that never capture.</summary>
         public List<string> CaptureDisabledEdges { get; set; } = new();
 
@@ -143,6 +146,7 @@ namespace AirBridge.Input
                     TargetScrollPixelsPerNotch = _data.TargetScrollPixelsPerNotch,
                     CaptureStrength = _data.CaptureStrength,
                     CaptureRequireAlt = _data.CaptureRequireAlt,
+                    EdgeColor = _data.EdgeColor,
                     CaptureDisabledEdges = new List<string>(_data.CaptureDisabledEdges),
                 };
             }
@@ -158,6 +162,22 @@ namespace AirBridge.Input
         {
             if (strength is not ("easy" or "normal" or "firm")) return;
             lock (Gate) { EnsureLoaded(); _data.CaptureStrength = strength; SaveLocked(); }
+            Changed?.Invoke();
+        }
+
+        /// <summary>The edge glow colour as "#RRGGBB" (the default if the stored value is not a colour).</summary>
+        public static string EdgeColorHex()
+        {
+            lock (Gate) { EnsureLoaded(); return IsHex(_data.EdgeColor) ? _data.EdgeColor : LayoutData.DefaultEdgeColor; }
+        }
+
+        private static bool IsHex(string? s) =>
+            s is { Length: 7 } && s[0] == '#' && s.Skip(1).All(Uri.IsHexDigit);
+
+        public static void SetEdgeColor(string hex)
+        {
+            if (!IsHex(hex)) return;
+            lock (Gate) { EnsureLoaded(); _data.EdgeColor = hex.ToUpperInvariant(); SaveLocked(); }
             Changed?.Invoke();
         }
 
@@ -210,6 +230,46 @@ namespace AirBridge.Input
             {
                 EnsureLoaded();
                 changed = AutoPlacement.AssignNew(_data.Peers, peers);
+                if (changed) SaveLocked();
+            }
+            if (changed) Changed?.Invoke();
+        }
+
+        /// <summary>A reinstalled device keeps the spot you gave it: its placement moves from the old id to the new one (if the new
+        /// one has none yet).</summary>
+        public static void Migrate(string oldId, string newId)
+        {
+            bool changed;
+            lock (Gate)
+            {
+                EnsureLoaded();
+                changed = oldId != newId && _data.Peers.TryGetValue(oldId, out var p);
+                if (changed)
+                {
+                    if (!_data.Peers.ContainsKey(newId)) _data.Peers[newId] = _data.Peers[oldId];
+                    _data.Peers.Remove(oldId);
+                    SaveLocked();
+                }
+            }
+            if (changed) Changed?.Invoke();
+        }
+
+        /// <summary>Forget the placement of a device that is no longer paired.</summary>
+        public static void Remove(string peerId)
+        {
+            bool changed;
+            lock (Gate) { EnsureLoaded(); changed = _data.Peers.Remove(peerId); if (changed) SaveLocked(); }
+            if (changed) Changed?.Invoke();
+        }
+
+        /// <summary>Drop every placement whose device is no longer paired (dead ids from reinstalls, forgotten devices).</summary>
+        public static void Prune(ISet<string> keep)
+        {
+            bool changed = false;
+            lock (Gate)
+            {
+                EnsureLoaded();
+                foreach (var id in _data.Peers.Keys.Where(id => !keep.Contains(id)).ToList()) { _data.Peers.Remove(id); changed = true; }
                 if (changed) SaveLocked();
             }
             if (changed) Changed?.Invoke();

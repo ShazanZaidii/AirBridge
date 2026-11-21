@@ -9,6 +9,8 @@ namespace AirBridge
         public ClipboardFiltersWindow()
         {
             InitializeComponent();
+            UiKit.Dark(this);
+            UiKit.Glass(this);
             RefreshList();
         }
 

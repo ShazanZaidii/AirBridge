@@ -89,8 +89,52 @@ namespace AirBridge
             Layout.SetCaptureStrength(strength);
         }
 
+        // ------------------------------------------------------------------ edge glow colour
+
+        private static readonly string[] GlowChoices =
+            { "#5B9DFF", "#F4F4F6", "#FF7A7A", "#FFC53D", "#34D399", "#22D3EE", "#A78BFA", "#F472B6", "#FB923C" };
+
+        private void BuildGlowSwatches(string current)
+        {
+            EdgeSwatches.Children.Clear();
+            foreach (var hex in GlowChoices)
+            {
+                var c = (Color)ColorConverter.ConvertFromString(hex);
+                bool on = string.Equals(hex, current, StringComparison.OrdinalIgnoreCase);
+                var swatch = new Border
+                {
+                    Width = 24, Height = 24, CornerRadius = new CornerRadius(12), Margin = new Thickness(0, 0, 8, 8), Cursor = Cursors.Hand,
+                    Background = new SolidColorBrush(c), BorderThickness = new Thickness(2),
+                    BorderBrush = on ? Brushes.White : Brushes.Transparent, Tag = hex, Focusable = true,
+                };
+                AutomationProperties.SetName(swatch, $"Edge glow {hex}" + (on ? ", selected" : ""));
+                swatch.MouseLeftButtonUp += (_, _) => Layout.SetEdgeColor(hex);
+                swatch.KeyDown += (_, e) => { if (e.Key is Key.Enter or Key.Space) { Layout.SetEdgeColor(hex); e.Handled = true; } };
+                EdgeSwatches.Children.Add(swatch);
+            }
+        }
+
+        private void EdgeHex_Commit(object sender, RoutedEventArgs e)
+        {
+            if (_building) return;
+            string t = EdgeHex.Text.Trim();
+            if (!t.StartsWith('#')) t = "#" + t;
+            Layout.SetEdgeColor(t);
+            EdgeHex.Text = Layout.EdgeColorHex(); // a typo snaps back to the colour in use
+        }
+
+        private void EdgeHex_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Key == Key.Enter) { EdgeHex_Commit(sender, e); e.Handled = true; }
+        }
+
+        private void EdgeReset_Click(object sender, RoutedEventArgs e) => Layout.SetEdgeColor(LayoutData.DefaultEdgeColor);
+
         private void LoadSettings(LayoutData s)
         {
+            BuildGlowSwatches(s.EdgeColor);
+            EdgeHex.Text = s.EdgeColor;
+            EdgeReset.Visibility = string.Equals(s.EdgeColor, LayoutData.DefaultEdgeColor, StringComparison.OrdinalIgnoreCase) ? Visibility.Collapsed : Visibility.Visible;
             SwapCmdCtrl.IsChecked = s.SwapCmdCtrlForMac;
             RequireAlt.IsChecked = s.CaptureRequireAlt;
             StrengthEasy.IsChecked = s.CaptureStrength == "easy";
@@ -112,7 +156,7 @@ namespace AirBridge
             foreach (var p in online.Where(p => p.Caps.Contains("ctl_target")))
                 rows.Add(new Row(p.Id, p.Name, true, placements.GetValueOrDefault(p.Id)));
             foreach (var (id, pl) in placements)
-                if (pl.Edge != null && rows.All(r => r.Id != id))
+                if (pl.Edge != null && rows.All(r => r.Id != id) && App.Peers?.Store.Get(id) != null)
                     rows.Add(new Row(id, string.IsNullOrEmpty(pl.Name) ? id[..Math.Min(8, id.Length)] : pl.Name, false, pl));
             return rows;
         }

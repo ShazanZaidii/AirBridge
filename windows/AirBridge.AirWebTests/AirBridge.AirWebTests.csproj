@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<!-- Self-check and live test host for AirWeb on Windows (the HTTP server, the shared pool, the short link).
+	     Runs on any OS: dotnet run (project AirBridge.AirWebTests) runs the checks, exit code 0 = all passed.
+	     With the argument serve it starts a server with a few files and prints its link, so tools/airwebcheck/check.py
+	     and browser_check.py can be pointed at it. -->
+	<PropertyGroup>
+		<OutputType>Exe</OutputType>
+		<TargetFramework>net8.0</TargetFramework>
+		<RollForward>Major</RollForward>
+		<Nullable>enable</Nullable>
+		<ImplicitUsings>enable</ImplicitUsings>
+	</PropertyGroup>
+	<ItemGroup>
+		<Compile Include="../AirBridge/AirWeb/AirWebServer.cs" Link="Shared/AirWebServer.cs" />
+		<Compile Include="../AirBridge/AirWeb/AirWebHttp.cs" Link="Shared/AirWebHttp.cs" />
+		<Compile Include="../AirBridge/AirWeb/AirWebShortLink.cs" Link="Shared/AirWebShortLink.cs" />
+		<Compile Include="../AirBridge/AirWeb/AirWebSession.cs" Link="Shared/AirWebSession.cs" />
+		<PackageReference Include="QRCoder" Version="1.8.0" />
+	</ItemGroup>
+</Project>
