@@ -1,0 +1,23 @@
+# AirBridge
+
+> Open-source AirDrop alternative for Android, Mac and Windows. It shares the clipboard, sends files, lets one keyboard and mouse control several devices, shows a phone's calls and notifications on the computer, and mirrors the phone's screen. Everything runs on the local network: no account, no cloud, no server.
+
+AirBridge is three native apps (Android in Kotlin, macOS in Swift, Windows in C#) that speak one documented protocol. Licensed under the GNU AGPL v3. Android 8.0 or newer; macOS 26.1 or newer for the current source; Windows 10 (2004) or 11. Linux and iOS are not started. Released builds (August 2026, v2.1) are on the Releases page; the source in the repository is newer.
+
+## Docs
+
+- [README](https://github.com/ShazanZaidii/AirBridge/blob/main/README.md): what it does, install, privacy, questions people ask
+- [Protocol](https://github.com/ShazanZaidii/AirBridge/blob/main/docs/protocol.md): the wire protocol all apps follow (discovery, pairing, encryption, clipboard, files, remote control, calls, battery)
+- [AirWeb](https://github.com/ShazanZaidii/AirBridge/blob/main/docs/airweb.md): sharing files with devices that only have a browser
+
+## Source
+
+- [android/](https://github.com/ShazanZaidii/AirBridge/tree/main/android): Android app
+- [macOS/](https://github.com/ShazanZaidii/AirBridge/tree/main/macOS): Mac app
+- [windows/](https://github.com/ShazanZaidii/AirBridge/tree/main/windows): Windows app
+
+## Links
+
+- [Website](https://shazanzaidi.com/airbridge/)
+- [Releases](https://github.com/ShazanZaidii/AirBridge/releases)
+- [Issues](https://github.com/ShazanZaidii/AirBridge/issues)
