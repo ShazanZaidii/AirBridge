@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<!-- Self-check for the pure phone-notification logic (§13: parsing, notification list, call board, commands).
+	     Runs on any OS: dotnet run (project AirBridge.PhoneTests) (exit code 0 = all passed). -->
+	<PropertyGroup>
+		<OutputType>Exe</OutputType>
+		<TargetFramework>net8.0</TargetFramework>
+		<RollForward>Major</RollForward>
+		<Nullable>enable</Nullable>
+		<ImplicitUsings>disable</ImplicitUsings>
+		<TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+	</PropertyGroup>
+	<ItemGroup>
+		<Compile Include="../AirBridge/Phone/PhoneNotifCore.cs" Link="Shared/PhoneNotifCore.cs" />
+		<Compile Include="../AirBridge/Phone/CallLogic.cs" Link="Shared/CallLogic.cs" />
+	</ItemGroup>
+</Project>

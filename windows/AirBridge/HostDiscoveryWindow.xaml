@@ -1,0 +1,72 @@
+<Window x:Class="AirBridge.HostDiscoveryWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Connect to a Mac or PC" Height="560" Width="380"
+        Background="{StaticResource AB.Background}" WindowStartupLocation="CenterScreen"
+        Topmost="True" ResizeMode="NoResize">
+    <Border Style="{StaticResource AB.Window.Card}">
+        <Grid Margin="20">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <!-- header -->
+            <Grid Grid.Row="0" Margin="0,0,0,14">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel>
+                    <TextBlock Style="{StaticResource AB.Text.Title}" Text="Connect to a Mac or PC"/>
+                    <TextBlock Style="{StaticResource AB.Text.Caption}" Margin="0,4,0,0"
+                               Text="Pick a computer running AirBridge. Both screens then show the same 6-digit code; confirm it on both. Nothing to type."/>
+                    <Button Style="{StaticResource AB.Button.Link}" Content="Can't find it?" HorizontalAlignment="Left" Margin="-6,4,0,0"
+                            Click="Help_Click" AutomationProperties.Name="Can't find it? Open the network check"/>
+                </StackPanel>
+                <Button Grid.Column="1" Style="{StaticResource AB.Button.Icon}" Content="{StaticResource AB.G.Close}" VerticalAlignment="Top"
+                        ToolTip="Close" AutomationProperties.Name="Close" Click="Close_Click" IsCancel="True"/>
+            </Grid>
+
+            <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Focusable="False">
+                <StackPanel x:Name="HostsPanel"/>
+            </ScrollViewer>
+
+            <!-- pairing panel: digits + Confirm/Cancel, then waiting / result -->
+            <Border Grid.Row="2" x:Name="PairPanel" Visibility="Collapsed" Background="{StaticResource AB.Card}" CornerRadius="12" Padding="16" Margin="0,12,0,0">
+                <StackPanel>
+                    <TextBlock x:Name="PairTitle" Style="{StaticResource AB.Text}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"/>
+                    <TextBlock x:Name="DigitsText" Style="{StaticResource AB.Text.Digits}" Margin="0,10,0,4" Visibility="Collapsed"
+                               AutomationProperties.Name="Confirmation code"/>
+                    <ProgressBar x:Name="BusyBar" Style="{StaticResource AB.Progress}" IsIndeterminate="True" Margin="0,10,0,0" Visibility="Collapsed"/>
+                    <TextBlock x:Name="PairStatus" Style="{StaticResource AB.Text.Caption}" Margin="0,8,0,0" AutomationProperties.LiveSetting="Polite"/>
+                    <Grid x:Name="ConfirmButtons" Margin="0,14,0,0" Visibility="Collapsed">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="12"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <Button x:Name="CancelButton" Content="Cancel" Style="{StaticResource AB.Button.Secondary}" Click="CancelPair_Click"/>
+                        <Button Grid.Column="2" x:Name="ConfirmButton" Content="Codes match" Style="{StaticResource AB.Button.Primary}" Click="ConfirmPair_Click"/>
+                    </Grid>
+                </StackPanel>
+            </Border>
+
+            <!-- manual address or pairing link -->
+            <Grid Grid.Row="3" Margin="0,12,0,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <TextBox x:Name="AddressBox" Style="{StaticResource AB.TextBox}" KeyDown="AddressBox_KeyDown"
+                         AutomationProperties.Name="Host address or pairing link"
+                         ToolTip="Host address (192.168.1.20 or 192.168.1.20:47632) or an airbridge://pair link"/>
+                <TextBlock x:Name="AddressHint" Text="IP address or pairing link" Style="{StaticResource AB.Text.Caption}" IsHitTestVisible="False"
+                           Margin="10,0,0,0" VerticalAlignment="Center"/>
+                <Button Grid.Column="1" Content="Connect" Style="{StaticResource AB.Button}" Margin="8,0,0,0" Click="UseAddress_Click"/>
+            </Grid>
+        </Grid>
+    </Border>
+</Window>

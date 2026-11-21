@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<!-- Self-check for the pure drop shelf / transfer card logic (dock geometry, folder expansion, card state machine,
+	     transfer board additions). Runs on any OS: dotnet run (project AirBridge.DropTests) (exit code 0 = all passed). -->
+	<PropertyGroup>
+		<OutputType>Exe</OutputType>
+		<TargetFramework>net8.0</TargetFramework>
+		<RollForward>Major</RollForward>
+		<Nullable>enable</Nullable>
+		<ImplicitUsings>disable</ImplicitUsings>
+		<TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+	</PropertyGroup>
+	<ItemGroup>
+		<Compile Include="../AirBridge/Drop/DropCore.cs" Link="Shared/DropCore.cs" />
+		<Compile Include="../AirBridge/Drop/HudState.cs" Link="Shared/HudState.cs" />
+		<Compile Include="../AirBridge/Net/Transfers.cs" Link="Shared/Transfers.cs" />
+		<Compile Include="../AirBridge/Net/Log.cs" Link="Shared/Log.cs" />
+	</ItemGroup>
+</Project>
