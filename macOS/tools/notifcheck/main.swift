@@ -108,7 +108,7 @@ do {
 // MARK: shared vectors (docs/test-vectors/phone-notifs.jsonl, the exact JSON the Android phone sends)
 
 do {
-    let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../../docs/test-vectors/phone-notifs.jsonl")
+    let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../../../docs/test-vectors/phone-notifs.jsonl")
     let lines = ((try? String(contentsOf: url, encoding: .utf8)) ?? "").split(separator: "\n").map(String.init)
     check(lines.count == 4, "vectors file found")
     if lines.count == 4 {
