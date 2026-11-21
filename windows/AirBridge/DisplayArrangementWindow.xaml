@@ -9,15 +9,15 @@
 
     <!-- No emoji icons: vector paths only. -->
     <Window.Resources>
-        <Color x:Key="CBackground">#0F172A</Color>
-        <Color x:Key="CCard">#1B2336</Color>
-        <Color x:Key="CMuted">#272F42</Color>
-        <Color x:Key="CSecondary">#334155</Color>
-        <Color x:Key="CBorder">#475569</Color>
-        <Color x:Key="CForeground">#F8FAFC</Color>
-        <Color x:Key="CMutedForeground">#94A3B8</Color>
-        <Color x:Key="CAccent">#22C55E</Color>
-        <Color x:Key="COnAccent">#0F172A</Color>
+        <Color x:Key="CBackground">#0F0F11</Color>
+        <Color x:Key="CCard">#1B1B1E</Color>
+        <Color x:Key="CMuted">#27272B</Color>
+        <Color x:Key="CSecondary">#34343A</Color>
+        <Color x:Key="CBorder">#45454C</Color>
+        <Color x:Key="CForeground">#F4F4F6</Color>
+        <Color x:Key="CMutedForeground">#A1A1A8</Color>
+        <Color x:Key="CAccent">#5B9DFF</Color>
+        <Color x:Key="COnAccent">#0F0F11</Color>
 
         <SolidColorBrush x:Key="Background" Color="{StaticResource CBackground}"/>
         <SolidColorBrush x:Key="Card" Color="{StaticResource CCard}"/>
