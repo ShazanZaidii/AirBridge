@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<!-- Self-check for the Windows screen-mirror source's protocol side (docs/protocol.md 8.7) with a fake screen and a fake encoder.
+	     Pure logic, runs on any OS: dotnet run (project AirBridge.MirrorTests) (exit code 0 = all passed). -->
+	<PropertyGroup>
+		<OutputType>Exe</OutputType>
+		<TargetFramework>net8.0</TargetFramework>
+		<RollForward>Major</RollForward>
+		<Nullable>enable</Nullable>
+		<ImplicitUsings>disable</ImplicitUsings>
+		<TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+	</PropertyGroup>
+	<ItemGroup>
+		<Compile Include="../AirBridge/Input/MirrorSourceCore.cs" Link="Shared/MirrorSourceCore.cs" />
+	</ItemGroup>
+</Project>
