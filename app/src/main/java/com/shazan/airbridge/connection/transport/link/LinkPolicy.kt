@@ -1,11 +1,11 @@
 package com.shazan.airbridge.connection.transport.link
 
 /**
- * Thresholds and timeouts for link upgrades (PROTOCOL §10.1; the design notes §6.1, §6.4).
+ * Thresholds and timeouts for link upgrades (docs/protocol.md §10.1).
  * Pure Kotlin.
  */
 object LinkPolicy {
-    /** With a LAN session, upgrade an `xfer_offer` only above this many bytes (§6.1: "> 200 MB"). */
+    /** With a LAN session, upgrade an `xfer_offer` only above this many bytes. */
     const val XFER_UPGRADE_BYTES = 200L * 1000 * 1000
 
     /** Whole link ready within this long of `link_request` / `link_offer` (§10.1). */

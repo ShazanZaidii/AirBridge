@@ -9,8 +9,7 @@ import androidx.compose.ui.text.style.LineBreak
 import androidx.compose.ui.unit.sp
 
 /**
- * Type scale. the design tokens names Plus Jakarta Sans; we use the system sans (its "system font,
- * utility" mood) to avoid bundling or downloading a font. Body ≥ 14 sp, line height ≈ 1.4–1.5.
+ * Type scale. The system sans, so no font has to be bundled or downloaded. Body ≥ 14 sp, line height ≈ 1.4–1.5.
  */
 private val Sans = FontFamily.Default
 

@@ -246,7 +246,7 @@ object LinkWire {
                 psk = m.str("psk"),
                 sec = m.str("sec") ?: "wpa2",
                 band = m.str("band") ?: "unknown",
-                // §10.1: a list; the design notes's earlier draft used a single string.
+                // §10.1: a list.
                 addr = m.optJSONArray("addr")?.let { strings(it) } ?: listOfNotNull(m.str("addr")),
                 port = m.optInt("port", 0),
                 ttl = m.optInt("ttl", LinkPolicy.TTL_DEFAULT_S),
