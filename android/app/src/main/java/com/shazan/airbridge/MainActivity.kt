@@ -789,7 +789,9 @@ private fun DevicesScreen(
     val serviceRunning by AirBridgeInputService.runningFlow.collectAsState()
     val setupDismissed by RemoteControlSetup.cardDismissed.collectAsState()
     // Re-checked on every resume (the user comes back from the system settings).
-    val accessibilityOff = remember(resumeTick, serviceRunning) { !AirBridgeInputService.isRunning }
+    val ownOff by com.shazan.airbridge.payment.PaymentPause.state.collectAsState()
+    // Off because AirBridge itself switched it off (payment app, or no device for a minute) is not "needs setup".
+    val accessibilityOff = remember(resumeTick, serviceRunning, ownOff) { !AirBridgeInputService.isRunning && !ownOff.ownOff }
 
     forgetting?.let { p ->
         AlertDialog(
@@ -1012,6 +1014,15 @@ private fun RemoteControlSetupCard(noun: String, onOpen: () -> Unit, onDismiss: 
 private fun TransferCard(t: TransferUi) {
     val ctx = LocalContext.current
     val open = t.received
+    var asking by remember { mutableStateOf(false) }
+    if (asking) {
+        AlertDialog(
+            onDismissRequest = { asking = false },
+            title = { Text(stringResource(if (t.incoming) R.string.xfer_cancel_recv_q else R.string.xfer_cancel_send_q, t.fileName)) },
+            confirmButton = { TextButton(onClick = { asking = false; Hub.cancelTransfer(t.key) }) { Text(stringResource(R.string.xfer_cancel_yes), color = AbTheme.status.danger) } },
+            dismissButton = { TextButton(onClick = { asking = false }) { Text(stringResource(R.string.xfer_cancel_keep)) } },
+        )
+    }
     AbCard(onClick = open?.let { r -> { r.open(ctx) } }) {
         Column(Modifier.padding(Dimens.md), verticalArrangement = Arrangement.spacedBy(Dimens.sm)) {
             Text(when {
@@ -1029,8 +1040,12 @@ private fun TransferCard(t: TransferUi) {
                     modifier = Modifier.fillMaxWidth().semantics { contentDescription = pctLabel.format((p * 100).toInt()) },
                     trackColor = MaterialTheme.colorScheme.surfaceVariant,
                 )
-                Text(stringResource(R.string.xfer_progress, minOf(t.filesDone + 1, t.filesTotal), t.filesTotal, (p * 100).toInt(), formatSpeed(t.bytesPerSec)),
-                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(if (t.cancelling) stringResource(R.string.xfer_cancelling)
+                        else stringResource(R.string.xfer_progress, minOf(t.filesDone + 1, t.filesTotal), t.filesTotal, (p * 100).toInt(), formatSpeed(t.bytesPerSec)),
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+                    if (!t.cancelling) TextButton(onClick = { asking = true }, modifier = Modifier.height(Dimens.touch)) { Text(stringResource(R.string.cancel)) }
+                }
             } else {
                 val ok = t.result == stringResource(R.string.xfer_sent) || t.result == stringResource(R.string.xfer_received)
                 val c = if (ok) AbTheme.status.success else AbTheme.status.danger

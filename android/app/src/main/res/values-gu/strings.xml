@@ -468,13 +468,18 @@
     <string name="aw_running">AirWeb ચાલી રહ્યું છે</string>
     <string name="pp_title">પેમેન્ટ એપ</string>
     <string name="pp_switch">UPI એપ ખુલ્લી હોય ત્યારે કંટ્રોલ બંધ રાખો</string>
-    <string name="pp_switch_sub">કોઈ એક્સેસિબિલિટી સેવા ચાલુ હોય ત્યાં સુધી Paytm, PhonePe, Google Pay અને BHIM પેમેન્ટ કરવા દેતી નથી. આ એપ આગળ હોય ત્યારે AirBridge પોતાની બંને સેવાઓ બંધ કરે છે અને પછી ફરી ચાલુ કરે છે.</string>
+    <string name="pp_switch_sub">કોઈ એક્સેસિબિલિટી સેવા ચાલુ હોય ત્યાં સુધી Paytm, PhonePe, Google Pay અને BHIM પેમેન્ટ કરવા દેતી નથી. આ એપ આગળ હોય, અથવા એક મિનિટ સુધી કોઈ ડિવાઇસ જોડાયેલું ન હોય, ત્યારે AirBridge પોતાની બંને સેવાઓ બંધ કરે છે અને જરૂર પડે ત્યારે ફરી ચાલુ કરે છે.</string>
     <string name="pp_usage">વપરાશ એક્સેસ</string>
     <string name="pp_usage_sub">ફક્ત એ જાણવા માટે કે આમાંથી કોઈ એપ આગળ છે કે નહીં.</string>
     <string name="pp_secure">જાતે ફરી ચાલુ થાય છે</string>
-    <string name="pp_secure_sub">કમ્પ્યુટરથી એક વાર પરવાનગી આપવી પડે છે: adb shell pm grant com.shazan.airbridge android.permission.WRITE_SECURE_SETTINGS. તેના વગર પેમેન્ટ પછી કંટ્રોલ તમારે જાતે ચાલુ કરવો પડશે.</string>
+    <string name="pp_secure_sub">કમ્પ્યુટરથી એક વાર પરવાનગી આપવી પડે છે: adb shell pm grant com.shazan.airbridge android.permission.WRITE_SECURE_SETTINGS. તેના વગર પેમેન્ટ પછી કંટ્રોલ તમારે જાતે ચાલુ કરવો પડશે, અને ડિવાઇસ ન હોય ત્યારે બંધ કરવાનું છોડી દેવાય છે.</string>
     <string name="pp_copy">કમાન્ડ કૉપિ કરો</string>
     <string name="pp_copied">કમાન્ડ કૉપિ થયો</string>
     <string name="pp_notif_title">AirBridge કંટ્રોલ બંધ છે</string>
     <string name="pp_notif_text">પેમેન્ટ એપ માટે તે બંધ કરાયો હતો. ફરી ચાલુ કરવા ટૅપ કરો.</string>
+    <string name="xfer_cancel_recv_q">%1$s મેળવવાનું રદ કરવું?</string>
+    <string name="xfer_cancel_send_q">%1$s મોકલવાનું રદ કરવું?</string>
+    <string name="xfer_cancel_keep">ચાલુ રાખો</string>
+    <string name="xfer_cancel_yes">ટ્રાન્સફર રદ કરો</string>
+    <string name="xfer_cancelling">રદ થઈ રહ્યું છે…</string>
 </resources>

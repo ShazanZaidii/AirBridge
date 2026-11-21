@@ -468,13 +468,18 @@
     <string name="aw_running">AirWeb চলছে</string>
     <string name="pp_title">পেমেন্ট অ্যাপ</string>
     <string name="pp_switch">UPI অ্যাপ খোলা থাকলে কন্ট্রোল বন্ধ রাখুন</string>
-    <string name="pp_switch_sub">কোনো অ্যাক্সেসিবিলিটি পরিষেবা চালু থাকলে Paytm, PhonePe, Google Pay ও BHIM পেমেন্ট করতে দেয় না। এই অ্যাপগুলো সামনে থাকলে AirBridge নিজের দুটি পরিষেবা বন্ধ করে দেয়, পরে আবার চালু করে।</string>
+    <string name="pp_switch_sub">কোনো অ্যাক্সেসিবিলিটি পরিষেবা চালু থাকলে Paytm, PhonePe, Google Pay ও BHIM পেমেন্ট করতে দেয় না। এই অ্যাপগুলো সামনে থাকলে, বা এক মিনিট কোনো ডিভাইস সংযুক্ত না থাকলে, AirBridge নিজের দুটি পরিষেবা বন্ধ করে দেয় এবং দরকার হলে আবার চালু করে।</string>
     <string name="pp_usage">ব্যবহার অ্যাক্সেস</string>
     <string name="pp_usage_sub">শুধু জানার জন্য যে এই অ্যাপগুলোর কোনোটি সামনে আছে কি না।</string>
     <string name="pp_secure">নিজে থেকেই আবার চালু</string>
-    <string name="pp_secure_sub">কম্পিউটার থেকে একবার অনুমতি দিতে হয়: adb shell pm grant com.shazan.airbridge android.permission.WRITE_SECURE_SETTINGS। এটা ছাড়া পেমেন্টের পরে কন্ট্রোল আপনাকে নিজে চালু করতে হবে।</string>
+    <string name="pp_secure_sub">কম্পিউটার থেকে একবার অনুমতি দিতে হয়: adb shell pm grant com.shazan.airbridge android.permission.WRITE_SECURE_SETTINGS। এটা ছাড়া পেমেন্টের পরে কন্ট্রোল আপনাকে নিজে চালু করতে হবে, আর ডিভাইস না থাকলে বন্ধ করা হবে না।</string>
     <string name="pp_copy">কমান্ড কপি করুন</string>
     <string name="pp_copied">কমান্ড কপি হয়েছে</string>
     <string name="pp_notif_title">AirBridge কন্ট্রোল বন্ধ</string>
     <string name="pp_notif_text">পেমেন্ট অ্যাপের জন্য এটি বন্ধ করা হয়েছিল। আবার চালু করতে ট্যাপ করুন।</string>
+    <string name="xfer_cancel_recv_q">%1$s গ্রহণ বাতিল করবেন?</string>
+    <string name="xfer_cancel_send_q">%1$s পাঠানো বাতিল করবেন?</string>
+    <string name="xfer_cancel_keep">চালিয়ে যান</string>
+    <string name="xfer_cancel_yes">ট্রান্সফার বাতিল করুন</string>
+    <string name="xfer_cancelling">বাতিল হচ্ছে…</string>
 </resources>

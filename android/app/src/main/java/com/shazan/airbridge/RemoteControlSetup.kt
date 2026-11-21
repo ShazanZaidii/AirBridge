@@ -61,6 +61,9 @@ object RemoteControlSetup {
     /** A `ctl_enter` from [plat] was answered `unavailable` because the service is off. */
     fun onRefused(ctx: Context, plat: String?) {
         try {
+            // AirBridge itself switched the services off (payment app in front, or no device for a minute) and puts them
+            // back on its own: don't send the user to Settings.
+            if (com.shazan.airbridge.payment.PaymentPause.state.value.ownOff) return
             setDismissed(false)
             if (!notifyLimit.tryAcquire(System.currentTimeMillis())) return
             val title = ctx.getString(R.string.cant_control_yet, controllerNoun(plat))

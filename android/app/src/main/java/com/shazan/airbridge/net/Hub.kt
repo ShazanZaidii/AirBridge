@@ -76,6 +76,8 @@ data class TransferUi(
     val result: String? = null,
     /** What a finished incoming transfer saved: the card opens it when tapped. */
     val received: ReceivedFiles? = null,
+    /** The user confirmed Cancel; the transfer is winding down. */
+    val cancelling: Boolean = false,
 )
 
 /**
@@ -440,9 +442,19 @@ object Hub : PeerBus.Transport {
     // ---- transfer UI ----
 
     fun putTransfer(t: TransferUi) {
-        _transfers.value = _transfers.value + (t.key to t)
+        // A progress update that was already on its way must not undo "Cancelling".
+        val v = if (t.result == null && _transfers.value[t.key]?.cancelling == true) t.copy(cancelling = true) else t
+        _transfers.value = _transfers.value + (v.key to v)
         // A finished card stays a while; one with files to open long enough to tap it.
         if (t.result != null) scheduler.schedule({ _transfers.value = _transfers.value - t.key }, if (t.received != null) 20L else 5L, TimeUnit.SECONDS)
+    }
+
+    /** The user confirmed Cancel on the running transfer that [key] (a [TransferUi] key, `peer:in|out:id`) names. */
+    fun cancelTransfer(key: String) {
+        val parts = key.split(':')
+        if (parts.size < 3) return
+        val id = parts.last().toIntOrNull() ?: return
+        readySession(parts.dropLast(2).joinToString(":"))?.xfer?.cancelLocal(id, parts[parts.size - 2] == "in")
     }
 
     fun removeTransfer(key: String) {

@@ -28,15 +28,19 @@ object TransferNotifs {
     /** Last progress notification per id, while the transfer runs (to put it back if swiped away). */
     private val live = ConcurrentHashMap<Int, Notification>()
     private val lastPost = ConcurrentHashMap<Int, Long>()
+    /** Ids whose Cancel was confirmed: no more progress notifications for them, only "Cancelling…" then the result. */
+    private val cancelling = ConcurrentHashMap.newKeySet<Int>()
 
     fun progress(
         ctx: Context, id: Int, incoming: Boolean, peer: String, file: String, filesDone: Int, filesTotal: Int,
         done: Long, total: Long, bps: Long, cancel: NotificationCompat.Action,
     ) {
+        if (id in cancelling) return
         val first = !live.containsKey(id)
-        // Updates at most twice a second; the first one and 100 % always go out.
+        // Updates at most once a second (fewer re-posts, and a Cancel tap never lands on a notification being rebuilt);
+        // the first one and 100 % always go out.
         val now = System.currentTimeMillis()
-        if (!first && done < total && now - (lastPost[id] ?: 0L) < 500) return
+        if (!first && done < total && now - (lastPost[id] ?: 0L) < 1000) return
         lastPost[id] = now
 
         val pct = if (total > 0) (done * 100 / total).toInt().coerceIn(0, 100) else 0
@@ -73,8 +77,27 @@ object TransferNotifs {
         Notifs.notify(id, n)
     }
 
+    /** Cancel was confirmed: show it at once (the partial file is deleted afterwards), without the Cancel button. */
+    fun cancelling(ctx: Context, id: Int, incoming: Boolean, peer: String) {
+        cancelling.add(id)
+        val n = NotificationCompat.Builder(ctx, Notifs.CH_LIVE)
+            .setSmallIcon(R.drawable.ic_stat_name)
+            .setContentTitle(ctx.getString(if (incoming) R.string.receiving_from else R.string.sending_to, peer))
+            .setContentText(ctx.getString(R.string.xfer_cancelling))
+            .setCategory(NotificationCompat.CATEGORY_PROGRESS)
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setProgress(0, 0, true)
+            .setContentIntent(Notifs.openAppIntent(ctx))
+            .setDeleteIntent(deleteIntent(ctx, id))
+            .build()
+        live[id] = n
+        Notifs.notify(id, n)
+    }
+
     /** The transfer ended: replace the live notification with a dismissible result. */
     fun finished(ctx: Context, id: Int, title: String, text: String, open: PendingIntent?) {
+        cancelling.remove(id)
         live.remove(id)
         lastPost.remove(id)
         val n = NotificationCompat.Builder(ctx, Notifs.CH_RESULT)

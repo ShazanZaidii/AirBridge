@@ -131,6 +131,16 @@
                 android:resource="@xml/shortcuts" />
         </activity>
 
+        <!-- "Are you sure?" for the Cancel button of a running transfer (notification action). -->
+        <activity
+            android:name=".TransferCancelActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:launchMode="singleTop"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
         <activity
             android:name=".SyncActivity"
             android:excludeFromRecents="true"
