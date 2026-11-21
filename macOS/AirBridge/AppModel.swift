@@ -198,24 +198,49 @@ import UserNotifications
 @MainActor enum TransferUI {
     static func update(_ s: TransferStatus) { AppModel.shared.updateTransfer(s) }
 
+    /// A received picture also goes on the clipboard as an image, so it pastes into apps that want the picture itself.
+    private static func addPictureToClipboard(first: URL?, after change: Int) {
+        guard let first, ClipboardImages.isImage(first) else { return }
+        Task.detached(priority: .userInitiated) {
+            guard let png = ClipboardImages.pngData(for: first) else { return }
+            await MainActor.run {
+                if ClipboardImages.addPNG(png, to: NSPasteboard.general, expectedChange: change) {
+                    ClipboardSync.shared.noteOwnWrite()
+                }
+            }
+        }
+    }
+
+    /// A clipboard transfer (§5.1) arrived: one picture becomes an image on the clipboard, anything else a file list.
+    /// No notice, no files in Downloads.
+    static func receivedClipboard(_ urls: [URL], from peer: String) {
+        guard !urls.isEmpty else { return }
+        ClipboardInbox.purgeOld()
+        if urls.count == 1, ClipboardImages.isImage(urls[0]) {
+            let url = urls[0]
+            Task.detached(priority: .userInitiated) {
+                guard let png = ClipboardImages.pngData(for: url) else { return }
+                await MainActor.run {
+                    ClipboardImages.setImage(png: png, on: NSPasteboard.general)
+                    ClipboardSync.shared.noteReceivedImage(png)
+                }
+            }
+            return
+        }
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.writeObjects(urls as [NSURL])
+        ClipboardSync.shared.noteOwnWrite()
+        addPictureToClipboard(first: urls.first, after: pb.changeCount)
+    }
+
     static func receivedFiles(_ urls: [URL], from peer: String) {
         guard !urls.isEmpty else { return }
         let pb = NSPasteboard.general
         pb.clearContents()
         pb.writeObjects(urls as [NSURL])
         ClipboardSync.shared.noteOwnWrite()
-        // A received picture also goes on the clipboard as an image, so it pastes into apps that want the picture itself.
-        if let first = urls.first, ClipboardImages.isImage(first) {
-            let change = pb.changeCount
-            Task.detached(priority: .userInitiated) {
-                guard let png = ClipboardImages.pngData(for: first) else { return }
-                await MainActor.run {
-                    if ClipboardImages.addPNG(png, to: NSPasteboard.general, expectedChange: change) {
-                        ClipboardSync.shared.noteOwnWrite()
-                    }
-                }
-            }
-        }
+        addPictureToClipboard(first: urls.first, after: pb.changeCount)
 
         let content = UNMutableNotificationContent()
         content.title = "AirBridge"

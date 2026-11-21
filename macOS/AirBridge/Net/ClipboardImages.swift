@@ -30,4 +30,60 @@ enum ClipboardImages {
         pb.addTypes([.png], owner: nil)
         return pb.setData(png, forType: .png)
     }
+
+    /// Puts a picture on the clipboard the way Apple's own screenshot-to-clipboard does: PNG and TIFF, nothing else.
+    /// Returns the pasteboard's change count after the write.
+    @discardableResult
+    static func setImage(png: Data, on pb: NSPasteboard) -> Int {
+        let tiff = NSBitmapImageRep(data: png)?.tiffRepresentation
+        pb.clearContents()
+        pb.declareTypes(tiff == nil ? [.png] : [.png, .tiff], owner: nil)
+        pb.setData(png, forType: .png)
+        if let tiff { pb.setData(tiff, forType: .tiff) }
+        return pb.changeCount
+    }
+
+    /// The picture on the clipboard as PNG (converted from TIFF when that is all there is), or nil.
+    static func pngFromPasteboard(_ pb: NSPasteboard) -> Data? {
+        if let png = pb.data(forType: .png), !png.isEmpty { return png }
+        if let tiff = pb.data(forType: .tiff), !tiff.isEmpty, let rep = NSBitmapImageRep(data: tiff) {
+            return rep.representation(using: .png, properties: [:])
+        }
+        return nil
+    }
+}
+
+/// Where clipboard transfers (§5.1) live: a private cache folder, never the downloads folder.
+enum ClipboardInbox {
+    static var root: URL {
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("AirBridge", isDirectory: true).appendingPathComponent("Clipboard", isDirectory: true)
+    }
+    /// Clipboard data that came in from another device.
+    static var directory: URL { root.appendingPathComponent("in", isDirectory: true) }
+    /// Clipboard data waiting to be sent (an image is written here first).
+    static var outbox: URL { root.appendingPathComponent("out", isDirectory: true) }
+
+    /// Writes `data` to a fresh file called `name` in the outbox and returns it.
+    static func outFile(named name: String, data: Data) -> URL? {
+        let dir = outbox.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        guard (try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)) != nil else { return nil }
+        let url = dir.appendingPathComponent(name)
+        return (try? data.write(to: url)) == nil ? nil : url
+    }
+
+    /// Removes an outbox file and the folder made for it.
+    static func discard(_ url: URL) { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+
+    /// Deletes cached clipboard data older than `age` seconds (a day by default). `root` is a parameter for testing.
+    static func purgeOld(age: TimeInterval = 86_400, in root: URL = ClipboardInbox.root) {
+        let fm = FileManager.default
+        let cutoff = Date().addingTimeInterval(-age)
+        for sub in [root.appendingPathComponent("in"), root.appendingPathComponent("out")] {
+            for item in (try? fm.contentsOfDirectory(at: sub, includingPropertiesForKeys: [.contentModificationDateKey])) ?? [] {
+                let when = (try? item.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantFuture
+                if when < cutoff { try? fm.removeItem(at: item) }
+            }
+        }
+    }
 }

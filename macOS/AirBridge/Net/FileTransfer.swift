@@ -55,11 +55,11 @@ nonisolated final class TransferService: @unchecked Sendable {
     }
 
     /// Starts sending `urls`. `cleanup` runs once the transfer ends (any outcome).
-    func send(urls: [URL], cleanup: (() -> Void)?) {
+    func send(urls: [URL], clip: Bool = false, cleanup: (() -> Void)?) {
         guard let session else { cleanup?(); return }
         let id = nextId
         nextId &+= 1
-        let t = OutgoingTransfer(id: id, urls: urls, session: session, queue: queue, cleanup: cleanup) { [weak self] in
+        let t = OutgoingTransfer(id: id, urls: urls, clip: clip, session: session, queue: queue, cleanup: cleanup) { [weak self] in
             self?.outgoing[id] = nil
         }
         outgoing[id] = t
@@ -97,13 +97,15 @@ nonisolated final class TransferService: @unchecked Sendable {
             files[i] = (Proto.sanitizeFileName(f.str("name") ?? ""), size)
         }
         let total = files.reduce(Int64(0)) { $0 + $1.size }
-        let dir = TransferService.destination
+        // A clipboard transfer (§5.1) is kept in a private cache folder, not in the downloads folder.
+        let clip = msg.bool("clip") == true
+        let dir = clip ? ClipboardInbox.directory : TransferService.destination
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         if let free = try? dir.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
             .volumeAvailableCapacityForImportantUsage, free < total {
             reject("disk"); return
         }
-        let t = IncomingTransfer(id: id, files: files, total: total, dir: dir, session: session, queue: queue) { [weak self] in
+        let t = IncomingTransfer(id: id, files: files, total: total, dir: dir, clip: clip, session: session, queue: queue) { [weak self] in
             self?.incoming[id] = nil
         }
         incoming[id] = t
@@ -119,6 +121,7 @@ nonisolated final class IncomingTransfer: @unchecked Sendable {
     private let files: [(name: String, size: Int64)]
     private let total: Int64
     private let dir: URL
+    private let clip: Bool
     private weak var session: Session?
     private let peerName: String
     private let peerId: String
@@ -143,12 +146,13 @@ nonisolated final class IncomingTransfer: @unchecked Sendable {
     private var completeFiles = Set<Int>()
     private var ioCancelled = false
 
-    init(id: UInt32, files: [(name: String, size: Int64)], total: Int64, dir: URL, session: Session,
+    init(id: UInt32, files: [(name: String, size: Int64)], total: Int64, dir: URL, clip: Bool, session: Session,
          queue: DispatchQueue, onEnd: @escaping () -> Void) {
         self.id = id
         self.files = files
         self.total = total
         self.dir = dir
+        self.clip = clip
         self.session = session
         self.peerName = session.peerName
         self.peerId = session.peerId
@@ -208,7 +212,8 @@ nonisolated final class IncomingTransfer: @unchecked Sendable {
                 savedURLs = saved
                 end(.done)
                 let from = peerName
-                onMain { TransferUI.receivedFiles(saved, from: from) }
+                if clip { onMain { TransferUI.receivedClipboard(saved, from: from) } }
+                else { onMain { TransferUI.receivedFiles(saved, from: from) } }
             }
         }
     }
@@ -245,6 +250,7 @@ nonisolated final class IncomingTransfer: @unchecked Sendable {
     }
 
     private func report(_ phase: TransferStatus.Phase) {
+        if clip { return } // a clipboard transfer is quiet: no progress card
         let elapsed = Date().timeIntervalSince(startedAt)
         let s = TransferStatus(id: key, direction: .incoming, peerName: peerName, fileCount: files.count,
                                firstName: files.first?.name ?? "", total: total, done: writtenBytes, phase: phase,
@@ -303,6 +309,7 @@ nonisolated final class OutgoingTransfer: @unchecked Sendable {
     private struct File { let url: URL; let name: String; let size: Int64 }
     private let files: [File]
     private let total: Int64
+    private let clip: Bool
     private weak var session: Session?
     private let peerName: String
     private let peerId: String
@@ -328,9 +335,10 @@ nonisolated final class OutgoingTransfer: @unchecked Sendable {
     private var handle: FileHandle?
     private var handleIndex = -1
 
-    init(id: UInt32, urls: [URL], session: Session, queue: DispatchQueue, cleanup: (() -> Void)?,
+    init(id: UInt32, urls: [URL], clip: Bool = false, session: Session, queue: DispatchQueue, cleanup: (() -> Void)?,
          onEnd: @escaping () -> Void) {
         self.id = id
+        self.clip = clip
         self.files = urls.compactMap { url in
             guard let v = try? url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]),
                   v.isRegularFile == true else { return nil }
@@ -354,7 +362,9 @@ nonisolated final class OutgoingTransfer: @unchecked Sendable {
             if let mime = f.url.mimeType { d["mime"] = mime }
             return d
         }
-        session?.send(["t": "xfer_offer", "id": Int(id), "files": list, "total": total])
+        var offer: [String: Any] = ["t": "xfer_offer", "id": Int(id), "files": list, "total": total]
+        if clip { offer["clip"] = true }
+        session?.send(offer)
         report(.waiting)
         queue.asyncAfter(deadline: .now() + 60) { [weak self] in
             guard let self, !self.ended, self.window == 0 else { return }
@@ -443,6 +453,7 @@ nonisolated final class OutgoingTransfer: @unchecked Sendable {
     }
 
     private func report(_ phase: TransferStatus.Phase) {
+        if clip { return } // a clipboard transfer is quiet: no progress card
         let elapsed = Date().timeIntervalSince(startedAt)
         let s = TransferStatus(id: key, direction: .outgoing, peerName: peerName, fileCount: files.count,
                                firstName: files.first?.name ?? "", total: total, done: acked, phase: phase,
