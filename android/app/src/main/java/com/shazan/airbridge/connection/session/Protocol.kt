@@ -62,7 +62,7 @@ object Protocol {
      * the accessibility service.
      */
     private val STATIC_CAPS: List<String> by lazy {
-        listOf("clip", "xfer", "trackpad", CAP_DRAG) +
+        listOf("clip", "clip_media", "xfer", "trackpad", CAP_DRAG) +
             // §13: this app can forward notifications and calls; the user still turns each on (notif_state).
             listOf(com.shazan.airbridge.phone.notifications.NotifWire.CAP_NOTIF_SOURCE, com.shazan.airbridge.phone.notifications.NotifWire.CAP_CALL_SOURCE,
                 com.shazan.airbridge.phone.notifications.NotifWire.CAP_CALL_RING) +

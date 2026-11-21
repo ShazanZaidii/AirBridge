@@ -5,4 +5,6 @@
     <external-path name="downloads" path="Download/AirBridge Transfers/" />
     <external-files-path name="app_downloads" path="Download/AirBridge Transfers/" />
     <files-path name="internal" path="AirBridge Transfers/" />
+    <!-- Clipboard images and files from other devices (docs/protocol.md 5.1), see ClipStore. -->
+    <cache-path name="clipboard" path="clipboard/" />
 </paths>

@@ -1,5 +1,8 @@
 package com.shazan.airbridge.transfer
 
+import com.shazan.airbridge.clipboard.ClipMedia
+import com.shazan.airbridge.clipboard.ClipStore
+import com.shazan.airbridge.clipboard.ClipboardSync
 import android.Manifest
 import android.app.DownloadManager
 import android.app.PendingIntent
@@ -143,9 +146,9 @@ class FileTransfer(private val s: Session) {
     // ================= sending =================
 
     /** [fast] = the user asked for "Send fast": upgrade to a Wi-Fi Direct link first if the peer can host one. */
-    fun send(uris: List<Uri>, fast: Boolean = false) {
+    fun send(uris: List<Uri>, fast: Boolean = false, clip: Boolean = false) {
         if (uris.isEmpty()) return
-        senders.execute { prepareAndSend(uris, fast) }
+        senders.execute { prepareAndSend(uris, fast, clip) }
     }
 
     /** True while any transfer runs on this session (keeps a link from going idle). */
@@ -155,11 +158,22 @@ class FileTransfer(private val s: Session) {
      * Describe the files, then (§10.1) hold the `xfer_offer` until an upgraded link session is ready
      * if [LinkPolicy] says so, and send on whichever session [LinkManager.prepareSend] returns.
      */
-    private fun prepareAndSend(uris: List<Uri>, fast: Boolean) {
+    private fun prepareAndSend(uris: List<Uri>, fast: Boolean, clip: Boolean = false) {
         val srcs = try { uris.map { describe(it) } } catch (e: Exception) {
             Log.w(TAG, "describe failed: ${e.message}")
+            if (clip) return // a clipboard transfer is quiet
             ConnectionHub.putTransfer(TransferUi("${s.peerId}:out:prep${System.nanoTime()}", false, peerName, "", 0, uris.size, 0, 0, 0,
                 result = ConnectionHub.app.getString(com.shazan.airbridge.R.string.xf_failed_detail, ConnectionHub.app.getString(com.shazan.airbridge.R.string.xf_cant_read, e.message ?: ""))))
+            return
+        }
+        if (clip) {
+            // docs/protocol.md 5.1: only small items go over the clipboard, and never through a link upgrade.
+            if (!ClipMedia.allowed(srcs.map { it.size }, ClipMedia.isImage(srcs.map { it.mime }))) {
+                Log.i(TAG, "clipboard item over the limit (${srcs.size} item(s)), not sent")
+                srcs.forEach { it.tmp?.delete() }
+                return
+            }
+            s.xfer.runSend(srcs, clip = true)
             return
         }
         val total = srcs.sumOf { it.size }
@@ -191,7 +205,7 @@ class FileTransfer(private val s: Session) {
         fun update(block: Outgoing.() -> Unit) = synchronized(lock) { block(); lock.notifyAll() }
     }
 
-    private fun runSend(srcs: List<Src>) {
+    private fun runSend(srcs: List<Src>, clip: Boolean = false) {
         val notifId = notifIds.incrementAndGet()
         val id = nextId.getAndIncrement()
         val key = "${s.peerId}:out:$id"
@@ -204,10 +218,13 @@ class FileTransfer(private val s: Session) {
             srcs.forEachIndexed { i, f ->
                 files.put(JSONObject().put("i", i).put("name", f.name).put("size", f.size).apply { f.mime?.let { put("mime", it) } })
             }
-            if (!s.send(Protocol.msg("xfer_offer").put("id", id).put("files", files).put("total", total))) throw XferError("not connected")
+            val offer = Protocol.msg("xfer_offer").put("id", id).put("files", files).put("total", total)
+            if (clip) offer.put("clip", true) // docs/protocol.md 5.1
+            if (!s.send(offer)) throw XferError("not connected")
             val started = System.currentTimeMillis()
             var lastUi = 0L
             fun ui(filesDone: Int, name: String, force: Boolean = false) {
+                if (clip) return // a clipboard transfer is quiet: no card, no notification
                 val now = System.currentTimeMillis()
                 if (!force && now - lastUi < UI_INTERVAL_MS) return
                 lastUi = now
@@ -268,8 +285,10 @@ class FileTransfer(private val s: Session) {
             }
             if (!complete.optBoolean("ok", true)) throw XferError(ConnectionHub.app.getString(com.shazan.airbridge.R.string.xf_cant_save, peerName))
             val label = if (srcs.size == 1) srcs[0].name else ConnectionHub.app.resources.getQuantityString(com.shazan.airbridge.R.plurals.sh_files, srcs.size, srcs.size)
-            ConnectionHub.putTransfer(TransferUi(key, false, peerName, label, srcs.size, srcs.size, total, total, 0, result = ConnectionHub.app.getString(com.shazan.airbridge.R.string.xfer_sent)))
-            resultNotification(notifId, ConnectionHub.app.getString(com.shazan.airbridge.R.string.sh_sent_to, peerName), label, null)
+            if (!clip) {
+                ConnectionHub.putTransfer(TransferUi(key, false, peerName, label, srcs.size, srcs.size, total, total, 0, result = ConnectionHub.app.getString(com.shazan.airbridge.R.string.xfer_sent)))
+                resultNotification(notifId, ConnectionHub.app.getString(com.shazan.airbridge.R.string.sh_sent_to, peerName), label, null)
+            }
         } catch (e: Exception) {
             val why = when (e) {
                 is XferError -> e.message ?: ConnectionHub.app.getString(com.shazan.airbridge.R.string.xf_failed_word)
@@ -280,8 +299,10 @@ class FileTransfer(private val s: Session) {
             val cancelledBy = synchronized(o.lock) { o.cancelled }
             if (cancelledBy == null && !s.isClosed) s.send(cancelMsg(id, "out", "error"))
             val text = if (cancelledBy == "user") ConnectionHub.app.getString(com.shazan.airbridge.R.string.xfer_cancelled) else ConnectionHub.app.getString(com.shazan.airbridge.R.string.xf_failed_detail, why)
-            ConnectionHub.putTransfer(TransferUi(key, false, peerName, srcs.firstOrNull()?.name ?: "", 0, srcs.size, 0, 0, 0, result = text))
-            resultNotification(notifId, ConnectionHub.app.getString(com.shazan.airbridge.R.string.xf_send_failed, peerName), text, null)
+            if (!clip) {
+                ConnectionHub.putTransfer(TransferUi(key, false, peerName, srcs.firstOrNull()?.name ?: "", 0, srcs.size, 0, 0, 0, result = text))
+                resultNotification(notifId, ConnectionHub.app.getString(com.shazan.airbridge.R.string.xf_send_failed, peerName), text, null)
+            }
         } finally {
             outgoing.remove(id)
             TransferLocks.release()
@@ -359,14 +380,14 @@ class FileTransfer(private val s: Session) {
             ConnectionHub.toast(ConnectionHub.app.getString(com.shazan.airbridge.R.string.xf_no_space_in, peerName))
             return
         }
-        val inc = Incoming(id, metas, total)
+        val inc = Incoming(id, metas, total, m.optBoolean("clip", false)) // 5.1: a clipboard transfer
         incoming[id] = inc
         TransferLocks.acquire(ctx)
         s.send(Protocol.msg("xfer_accept").put("id", id).put("window", Protocol.RECV_WINDOW))
         Thread(inc, "airbridge-xfer-write-$id").apply { isDaemon = true }.start()
     }
 
-    private inner class Incoming(val id: Int, val files: List<Meta>, val total: Long) : Runnable {
+    private inner class Incoming(val id: Int, val files: List<Meta>, val total: Long, val clip: Boolean = false) : Runnable {
         // Bounded by bytes, never blocking the network reader: acks are sent after writing, so a sender
         // that respects the window can never have more than RECV_WINDOW bytes queued here.
         private val queue = LinkedBlockingQueue<Any>()
@@ -384,7 +405,11 @@ class FileTransfer(private val s: Session) {
         private var lastAck = 0L
         private var target: Saver.Target? = null
         // Names already in the destination folder, read once per transfer (not once per file) and kept current.
-        private val taken: MutableSet<String> by lazy { Saver.existingNames(ctx).toMutableSet() }
+        private val taken: MutableSet<String> by lazy { if (clip) mutableSetOf() else Saver.existingNames(ctx).toMutableSet() }
+        /** A clipboard transfer keeps its files in the cache folder and puts them on the clipboard when it is done. */
+        private val clipItems = ArrayList<Pair<Uri, String?>>()
+        private fun createTarget(f: Meta): Saver.Target =
+            if (clip) ClipStore.create(ctx.cacheDir, "in-$id-$started", f.name, taken) else Saver.create(ctx, f.name, f.mime, taken)
         private val saved = ArrayList<String>()
         private val savedFiles = ArrayList<ReceivedFiles.Item>()
         private val started = System.currentTimeMillis()
@@ -455,8 +480,10 @@ class FileTransfer(private val s: Session) {
                         null, "error" -> ConnectionHub.app.getString(com.shazan.airbridge.R.string.xfer_failed)
                         else -> ConnectionHub.app.getString(com.shazan.airbridge.R.string.xf_cancelled_by, peerName)
                     }
-                    ConnectionHub.putTransfer(TransferUi(key, true, peerName, files.getOrNull(cur)?.name ?: "", saved.size, files.size, written, total, 0, result = text))
-                    resultNotification(notifId, ConnectionHub.app.getString(com.shazan.airbridge.R.string.xf_in_failed, peerName), text, null)
+                    if (!clip) {
+                        ConnectionHub.putTransfer(TransferUi(key, true, peerName, files.getOrNull(cur)?.name ?: "", saved.size, files.size, written, total, 0, result = text))
+                        resultNotification(notifId, ConnectionHub.app.getString(com.shazan.airbridge.R.string.xf_in_failed, peerName), text, null)
+                    }
                 }
                 incoming.remove(id)
                 TransferLocks.release()
@@ -465,7 +492,7 @@ class FileTransfer(private val s: Session) {
 
         private fun write(c: Protocol.Chunk) {
             val f = files[cur]
-            val t = target ?: Saver.create(ctx, f.name, f.mime, taken).also { target = it }
+            val t = target ?: createTarget(f).also { target = it }
             t.out.write(c.data, c.dataOff, c.len)
             curWritten += c.len
             written += c.len
@@ -480,8 +507,13 @@ class FileTransfer(private val s: Session) {
         private fun finishFile() {
             val t = target ?: return
             t.out.close()
-            saved.add(Saver.publish(ctx, t))
-            Saver.shareUri(ctx, t)?.let { savedFiles.add(ReceivedFiles.Item(it, Saver.mimeFor(t.name, null))) }
+            if (clip) {
+                saved.add(t.name)
+                Saver.shareUri(ctx, t)?.let { clipItems.add(it to Saver.mimeFor(t.name, files[cur].mime)) }
+            } else {
+                saved.add(Saver.publish(ctx, t))
+                Saver.shareUri(ctx, t)?.let { savedFiles.add(ReceivedFiles.Item(it, Saver.mimeFor(t.name, null))) }
+            }
             target = null
             cur++
             curWritten = 0
@@ -490,7 +522,7 @@ class FileTransfer(private val s: Session) {
         /** Zero-size files have no chunks (§6.2): create them as soon as they are next. */
         private fun advanceZeroSize() {
             while (cur < files.size && files[cur].size == 0L) {
-                target = Saver.create(ctx, files[cur].name, files[cur].mime, taken)
+                target = createTarget(files[cur])
                 finishFile()
             }
         }
@@ -501,6 +533,7 @@ class FileTransfer(private val s: Session) {
         }
 
         private fun ui(force: Boolean = false) {
+            if (clip) return // quiet
             val now = System.currentTimeMillis()
             if (!force && now - lastUi < UI_INTERVAL_MS) return
             lastUi = now
@@ -512,6 +545,11 @@ class FileTransfer(private val s: Session) {
 
         private fun finishAll() {
             s.send(Protocol.msg("xfer_complete").put("id", id).put("ok", true).put("saved", JSONArray(saved)))
+            if (clip) {
+                ClipStore.purgeOld(ctx.cacheDir)
+                ClipboardSync.setMedia(clipItems.toList())
+                return
+            }
             val label = if (saved.size == 1) saved[0] else ConnectionHub.app.resources.getQuantityString(com.shazan.airbridge.R.plurals.sh_files, saved.size, saved.size)
             val received = ReceivedFiles(savedFiles.toList()).takeIf { it.items.isNotEmpty() }
             ConnectionHub.putTransfer(TransferUi(key, true, peerName, label, saved.size, files.size, total, total, 0,

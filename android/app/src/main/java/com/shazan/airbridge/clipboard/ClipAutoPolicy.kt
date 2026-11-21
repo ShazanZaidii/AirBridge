@@ -10,7 +10,7 @@ data class ClipMeta(
     val sensitive: Boolean = false,
     /** `ClipDescription.EXTRA_IS_REMOTE_DEVICE`: the clip came from another device (system cross-device sync). */
     val remoteDevice: Boolean = false,
-    /** A list of file/content URIs, not text. */
+    /** A list of file/content URIs (a file or an image), not text. */
     val fileList: Boolean = false,
     /** Set by AirBridge itself ([ClipboardSync.onRemote] labels its clips). */
     val ownClip: Boolean = false,
@@ -107,6 +107,26 @@ class ClipAutoPolicy(
         return check(meta, textHash, sizeBytes, maxBytes)?.let { Decision.Skipped(it) } ?: Decision.Send
     }
 
+    /**
+     * The clipboard was read (with focus) and holds an image or files instead of text; [mediaHash] identifies it
+     * (docs/protocol.md 5.1). Ends the in-flight read. Returns [Decision.Send] or why not.
+     */
+    fun onReadMedia(meta: ClipMeta?, mediaHash: String): Decision {
+        inFlight = false
+        pending = false
+        return checkMedia(meta, mediaHash)?.let { Decision.Skipped(it) } ?: Decision.Send
+    }
+
+    /** Whether an automatically read image or file list may be sent (no state change). Null = send. */
+    fun checkMedia(meta: ClipMeta?, mediaHash: String): Skip? {
+        metaSkip(meta)?.let { return it }
+        return when (mediaHash) {
+            lastRemoteHash -> Skip.ECHO
+            lastSentHash -> Skip.UNCHANGED
+            else -> null
+        }
+    }
+
     /** Whether automatically read content may be sent (no state change). Null = send. */
     fun check(meta: ClipMeta?, textHash: String?, sizeBytes: Int, maxBytes: Int): Skip? {
         metaSkip(meta)?.let { return it }
@@ -156,7 +176,6 @@ class ClipAutoPolicy(
         meta.ownClip -> Skip.OWN_CLIP
         meta.sensitive -> Skip.SENSITIVE
         meta.remoteDevice -> Skip.REMOTE_DEVICE
-        meta.fileList -> Skip.FILES
         else -> null
     }
 }
