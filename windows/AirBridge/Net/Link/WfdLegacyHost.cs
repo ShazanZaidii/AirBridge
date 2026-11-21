@@ -16,7 +16,7 @@ namespace AirBridge.Net.Link
     /// Windows hosts a Wi-Fi Direct <b>legacy</b> group owner (topology T1, PROTOCOL §10.1 <c>wfd_legacy</c>): the phone joins it
     /// as an ordinary Wi-Fi client with the SSID/passphrase derived from the pairing key.
     ///
-    /// Robustness rules from the design notes §1.2 (all implemented here):
+    /// Robustness rules:
     /// - one NEW <see cref="WiFiDirectAdvertisementPublisher"/> (and listener) per attempt: a publisher can't be restarted;
     /// - <c>Started</c> must arrive within 5 s; one retry with a fresh publisher after 1 s (timeout, Aborted(Success), Start() throwing);
     ///   Aborted(RadioNotAvailable) → <c>radio_off</c>, Aborted(ResourceInUse) → <c>hotspot_active</c> (no retry);

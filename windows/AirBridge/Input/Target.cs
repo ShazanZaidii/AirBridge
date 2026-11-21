@@ -15,7 +15,7 @@ namespace AirBridge.Input
     /// rel). Input from a peer while nobody holds it takes an implicit lease that expires after 1500 ms without
     /// input. Input from a non-holder is dropped and answered with ctl_busy at most once per 2 s per peer.
     /// key_state is never subject to the lease. mirror_start is answered with mirror_stop (no mirror source on
-    /// Windows yet, see the design notes).
+    /// Windows yet).
     ///
     /// No loops (§8.6): while this PC drives peer P (<see cref="ControlGate.Controlling"/>), a ctl_enter from P is
     /// answered with ctl_leave reason "loop" and P's input with ctl_busy (holder = this PC), at most once per 2 s.
