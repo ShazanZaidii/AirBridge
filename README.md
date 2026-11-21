@@ -5,11 +5,16 @@
 | On Apple devices | With AirBridge |
 |---|---|
 | AirDrop | Send files between Android, Mac and Windows |
-| Universal Clipboard | One clipboard across all of them |
+| Universal Clipboard | One clipboard across all of them: text, pictures and files |
 | Universal Control | One keyboard and mouse for all of them |
 | iPhone Mirroring | Your phone's screen on your Mac, and your computer's screen on your phone |
 | Calls and notifications on the Mac | Your phone's calls and notifications on your Mac or PC |
 | Devices in the Batteries widget | Your phone's and PC's battery in the Mac's Notification Center |
+| - | **Control anything from anything.** Your Mac or PC keyboard and mouse can drive another computer or an Android phone, and your phone doubles as a trackpad and keyboard for any computer |
+| - | **AirWeb: share with anyone, even with no app.** Show a QR code and anyone with a browser can drop files into one shared pool. No install, no account |
+| - | **Mix any devices on one layout.** A Mac, a PC and a phone side by side, in whatever order you like |
+| - | **Drag files across screens.** Pick up files on your Mac or PC and carry them over the edge onto another computer or your Android phone |
+| - | **No Apple ID. No iCloud. No sign-in.** Everything stays on your own network |
 
 AirBridge is an independent project and is not affiliated with Apple. The Apple names above are used only to say what each feature is like.
 
@@ -25,9 +30,9 @@ AirBridge is an independent project and is not affiliated with Apple. The Apple 
 
 ## What it does
 
-**Clipboard.** Copy text on one device and paste it on another. Between computers it is automatic. Android only lets an app read the clipboard while it is in front, so on the phone AirBridge sends your copy when it can, and gives you a quick settings tile and a floating bubble for the times it can't. Only text for now (up to 512 KiB), and you can set filters for things that should never be sent.
+**Clipboard.** Copy text, a picture or files on one device and paste them on another. Between computers it is automatic. Android only lets an app read the clipboard while it is in front, so on the phone AirBridge sends your copy when it can, and gives you a quick settings tile and a floating bubble for the times it can't. Text can be up to 512 KiB, a picture up to 25 MB, and files up to 20 at a time and 100 MB in total. Folders go through the normal file transfer instead. You can set filters for text that should never be sent.
 
-**Files.** Send one file or a hundred to a paired device. Big files are streamed in pieces instead of being loaded into memory. With a mouse you can also drag files across the edge of your screen onto another device.
+**Files.** Send one file or a hundred to a paired device, whatever their size. Big files are streamed in pieces instead of being loaded into memory. With a mouse you can also drag files across the edge of your screen onto another device.
 
 **One keyboard and mouse for all of them.** Push the cursor off the edge of your Mac or PC and it carries on, on your other computer or on your Android phone. It is the same idea as Apple's Universal Control, across Mac, Windows and Android. You arrange the screens in the Displays window. Only one device is in control at a time, and control loops are refused.
 
@@ -68,10 +73,13 @@ To connect two devices, put them on the same Wi-Fi and open AirBridge on both. T
 AirBridge does what AirDrop does between Android, macOS and Windows, over your local network, and goes further: it also shares the clipboard, shares one keyboard and mouse, shows your phone's calls and mirrors screens.
 
 **How do I copy on my Android phone and paste on my Mac?**
-Install AirBridge on both, pair them once, and copy as usual. The Mac receives the text. On Android the system limits background clipboard access, so if a copy doesn't arrive on its own, tap the floating bubble or the quick settings tile.
+Install AirBridge on both, pair them once, and copy as usual. The Mac receives the text, picture or files. On Android the system limits background clipboard access, so if a copy doesn't arrive on its own, tap the floating bubble or the quick settings tile.
+
+**Can I copy a picture or a file on one device and paste it on another?**
+Yes, between Android, Mac and Windows. A copied picture arrives as a picture you can paste into any app, and copied files arrive as files you can paste into a folder or a chat. The limits are 25 MB for a picture and 100 MB or 20 files for files. Bigger things go through the normal file transfer.
 
 **Can I use my Mac's keyboard and mouse on my Android phone, or on a Windows PC?**
-Yes. Move the cursor past the edge of your Mac screen and it continues on the other device. You can also go the other way and use the phone as a trackpad and keyboard for your computer.
+Yes. Move the cursor past the edge of your Mac screen and it continues on the other device, and the same works from a Windows PC. You can also go the other way and use the phone as a trackpad and keyboard for any computer.
 
 **Can I get my phone's calls and notifications on my Mac or Windows PC?**
 Yes, once you turn it on in the Android app. You can reply to messages and answer, decline or end calls from the computer.
