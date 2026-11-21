@@ -12,7 +12,7 @@ namespace AirBridge.Net
     public static class Protocol
     {
         public const int Version = 2;
-        public const string AppVersion = "2.0.0";
+        public const string AppVersion = "3.0.0";
         public const string Platform = "windows";
         public const string ServiceType = "_airbridge._tcp";
         public const string Path = "/v2";
