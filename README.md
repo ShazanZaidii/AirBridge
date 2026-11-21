@@ -7,7 +7,7 @@ AirBridge is a cross platform tool that allows you to:
 - Control your mac from Android or Android from Mac 
 
 
-Also, NO DATA IS COLLECTED. The android source code is opensource and you are free to inspect. There is literally no server/ DB connected. 
+Also, NO DATA IS COLLECTED. The source code is completely opensource and you are free to inspect. There is literally no server/ DB connected. 
 
 
 The Windows version is here now, in the `windows/` folder. It sat on my drive in a different city for a while, which is why it took so long. The build will show up in the releases tab once I publish it :) 
