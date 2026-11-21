@@ -10,7 +10,7 @@ AirBridge is a cross platform tool that allows you to:
 Also, NO DATA IS COLLECTED. The android source code is opensource and you are free to inspect. There is literally no server/ DB connected. 
 
 
-I had already built the Windows version but it is currently sitting in a different city on my local drive. So please wait for it.. :) 
+The Windows version is here now, in the `windows/` folder. It sat on my drive in a different city for a while, which is why it took so long. The build will show up in the releases tab once I publish it :) 
 
 Also yes, the Linux support is coming soon. But i cant promise about the iOS support as the app needs several "Trust me bro" permissions.. haha, such as - Accessibility to control device remotely, Clipboard access to actually share clipboard data, Draw over other apps and all. But yeah i will give it a shot.
 
