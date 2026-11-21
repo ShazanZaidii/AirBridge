@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 	<!-- Self-check for the pure link logic (credential derivation, link_* messages, log format).
 	     Runs on any OS: dotnet run (project AirBridge.LinkTests) (exit code 0 = all passed).
-	     Optional argument: path to the Android repo's docs/test-vectors/wfd-creds.json to cross-check. -->
+	     Optional argument: path to docs/test-vectors/wfd-creds.json to cross-check. -->
 	<PropertyGroup>
 		<OutputType>Exe</OutputType>
 		<TargetFramework>net8.0</TargetFramework>

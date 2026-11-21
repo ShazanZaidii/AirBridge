@@ -3,7 +3,7 @@
 AirWeb lets a phone or computer **without AirBridge** swap files through a device that has it, from a browser. The
 host (an Android phone, a Mac or a Windows PC) serves a small web page on its Wi-Fi (or hotspot) address and shows a QR
 code of the link. Everyone who opens the link joins **one shared pool**. All three hosts serve the same page
-(`airweb.html`, byte-identical in the three repos) and speak the same HTTP interface below.
+(`airweb.html`, byte-identical in the three apps) and speak the same HTTP interface below.
 
 ## One session, always on until stopped
 

@@ -17,3 +17,12 @@ Also yes, the Linux support is coming soon. But i cant promise about the iOS sup
 The android and macOS release can be found in the releases tab.
 
 And if you are asking for a tutorial, please try to discover the app yourself. 😤 (I will attach once i have the windows and linux release with me..) 
+
+
+## What is in this repo
+
+- `android/` the Android app
+- `macOS/` the Mac app
+- `windows/` the Windows app
+- `linux/` and `iOS/` not started yet
+- `docs/` the protocol every app speaks, the AirWeb page description and the shared test files

@@ -161,7 +161,7 @@ do {
 // MARK: wire (docs/test-vectors/call-experience.jsonl, built by the Android app)
 
 do {
-    let lines = (try? String(contentsOfFile: "docs/test-vectors/call-experience.jsonl", encoding: .utf8))?
+    let lines = (try? String(contentsOfFile: "../docs/test-vectors/call-experience.jsonl", encoding: .utf8))?
         .split(separator: "\n").map(String.init) ?? []
     check(lines.count == 8, "vector file found (\(lines.count) lines)")
     if lines.count == 8 {
