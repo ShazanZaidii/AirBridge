@@ -105,8 +105,15 @@ class FileTransfer(private val s: Session) {
 
     /** User pressed Cancel on a notification. */
     fun cancelLocal(id: Int, isIncoming: Boolean) {
-        if (isIncoming) incoming[id]?.cancel("user", tellPeer = true)
+        // Say so at once, on the notification and the card: the partial file is cleaned up afterwards.
+        val key = "${s.peerId}:${if (isIncoming) "in" else "out"}:$id"
+        Hub.transfers.value[key]?.let { Hub.putTransfer(it.copy(cancelling = true)) }
+        if (isIncoming) incoming[id]?.let { inc ->
+            TransferNotifs.cancelling(ctx, inc.notifId, true, peerName)
+            inc.cancel("user", tellPeer = true)
+        }
         else outgoing[id]?.let { o ->
+            TransferNotifs.cancelling(ctx, o.notifId, false, peerName)
             o.update { cancelled = "user" }
             s.send(cancelMsg(id, "out", "user"))
         }
@@ -115,10 +122,15 @@ class FileTransfer(private val s: Session) {
     private fun cancelMsg(id: Int, dir: String, reason: String) =
         Protocol.withReason("xfer_cancel", reason).put("id", id).put("dir", dir)
 
-    private fun cancelAction(id: Int, isIncoming: Boolean): NotificationCompat.Action {
-        val i = Intent(ctx, AirBridgeService::class.java).setAction(AirBridgeService.ACTION_CANCEL_XFER)
-            .putExtra("peer", s.peerId).putExtra("id", id).putExtra("incoming", isIncoming)
-        val pi = PendingIntent.getService(ctx, id * 2 + (if (isIncoming) 1 else 0) + (s.peerId.hashCode() and 0xFFFF) * 4096, i,
+    /** "Cancel" on the notification opens a small "Are you sure?" first (see [com.shazan.airbridge.TransferCancelActivity]). */
+    private fun cancelAction(id: Int, isIncoming: Boolean, file: String): NotificationCompat.Action {
+        val i = Intent(ctx, com.shazan.airbridge.TransferCancelActivity::class.java)
+            .putExtra(com.shazan.airbridge.TransferCancelActivity.EXTRA_PEER, s.peerId)
+            .putExtra(com.shazan.airbridge.TransferCancelActivity.EXTRA_ID, id)
+            .putExtra(com.shazan.airbridge.TransferCancelActivity.EXTRA_INCOMING, isIncoming)
+            .putExtra(com.shazan.airbridge.TransferCancelActivity.EXTRA_FILE, file)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        val pi = PendingIntent.getActivity(ctx, id * 2 + (if (isIncoming) 1 else 0) + (s.peerId.hashCode() and 0xFFFF) * 4096, i,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         return NotificationCompat.Action(0, Hub.app.getString(com.shazan.airbridge.R.string.cancel), pi)
     }
@@ -170,6 +182,7 @@ class FileTransfer(private val s: Session) {
         var lastProgressAt = System.currentTimeMillis()
         var complete: JSONObject? = null
         var cancelled: String? = null
+        var notifId = 0
         fun update(block: Outgoing.() -> Unit) = synchronized(lock) { block(); lock.notifyAll() }
     }
 
@@ -177,7 +190,7 @@ class FileTransfer(private val s: Session) {
         val notifId = notifIds.incrementAndGet()
         val id = nextId.getAndIncrement()
         val key = "${s.peerId}:out:$id"
-        val o = Outgoing(id)
+        val o = Outgoing(id).also { it.notifId = notifId }
         outgoing[id] = o
         TransferLocks.acquire(ctx)
         try {
@@ -196,7 +209,7 @@ class FileTransfer(private val s: Session) {
                 val acked = synchronized(o.lock) { o.acked }
                 val bps = if (now > started) acked * 1000 / (now - started) else 0
                 Hub.putTransfer(TransferUi(key, false, peerName, name, filesDone, srcs.size, acked, total, bps))
-                progressNotification(notifId, false, name, filesDone, srcs.size, acked, total, bps, cancelAction(id, false))
+                progressNotification(notifId, false, name, filesDone, srcs.size, acked, total, bps, cancelAction(id, false, name))
             }
             ui(0, srcs.firstOrNull()?.name ?: "", force = true)
 
@@ -355,7 +368,7 @@ class FileTransfer(private val s: Session) {
         private val queuedBytes = AtomicLong()
         @Volatile var cancelled: String? = null
         private val key = "${s.peerId}:in:$id"
-        private val notifId = notifIds.incrementAndGet()
+        val notifId = notifIds.incrementAndGet()
         // reader-thread validation state
         private var rxIndex = 0
         private var rxOffset = 0L
@@ -489,7 +502,7 @@ class FileTransfer(private val s: Session) {
             val bps = if (now > started) written * 1000 / (now - started) else 0
             val name = files.getOrNull(cur)?.name ?: ""
             Hub.putTransfer(TransferUi(key, true, peerName, name, saved.size, files.size, written, total, bps))
-            progressNotification(notifId, true, name, saved.size, files.size, written, total, bps, cancelAction(id, true))
+            progressNotification(notifId, true, name, saved.size, files.size, written, total, bps, cancelAction(id, true, name))
         }
 
         private fun finishAll() {

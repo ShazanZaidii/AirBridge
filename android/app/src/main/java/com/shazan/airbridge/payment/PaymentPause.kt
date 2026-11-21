@@ -3,44 +3,65 @@ package com.shazan.airbridge.payment
 import android.Manifest
 import android.app.AppOpsManager
 import android.app.PendingIntent
-import android.content.Context
-import android.content.Intent
-import android.content.pm.PackageManager
-import android.os.Build
-import android.os.PowerManager
-import android.os.Process
-import android.provider.Settings
 import android.app.usage.UsageEvents
 import android.app.usage.UsageStatsManager
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.content.pm.PackageManager
+import android.database.ContentObserver
+import android.os.Build
+import android.os.Handler
+import android.os.Looper
+import android.os.PowerManager
+import android.os.Process
+import android.os.SystemClock
+import android.provider.Settings
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import com.shazan.airbridge.AirBridgeInputService
 import com.shazan.airbridge.AirBridgeService
 import com.shazan.airbridge.AirBridgeTextService
 import com.shazan.airbridge.R
+import com.shazan.airbridge.net.Hub
 import com.shazan.airbridge.net.Notifs
+import com.shazan.airbridge.net.PeerStatus
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlin.coroutines.resume
 
 /**
  * UPI apps (Paytm shows "Suspicious App Detected: remove the app or disable its Accessibility permission")
  * refuse to pay while any accessibility service from outside the Play Store is on, and they look again before
- * every payment. AirBridge cannot make its two services invisible, but it can make sure they are off exactly
- * while such an app is in front, and on again right after.
+ * every payment. AirBridge cannot make its two services invisible, but it can make sure they are off whenever
+ * they are not needed:
  *
- *  - Which app is in front comes from usage stats (Settings → Usage access), not from accessibility, because
- *    the services are the thing being switched off.
+ *  1. **While a UPI app is in front** (and on again right after). Which app is in front comes from usage stats
+ *     (Settings → Usage access), not from accessibility, because the services are the thing being switched off.
+ *  2. **While no device has been connected for a minute** (and on again the moment one connects). Nothing can
+ *     control this phone or type into it without a device, so the services are not needed, and the watcher sleeps:
+ *     no polling, no timers, only a wake-up when a connection changes. Finding, pairing and reconnecting devices
+ *     don't use the services and are untouched.
+ *
  *  - Switching: with WRITE_SECURE_SETTINGS (`adb shell pm grant … android.permission.WRITE_SECURE_SETTINGS`, one
  *    time) the entries of our two services are taken out of `enabled_accessibility_services` and put back after,
- *    nothing else in that list is touched. Without it the services turn themselves off with `disableSelf()` and
- *    a notification asks the user to turn them back on (Android gives an app no way to do that itself).
+ *    nothing else in that list is touched. Without it the services turn themselves off with `disableSelf()` for a
+ *    payment app and a notification asks the user to turn them back on (Android gives an app no way to do that
+ *    itself); the no-device switch-off needs the permission and is skipped without it.
  *  - What was taken out is stored on disk first, so a kill, crash or reboot in between is repaired at the next start.
  *
  * Off the table on purpose: hiding the services from the app or pretending to be installed from Google Play.
@@ -50,34 +71,57 @@ object PaymentPause {
     private const val TAG = "AirBridgePayPause"
     const val PREF_ENABLED = "PAYMENT_PAUSE"
     private const val PREF_REMOVED = "PAYMENT_PAUSE_REMOVED"
+    private const val PREF_REASON = "PAYMENT_PAUSE_REASON"
+    /** Wall-clock time a device was last seen connected: a restarted watcher counts the minute from then, not from its own start. */
+    private const val PREF_LAST_CONNECTED = "PAYMENT_PAUSE_LAST_CONNECTED"
+    private const val REASON_PAYMENT = "payment"
+    private const val REASON_IDLE = "idle"
     private const val PREFS = "AirBridgePrefs"
     private const val NOTIF_ID = 4732
 
     /** Back on this long after the payment app left, so moving between its screens doesn't flap the services. */
     private const val GRACE_MS = 1500L
 
-    /** How far back the first look goes, to know which app is already in front. */
     /** Usage events can become visible a moment after they happened, so each look re-reads a little of the last one. */
     private const val OVERLAP_MS = 10_000L
 
+    /** How far back the first look goes, to know which app is already in front. */
     private const val LOOKBACK_MS = 10 * 60_000L
 
-    data class State(val paused: Boolean = false, val app: String? = null)
+    /** No device connected for this long: the accessibility services go off. */
+    const val IDLE_MS = 60_000L
+
+    /** After a (re)start the watcher still waits this long for devices to reconnect by themselves before switching off. */
+    private const val START_GRACE_MS = 15_000L
+
+    /**
+     * [paused]: off because a payment app is in front. [idleOff]: off because no device is connected.
+     * Either way it is AirBridge that switched them off, not the user.
+     */
+    data class State(val paused: Boolean = false, val app: String? = null, val idleOff: Boolean = false) {
+        val ownOff: Boolean get() = paused || idleOff
+    }
 
     private val _state = MutableStateFlow(State())
     val state: StateFlow<State> = _state
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    @Volatile private var job: Job? = null
+    private val lock = Any()
+    @Volatile private var supervisor: Job? = null
+    @Volatile private var pollJob: Job? = null
     @Volatile private var fallbackNotify = false
-    @Volatile private var seen = 0
-    @Volatile private var lastEvent = ""
+
+    /** Something the coordinator reacts to changed (connection, services list, the switch). */
+    private val wake = Channel<Unit>(Channel.CONFLATED)
+    /** The services list changed: the poll loop may have something to do again. */
+    private val pollWake = Channel<Unit>(Channel.CONFLATED)
 
     fun isEnabled(ctx: Context): Boolean = prefs(ctx).getBoolean(PREF_ENABLED, true)
 
     fun setEnabled(ctx: Context, on: Boolean) {
         prefs(ctx).edit().putBoolean(PREF_ENABLED, on).apply()
-        if (on) ensureRunning(ctx)
+        ensureRunning(ctx)
+        wake.trySend(Unit)
     }
 
     fun hasUsageAccess(ctx: Context): Boolean = try {
@@ -91,18 +135,103 @@ object PaymentPause {
     fun canSwitchSecurely(ctx: Context): Boolean =
         ctx.checkSelfPermission(Manifest.permission.WRITE_SECURE_SETTINGS) == PackageManager.PERMISSION_GRANTED
 
-    /** Start the watcher (idempotent) and repair a pause that a kill or reboot left behind. */
+    private fun connected(): Boolean = Hub.status.value.values.any { it == PeerStatus.CONNECTED }
+
+    /** Start the watcher (idempotent) and repair a switch-off that a kill or reboot left behind. */
     fun ensureRunning(ctx: Context) {
         val app = ctx.applicationContext
-        if (job?.isActive == true) return
-        synchronized(this) {
-            if (job?.isActive == true) return
-            if (leftover(app).isNotEmpty()) _state.value = State(paused = true)
-            job = scope.launch { try { loop(app) } catch (t: Throwable) { Log.w(TAG, "watcher ended", t) } }
+        if (supervisor?.isActive == true) return
+        synchronized(lock) {
+            if (supervisor?.isActive == true) return
+            if (leftover(app).isNotEmpty()) {
+                _state.value = if (prefs(app).getString(PREF_REASON, null) == REASON_IDLE) State(idleOff = true) else State(paused = true)
+            }
+            supervisor = scope.launch {
+                while (isActive) {
+                    try { coordinate(app) }
+                    catch (e: CancellationException) { throw e }
+                    catch (t: Throwable) { Log.w(TAG, "watcher restarting", t); delay(5_000) }
+                }
+            }
         }
     }
 
-    private suspend fun loop(ctx: Context) {
+    // ------------------------------------------------------------------ coordinator: events only, no polling
+
+    private suspend fun coordinate(ctx: Context) = coroutineScope {
+        val obs = object : ContentObserver(Handler(Looper.getMainLooper())) {
+            override fun onChange(selfChange: Boolean) { wake.trySend(Unit); pollWake.trySend(Unit) }
+        }
+        ctx.contentResolver.registerContentObserver(Settings.Secure.getUriFor(Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES), false, obs)
+        val watch = launch { Hub.status.collect { wake.trySend(Unit) } }
+        try {
+            var noDeviceSince = 0L
+            // If the process was killed and restarted while no device was around, the minute has partly run already.
+            var carriedAge = (System.currentTimeMillis() - prefs(ctx).getLong(PREF_LAST_CONNECTED, 0L)).coerceIn(0L, IDLE_MS)
+            if (prefs(ctx).getLong(PREF_LAST_CONNECTED, 0L) == 0L) carriedAge = 0L
+            var wasConnected = connected()
+            if (wasConnected) prefs(ctx).edit().putLong(PREF_LAST_CONNECTED, System.currentTimeMillis()).apply()
+            while (isActive) {
+                val now = SystemClock.elapsedRealtime()
+                val isConn = connected()
+                if (isConn != wasConnected) {
+                    // The moment a device went away (or came): what a restarted watcher counts from.
+                    prefs(ctx).edit().putLong(PREF_LAST_CONNECTED, System.currentTimeMillis()).apply()
+                    wasConnected = isConn
+                    carriedAge = 0L
+                }
+                val st = _state.value
+                val plan = IdleLogic.decide(
+                    enabled = isEnabled(ctx), connected = connected(), paused = st.paused, idleOff = st.idleOff,
+                    hasEntries = ourEntries(ctx).isNotEmpty(), noDeviceForMs = if (noDeviceSince == 0L) 0L else now - noDeviceSince,
+                )
+                when (plan) {
+                    IdleLogic.Plan.Disabled -> { noDeviceSince = 0; stopPoll(); if (st.ownOff) restoreEntries(ctx); wake.receive() }
+                    IdleLogic.Plan.Active -> {
+                        noDeviceSince = 0
+                        if (st.idleOff && !restoreEntries(ctx)) { withTimeoutOrNull(5_000) { wake.receive() }; continue }
+                        armPoll(ctx)
+                        wake.receive()
+                    }
+                    IdleLogic.Plan.AdoptManual -> { noDeviceSince = 0; adoptManual(ctx) }
+                    IdleLogic.Plan.Sleep -> { noDeviceSince = 0; wake.receive() }
+                    IdleLogic.Plan.Wait -> {
+                        if (noDeviceSince == 0L) noDeviceSince = now - minOf(carriedAge, IDLE_MS - START_GRACE_MS)
+                        val left = IDLE_MS - (now - noDeviceSince)
+                        if (left > 0) withTimeoutOrNull(left) { wake.receive() }
+                    }
+                    IdleLogic.Plan.GoIdle -> {
+                        noDeviceSince = 0; carriedAge = 0L
+                        if (!enterIdleOff(ctx)) wake.receive()
+                    }
+                }
+            }
+        } finally {
+            watch.cancel()
+            try { ctx.contentResolver.unregisterContentObserver(obs) } catch (_: Exception) {}
+        }
+    }
+
+    private fun armPoll(ctx: Context) {
+        if (pollJob?.isActive == true) return
+        synchronized(lock) {
+            if (pollJob?.isActive == true) return
+            pollJob = scope.launch {
+                while (isActive) {
+                    try { poll(ctx); return@launch }
+                    catch (e: CancellationException) { throw e }
+                    catch (t: Throwable) { Log.w(TAG, "poll restarting", t); delay(5_000) }
+                }
+            }
+        }
+    }
+
+    private fun stopPoll() { pollJob?.cancel(); pollJob = null }
+
+    // ------------------------------------------------------------------ poll: only while a device is connected
+
+    /** Watches for a payment app in front. Returns (and the job ends) when the services went off for lack of a device or the switch is off. */
+    private suspend fun poll(ctx: Context) {
         val power = ctx.getSystemService(PowerManager::class.java)
         val stats = ctx.getSystemService(UsageStatsManager::class.java)
         var fg = Front(null, null)
@@ -110,45 +239,68 @@ object PaymentPause {
         var since = System.currentTimeMillis() - LOOKBACK_MS
         var leftAt = 0L
         while (scope.isActive) {
-            val watching = isEnabled(ctx) && hasUsageAccess(ctx)
+            if (_state.value.idleOff || !isEnabled(ctx)) return
+            val watching = hasUsageAccess(ctx)
             val paused = _state.value.paused
             val ours = ourEntries(ctx).isNotEmpty()
             val t0 = System.currentTimeMillis()
-            if (t0 - beat > 15_000) {
+            if (t0 - beat > 30_000) {
                 beat = t0
-                Log.i(TAG, "watching=$watching front=${fg.pkg} ourServicesOn=$ours paused=$paused secure=${canSwitchSecurely(ctx)} serviceRunning=${AirBridgeService.isRunning} lastQueryEvents=$seen last=$lastEvent")
+                Log.i(TAG, "watching=$watching front=${fg.pkg} ourServicesOn=$ours paused=$paused secure=${canSwitchSecurely(ctx)} serviceRunning=${AirBridgeService.isRunning} connected=${connected()}")
             }
             if (!watching) {
                 if (paused) resume(ctx)
                 fg = Front(null, null); since = System.currentTimeMillis() - LOOKBACK_MS
-                delay(5_000)
+                delay(15_000)
                 continue
             }
             if (!paused && !ours) {
-                // Nothing to switch off: look again soon, and replay the last minutes when something is switched on.
+                // Nothing to switch off: sleep until the services list changes (or a minute passes).
                 fg = Front(null, null); since = System.currentTimeMillis() - LOOKBACK_MS
-                delay(3_000)
+                withTimeoutOrNull(60_000) { pollWake.receive() }
                 continue
             }
             PaymentApps.extra = prefs(ctx).getString("PAYMENT_PAUSE_EXTRA", null)?.split(',')?.map { it.trim() }?.filter { it.isNotEmpty() }?.toSet().orEmpty()
             if (power?.isInteractive == false) {
+                // Screen off: nothing can be in front. Put the services back if they were off for a payment, then sleep
+                // until the screen is on again instead of polling.
+                if (paused) resume(ctx)
                 fg = Front(null, null)
-            } else {
-                val now = System.currentTimeMillis()
-                fg = foreground(stats, since - OVERLAP_MS, now, fg)
-                since = now
+                awaitScreenOn(ctx, power)
+                since = System.currentTimeMillis() - LOOKBACK_MS
+                continue
             }
+            val now = System.currentTimeMillis()
+            fg = foreground(stats, since - OVERLAP_MS, now, fg)
+            since = now
             val pay = PaymentApps.isPayment(fg.pkg)
             if (pay) {
                 leftAt = 0
                 // Every tick, not once: at process start the services may not have connected yet, and one may bind late.
                 if (ours) pause(ctx, fg.pkg!!)
             } else if (_state.value.paused) {
-                val now = System.currentTimeMillis()
-                if (leftAt == 0L) leftAt = now
-                if (now - leftAt >= GRACE_MS) { resume(ctx); leftAt = 0 }
+                val n = System.currentTimeMillis()
+                if (leftAt == 0L) leftAt = n
+                if (n - leftAt >= GRACE_MS) { resume(ctx); leftAt = 0 }
             }
             delay(if (pay || _state.value.paused) 350 else 700)
+        }
+    }
+
+    private suspend fun awaitScreenOn(ctx: Context, power: PowerManager?) {
+        var cont: kotlinx.coroutines.CancellableContinuation<Unit>? = null
+        val r = object : BroadcastReceiver() {
+            override fun onReceive(c: Context?, i: Intent?) { cont?.let { if (it.isActive) it.resume(Unit) } }
+        }
+        ContextCompat.registerReceiver(ctx, r, IntentFilter(Intent.ACTION_SCREEN_ON), ContextCompat.RECEIVER_NOT_EXPORTED)
+        try {
+            suspendCancellableCoroutine { c ->
+                cont = c
+                // The screen may have come on between the check and the registration.
+                if (power?.isInteractive != false && c.isActive) c.resume(Unit)
+            }
+        } finally {
+            try { ctx.unregisterReceiver(r) } catch (_: Exception) {}
         }
     }
 
@@ -165,11 +317,9 @@ object PaymentPause {
         var fg = current
         try {
             val ev = stats.queryEvents(from, to)
-            seen = 0
             val e = UsageEvents.Event()
             while (ev.hasNextEvent()) {
                 ev.getNextEvent(e)
-                seen++; lastEvent = "${e.eventType} ${e.packageName}/${e.className?.substringAfterLast('.')}"
                 when (e.eventType) {
                     1 /* ACTIVITY_RESUMED / MOVE_TO_FOREGROUND */ -> fg = Front(e.packageName, e.className)
                     2 /* ACTIVITY_PAUSED / MOVE_TO_BACKGROUND */ -> if (e.packageName == fg.pkg && e.className == fg.cls) fg = Front(null, null)
@@ -179,39 +329,55 @@ object PaymentPause {
         return fg
     }
 
+    // ------------------------------------------------------------------ switching
+
     private fun ourEntries(ctx: Context): List<String> =
         EnabledServices.ours(Settings.Secure.getString(ctx.contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES), ctx.packageName)
 
     private fun leftover(ctx: Context): List<String> = EnabledServices.split(prefs(ctx).getString(PREF_REMOVED, null))
 
-    private fun pause(ctx: Context, app: String) {
+    /** A payment app is in front: services off. */
+    private fun pause(ctx: Context, app: String) = synchronized(lock) {
         val cr = ctx.contentResolver
         val cur = Settings.Secure.getString(cr, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES)
         val (next, removed) = EnabledServices.remove(cur, ctx.packageName)
-        if (removed.isEmpty()) return
+        if (removed.isEmpty()) return@synchronized
         // Switching our own entries only works while something keeps this process alive to switch them back.
         if (canSwitchSecurely(ctx) && AirBridgeService.isRunning) {
             // On disk first: if we die between the two steps the next start still knows what to put back.
             val all = (leftover(ctx) + removed).distinct()
-            prefs(ctx).edit().putString(PREF_REMOVED, all.joinToString(":")).commit()
+            prefs(ctx).edit().putString(PREF_REMOVED, all.joinToString(":")).putString(PREF_REASON, REASON_PAYMENT).commit()
             val ok = try { Settings.Secure.putString(cr, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, next) } catch (_: Exception) { false }
             if (ok) {
                 Log.i(TAG, "paused ${removed.size} service(s) for $app")
                 _state.value = State(paused = true, app = app)
-                return
+                return@synchronized
             }
-            if (leftover(ctx).isEmpty() || all == removed) prefs(ctx).edit().remove(PREF_REMOVED).apply()
+            if (leftover(ctx).isEmpty() || all == removed) prefs(ctx).edit().remove(PREF_REMOVED).remove(PREF_REASON).apply()
         }
         // No way back by ourselves: turn them off, and tell the user how to turn them on once the payment is done.
         val a = AirBridgeInputService.turnOff()
         val b = AirBridgeTextService.turnOff()
-        if (!a && !b) return // not connected yet (process just started): try again on the next tick
+        if (!a && !b) return@synchronized // not connected yet (process just started): try again on the next tick
         Log.i(TAG, "switched off for $app (user turns back on)")
         fallbackNotify = true
         _state.value = State(paused = true, app = app)
     }
 
-    private fun resume(ctx: Context) {
+    /** The payment app left. Back on, unless no device is connected: then they stay off (the no-device rule). */
+    private fun resume(ctx: Context) = synchronized(lock) {
+        if (!connected() && leftover(ctx).isNotEmpty() && canSwitchSecurely(ctx)) {
+            prefs(ctx).edit().putString(PREF_REASON, REASON_IDLE).commit()
+            _state.value = State(idleOff = true)
+            Log.i(TAG, "payment app left, no device connected: services stay off")
+            return@synchronized
+        }
+        if (!restoreEntries(ctx)) return@synchronized // try again on the next tick
+        if (fallbackNotify) { fallbackNotify = false; notifyTurnBackOn(ctx) }
+    }
+
+    /** Puts our entries back (what [leftover] says) and clears the state. False if it could not and should be retried. */
+    private fun restoreEntries(ctx: Context): Boolean = synchronized(lock) {
         val cr = ctx.contentResolver
         val removed = leftover(ctx)
         if (removed.isNotEmpty()) {
@@ -221,11 +387,38 @@ object PaymentPause {
                 Settings.Secure.putString(cr, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, next) &&
                     Settings.Secure.putInt(cr, Settings.Secure.ACCESSIBILITY_ENABLED, 1)
             } catch (t: Throwable) { Log.w(TAG, "restore refused", t); false }
-            if (ok) { prefs(ctx).edit().remove(PREF_REMOVED).apply(); Log.i(TAG, "restored ${removed.size} service(s)") }
-            else if (!canSwitchSecurely(ctx)) { prefs(ctx).edit().remove(PREF_REMOVED).apply(); fallbackNotify = true }
-            else return // try again on the next tick
+            if (ok) {
+                prefs(ctx).edit().remove(PREF_REMOVED).remove(PREF_REASON).apply()
+                Log.i(TAG, "restored ${removed.size} service(s)")
+            } else if (!canSwitchSecurely(ctx)) {
+                prefs(ctx).edit().remove(PREF_REMOVED).remove(PREF_REASON).apply(); fallbackNotify = true
+            } else return@synchronized false
         }
-        if (fallbackNotify) { fallbackNotify = false; notifyTurnBackOn(ctx) }
+        _state.value = State()
+        true
+    }
+
+    /** No device for a minute: services off until one connects. False if nothing was done. */
+    private fun enterIdleOff(ctx: Context): Boolean = synchronized(lock) {
+        if (!canSwitchSecurely(ctx)) { Log.i(TAG, "no device for a minute, but switching back on needs WRITE_SECURE_SETTINGS: left as is"); return@synchronized false }
+        if (connected() || _state.value.paused) return@synchronized false
+        val cr = ctx.contentResolver
+        val cur = Settings.Secure.getString(cr, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES)
+        val (next, removed) = EnabledServices.remove(cur, ctx.packageName)
+        if (removed.isEmpty()) return@synchronized false
+        val all = (leftover(ctx) + removed).distinct()
+        prefs(ctx).edit().putString(PREF_REMOVED, all.joinToString(":")).putString(PREF_REASON, REASON_IDLE).commit()
+        val ok = try { Settings.Secure.putString(cr, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, next) } catch (_: Exception) { false }
+        if (!ok) { prefs(ctx).edit().remove(PREF_REMOVED).remove(PREF_REASON).apply(); return@synchronized false }
+        Log.i(TAG, "no device connected for a minute: ${removed.size} service(s) off until one connects")
+        _state.value = State(idleOff = true)
+        stopPoll()
+        true
+    }
+
+    /** The user switched our services on by hand while they were off for lack of a device: that is the new normal. */
+    private fun adoptManual(ctx: Context) = synchronized(lock) {
+        prefs(ctx).edit().remove(PREF_REMOVED).remove(PREF_REASON).apply()
         _state.value = State()
     }
 
@@ -246,6 +439,41 @@ object PaymentPause {
     }
 
     private fun prefs(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+}
+
+/**
+ * What the coordinator does next, from the facts. Pure and unit-tested: the watcher sleeps (no timers) except
+ * for the one-minute wait after the last device went away.
+ */
+object IdleLogic {
+    sealed class Plan {
+        /** The switch is off: put back whatever we took out. */
+        data object Disabled : Plan()
+        /** A device is connected: services on (restore if they were off for lack of one) and watch for payment apps. */
+        data object Active : Plan()
+        /** Services were off for lack of a device, and the user switched them on by hand: leave them. */
+        data object AdoptManual : Plan()
+        /** Nothing to do until something changes. */
+        data object Sleep : Plan()
+        /** No device and services on: wait out the rest of the minute (woken early by a change). */
+        data object Wait : Plan()
+        /** The minute is over with no device: switch the services off. */
+        data object GoIdle : Plan()
+    }
+
+    fun decide(
+        enabled: Boolean, connected: Boolean, paused: Boolean, idleOff: Boolean, hasEntries: Boolean, noDeviceForMs: Long,
+        idleMs: Long = PaymentPause.IDLE_MS,
+    ): Plan = when {
+        !enabled -> Plan.Disabled
+        connected -> Plan.Active
+        idleOff -> if (hasEntries) Plan.AdoptManual else Plan.Sleep
+        // A payment app is in front: its end (resume) decides, it keeps them off if there is still no device.
+        paused -> Plan.Sleep
+        !hasEntries -> Plan.Sleep
+        noDeviceForMs >= idleMs -> Plan.GoIdle
+        else -> Plan.Wait
+    }
 }
 
 /** Packages whose apps refuse to pay while an accessibility service is on. */
