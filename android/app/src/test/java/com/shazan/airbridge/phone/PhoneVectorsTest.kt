@@ -33,7 +33,7 @@ class PhoneVectorsTest {
     ).map(::json)
 
     @Test fun matchesSharedVectors() {
-        val f = listOf(File("../docs/test-vectors/phone-notifs.jsonl"), File("docs/test-vectors/phone-notifs.jsonl")).first { it.exists() }
+        val f = listOf(File("../../docs/test-vectors/phone-notifs.jsonl"), File("../docs/test-vectors/phone-notifs.jsonl"), File("docs/test-vectors/phone-notifs.jsonl")).first { it.exists() }
         val lines = f.readLines().filter { it.isNotBlank() }
         assertEquals(built.size, lines.size)
         built.zip(lines).forEach { (b, l) -> assertEquals(l, b) }
