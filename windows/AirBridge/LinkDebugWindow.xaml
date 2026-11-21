@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="AirBridge · Wi-Fi Direct debug" Width="720" Height="760" MinWidth="560" MinHeight="520"
         WindowStartupLocation="CenterScreen" Background="{StaticResource AB.Background}">
-    <!-- Hidden (Ctrl+Shift+click the tray title). Device tests S-W1 / S-W3 / S-W4 of the design notes §6.5. -->
+    <!-- Hidden (Ctrl+Shift+click the tray title). For the Wi-Fi Direct device tests. -->
     <Grid Margin="16">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>

@@ -7,7 +7,7 @@
         FontFamily="Plus Jakarta Sans, Segoe UI Variable Text, Segoe UI" TextOptions.TextFormattingMode="Display"
         MouseLeftButtonDown="Window_MouseDown">
 
-    <!-- Palette: the design tokens (dark theme). No emoji icons: vector paths only. -->
+    <!-- No emoji icons: vector paths only. -->
     <Window.Resources>
         <Color x:Key="CBackground">#0F172A</Color>
         <Color x:Key="CCard">#1B2336</Color>

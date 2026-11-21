@@ -2,7 +2,7 @@
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
                     xmlns:sys="clr-namespace:System;assembly=mscorlib">
     <!--
-        AirBridge design tokens: dark theme.
+        AirBridge design tokens.
         Everything is keyed with an "AB." prefix and there are NO implicit styles, so windows owned by the
         input half (DisplayArrangementWindow) are unaffected unless they opt in.
         Icons: Segoe Fluent Icons (Windows 11) with Segoe MDL2 Assets fallback (Windows 10). No emoji.

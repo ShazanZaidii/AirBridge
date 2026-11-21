@@ -32,7 +32,7 @@ namespace AirBridge.Net.Link
     public sealed record WifiAdapterInfo(string Description, string? DriverVersion, string? Provider, string? DriverDate);
 
     /// <summary>
-    /// Finds the WFD virtual adapter and its addresses (the design notes §4 "Addressing"). The IP appears late
+    /// Finds the WFD virtual adapter and its addresses . The IP appears late
     /// and there is no change notification, so <see cref="WaitForIpv4Async"/> polls (10 × 500 ms, as Google does). Never hard-codes
     /// 192.168.137.1.
     /// </summary>

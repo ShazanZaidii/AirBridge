@@ -824,7 +824,7 @@ Nearby's own digit confirmation.
 ### 10.1 Link upgrades (Wi-Fi Direct, Android ↔ Windows)
 
 A second, faster link between two peers that already have a ready session (LAN, or later BLE). Normative for the
-`wfd_*` types; other `type` values (`hotspot` for the Mac path) are still proposals (the design notes §4.2).
+`wfd_*` types; other `type` values (`hotspot` for the Mac path) are still proposals.
 
 New `hello` caps: `wfd_host` (this device can host a Wi-Fi Direct legacy group; Windows after at least one
 successful start), `wfd_join` (can join one; Android API ≥ 29).
