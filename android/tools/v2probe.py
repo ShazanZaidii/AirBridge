@@ -13,7 +13,7 @@ Requires: python3 >= 3.9, `websockets` (>= 10) and `cryptography`.
   python3 tools/v2probe.py client ws://192.168.1.20:47632          # confirm-mode pairing (shows digits)
   python3 tools/v2probe.py client 'airbridge://pair?v=2&id=...'    # QR-mode pairing
 
-Interactive commands (client): clip <text> | send <path> | ping | enter <edge> <rel> |
+Interactive commands (client): clip <text> | send <path> | sendclip <path> (as a clipboard transfer, §5.1) | ping | enter <edge> <rel> |
   move <dx> <dy> | scroll <dx> <dy> | btn <b> <down|up> | click <b> [n] | abs <x> <y> |
   key <hid> [text] | mkey <hid> [mods] | kd|ku <hid> [mods] | action <name> | mirror [w h fps] | mirror_stop | leave | unpair | quit
 
@@ -182,7 +182,7 @@ class Session:
     def hello(self, nonce: bytes, paired=None):
         m = {"t": "hello", "v": 2, "id": self.my_id, "name": self.name,
              "plat": "linux", "app": "probe-0.2",
-             "caps": ["clip", "xfer", "ctl_source", "ctl_target", "trackpad", "mirror_sink"],
+             "caps": ["clip", "clip_media", "xfer", "ctl_source", "ctl_target", "trackpad", "mirror_sink"],
              "nonce": b64(nonce), "pk": b64(pk_bytes(self.priv)), "screen": {"w": 1920, "h": 1080}}
         if paired is not None:
             m["paired"] = paired
@@ -451,7 +451,7 @@ class Session:
     async def send_clip(self, text: str):
         await self.send({"t": "clip", "kind": "text", "text": text, "ts": int(time.time() * 1000)})
 
-    async def send_files(self, paths):
+    async def send_files(self, paths, clip=False):
         paths = [Path(p) for p in paths if Path(p).is_file()]
         if not paths:
             log("no files")
@@ -460,7 +460,10 @@ class Session:
         files = [{"i": i, "name": p.name, "size": p.stat().st_size} for i, p in enumerate(paths)]
         total = sum(f["size"] for f in files)
         ev = self.xfer_acks.setdefault(xid, [asyncio.Event(), 0])
-        await self.send({"t": "xfer_offer", "id": xid, "files": files, "total": total})
+        offer = {"t": "xfer_offer", "id": xid, "files": files, "total": total}
+        if clip:
+            offer["clip"] = True  # protocol §5.1: put this on the clipboard instead of saving it as a download
+        await self.send(offer)
         await asyncio.wait_for(ev[0].wait(), 15)
         sent, t0 = 0, time.time()
         for i, p in enumerate(paths):
@@ -630,6 +633,9 @@ async def run_host(args):
             elif cmd == "send":
                 for s in sessions:
                     asyncio.create_task(s.send_files(rest.split()))
+            elif cmd == "sendclip":
+                for s in sessions:
+                    asyncio.create_task(s.send_files(rest.split(), clip=True))
             else:
                 for s in sessions:
                     if not await run_command(s, st, cmd, rest):
@@ -675,6 +681,8 @@ async def run_client(args):
                             await s.send_clip(rest)
                         elif cmd == "send":
                             asyncio.create_task(s.send_files(a))
+                        elif cmd == "sendclip":
+                            asyncio.create_task(s.send_files(a, clip=True))
                         elif cmd == "ping":
                             await s.send({"t": "ping", "ts": int(time.time() * 1000)})
                         elif cmd == "enter":
