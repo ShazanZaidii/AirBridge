@@ -36,6 +36,12 @@ nonisolated struct STApp: Codable, Hashable, Sendable {
     var id: String
     var name: String
     var seconds: Int
+    /// Times it was opened (came on screen), when the device counts that.
+    var opens: Int? = nil
+    /// Notifications it showed, when the device counts that.
+    var notifs: Int? = nil
+    /// Its kind ("social", "games", …, see `STCategory`), when the device knows it.
+    var cat: String? = nil
 }
 
 /// One day on one device. `day` is the device's own calendar date, "yyyy-MM-dd".
@@ -46,6 +52,12 @@ nonisolated struct STDay: Codable, Hashable, Sendable {
     var hours: [Int]?
     /// The day's apps, most used first, when the device sent them.
     var apps: [STApp]?
+    /// Unlocks ("pickups"), when the device counts them.
+    var unlocks: Int? = nil
+    /// Notifications that day, when the device counts them.
+    var notifs: Int? = nil
+    /// When the device was first used that day: seconds after midnight.
+    var first: Int? = nil
 }
 
 /// What one device reported: its identity and recent days.
@@ -246,4 +258,88 @@ nonisolated enum STFormat {
         guard abs(d) >= 300 else { return nil }
         return (d > 0 ? "+" : "−") + duration(abs(d))
     }
+}
+
+/// App kinds, the same words on every platform. The device says which when it knows (Android's app category, a Mac app's
+/// LSApplicationCategoryType); otherwise a short list of well-known apps fills in, and the rest is "other".
+nonisolated enum STCategory {
+    static let all = ["social", "entertainment", "games", "productivity", "creativity", "reading", "travel", "shopping",
+                      "health", "utilities", "other"]
+
+    static func title(_ c: String) -> String {
+        switch c {
+        case "social": "Social"
+        case "entertainment": "Entertainment"
+        case "games": "Games"
+        case "productivity": "Productivity"
+        case "creativity": "Creativity"
+        case "reading": "Information & Reading"
+        case "travel": "Travel & Maps"
+        case "shopping": "Shopping & Food"
+        case "health": "Health & Fitness"
+        case "utilities": "Utilities"
+        default: "Other"
+        }
+    }
+
+    static func symbol(_ c: String) -> String {
+        switch c {
+        case "social": "bubble.left.and.bubble.right.fill"
+        case "entertainment": "play.rectangle.fill"
+        case "games": "gamecontroller.fill"
+        case "productivity": "hammer.fill"
+        case "creativity": "paintpalette.fill"
+        case "reading": "book.fill"
+        case "travel": "map.fill"
+        case "shopping": "bag.fill"
+        case "health": "heart.fill"
+        case "utilities": "wrench.and.screwdriver.fill"
+        default: "square.grid.2x2.fill"
+        }
+    }
+
+    /// A word from a device, if it is one of ours.
+    static func valid(_ c: String?) -> String? { c.flatMap { all.contains($0) ? $0 : nil } }
+
+    /// A Mac app's LSApplicationCategoryType ("public.app-category.developer-tools").
+    static func fromApple(_ type: String?) -> String? {
+        guard let t = type?.lowercased().replacingOccurrences(of: "public.app-category.", with: "") else { return nil }
+        if t.hasSuffix("-games") || t == "games" { return "games" }
+        switch t {
+        case "social-networking": return "social"
+        case "entertainment", "music", "video": return "entertainment"
+        case "productivity", "business", "developer-tools", "education", "finance": return "productivity"
+        case "graphics-design", "photography": return "creativity"
+        case "news", "reference", "weather", "books", "magazines-and-newspapers": return "reading"
+        case "travel", "navigation": return "travel"
+        case "shopping", "food-and-drink": return "shopping"
+        case "healthcare-fitness", "medical", "sports", "lifestyle": return "health"
+        case "utilities": return "utilities"
+        default: return nil
+        }
+    }
+
+    /// Well-known apps whose makers give no category, by id (Android package, Mac bundle id, Windows exe name).
+    static func guess(_ id: String) -> String? {
+        let s = id.lowercased()
+        let table: [(String, [String])] = [
+            ("social", ["instagram", "whatsapp", "facebook", "messenger", "snapchat", "twitter", "com.x.", "reddit", "telegram",
+                        "discord", "linkedin", "threads", "signal", "tiktok", "musically", "pinterest", "mobilesms", "messages", "slack"]),
+            ("entertainment", ["youtube", "netflix", "spotify", "primevideo", "hotstar", "jiocinema", "twitch", "music", "vlc", "iina",
+                               "podcasts", "tv"]),
+            ("productivity", ["xcode", "android.studio", "studio64", "com.google.android.studio", "jetbrains", "vscode", "code.exe",
+                              "com.microsoft.vscode", "terminal", "iterm", "notion", "office", "word", "excel", "powerpoint", "docs",
+                              "sheets", "mail", "gmail", "outlook", "calendar", "chatgpt", "openai", "claude", "anthropic", "zoom", "teams"]),
+            ("creativity", ["photoshop", "figma", "lightroom", "finalcut", "premiere", "blender", "procreate", "canva", "photos", "camera"]),
+            ("reading", ["chrome", "safari", "firefox", "edge", "brave", "arc", "news", "kindle", "books", "wikipedia", "quora"]),
+            ("travel", ["maps", "uber", "ola", "rapido", "airbnb"]),
+            ("shopping", ["amazon", "flipkart", "zepto", "blinkit", "swiggy", "zomato", "myntra", "meesho", "instamart"]),
+            ("utilities", ["finder", "settings", "systempreferences", "files", "explorer.exe", "calculator", "clock", "airbridge"]),
+        ]
+        for (cat, keys) in table where keys.contains(where: { s.contains($0) }) { return cat }
+        return nil
+    }
+
+    /// The category to show for an app.
+    static func of(_ app: STApp) -> String { valid(app.cat) ?? guess(app.id) ?? "other" }
 }

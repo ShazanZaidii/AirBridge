@@ -3,5 +3,5 @@
 set -e
 here=$(cd "$(dirname "$0")" && pwd)
 out=${TMPDIR:-/tmp}/airbridge-screentimecheck
-swiftc -swift-version 5 -o "$out" "$here/../../Widgets/Shared/ScreenTimeModel.swift" "$here/../../AirBridge/ScreenTime/ScreenTimeAccumulator.swift" "$here/main.swift"
+swiftc -swift-version 5 -o "$out" "$here/../../Widgets/Shared/ScreenTimeModel.swift" "$here/../../Widgets/Shared/ScreenTimeReport.swift" "$here/../../AirBridge/ScreenTime/ScreenTimeAccumulator.swift" "$here/../../AirBridge/ScreenTime/MacUsageHistory.swift" "$here/main.swift"
 "$out"

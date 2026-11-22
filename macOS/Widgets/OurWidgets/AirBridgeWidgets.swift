@@ -56,6 +56,8 @@ struct ScreenTimeEntry: TimelineEntry {
     /// PNG data for the top apps' icons, by app id.
     let icons: [String: Data]
     let isEmpty: Bool
+    /// The device picked in the widget's settings (nil: all), for the page a click opens.
+    var deviceId: String? = nil
 }
 
 struct ScreenTimeProvider: AppIntentTimelineProvider {
@@ -82,7 +84,8 @@ struct ScreenTimeProvider: AppIntentTimelineProvider {
                 if let d = try? Data(contentsOf: ScreenTimeShared.iconURL(appId: app.id, in: folder)) { icons[app.id] = d }
             }
         }
-        return ScreenTimeEntry(date: now, summary: summary, icons: icons, isEmpty: snap.devices.isEmpty)
+        return ScreenTimeEntry(date: now, summary: summary, icons: icons, isEmpty: snap.devices.isEmpty,
+                               deviceId: id == DeviceEntity.allId ? nil : id)
     }
 
     /// What the widget gallery shows before any device has reported.
@@ -109,7 +112,8 @@ struct ScreenTimeWidget: Widget {
     var body: some WidgetConfiguration {
         AppIntentConfiguration(kind: ScreenTimeShared.widgetKind, intent: SelectDeviceIntent.self, provider: ScreenTimeProvider()) { entry in
             ScreenTimeView(entry: entry)
-                .containerBackground(.fill.tertiary, for: .widget)
+                .containerBackground(for: .widget) { WidgetTone.top }
+                .widgetURL(STLink.page(device: entry.deviceId))
         }
         .configurationDisplayName("Screen Time")
         .description("Screen time from your phone, PCs and Macs, together.")
@@ -120,6 +124,18 @@ struct ScreenTimeWidget: Widget {
 // MARK: - Views
 
 private let lineColor = Color(red: 0.36, green: 0.62, blue: 1.0)   // AirBridge blue
+
+/// The two greys of Apple's own Screen Time widget (measured from it): a lighter top and a slightly darker band behind the
+/// app list. White and a soft grey in light mode.
+enum WidgetTone {
+    static let top = Color(nsColor: NSColor(name: nil) { a in
+        a.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? NSColor(srgbRed: 50 / 255, green: 50 / 255, blue: 52 / 255, alpha: 1) : .white
+    })
+    static let band = Color(nsColor: NSColor(name: nil) { a in
+        a.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? NSColor(srgbRed: 44 / 255, green: 44 / 255, blue: 45 / 255, alpha: 1)
+            : NSColor(srgbRed: 246 / 255, green: 246 / 255, blue: 248 / 255, alpha: 1)
+    })
+}
 
 struct ScreenTimeView: View {
     @Environment(\.widgetFamily) private var family
@@ -262,15 +278,29 @@ private struct LargeView: View {
             Header(s: s)
             TrendChart(s: s).frame(height: 128)
             if !s.topApps.isEmpty {
-                Divider().opacity(0.4)
                 LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], alignment: .leading, spacing: 10) {
                     ForEach(s.topApps, id: \.id) { app in
                         AppRow(app: app, icon: entry.icons[app.id])
                     }
                 }
+                .padding(.top, 12)
+                .frame(maxHeight: .infinity, alignment: .top)
+                .background(alignment: .top) { BandBackground() }
+            } else {
+                Spacer(minLength: 0)
             }
-            Spacer(minLength: 0)
         }
+    }
+}
+
+/// The darker band behind the app list, out to the widget's edges like Apple's.
+private struct BandBackground: View {
+    @Environment(\.widgetContentMargins) private var margins
+    var body: some View {
+        WidgetTone.band
+            .padding(.leading, -margins.leading)
+            .padding(.trailing, -margins.trailing)
+            .padding(.bottom, -margins.bottom)
     }
 }
 

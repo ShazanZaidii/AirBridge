@@ -5,8 +5,9 @@ import WidgetKit
 /// Screen time for the AirBridge widget (docs/protocol.md §15).
 ///
 /// - Other devices send `screen_time` (and `screen_time_icon`); each becomes a device in the shared snapshot the widget reads.
-/// - This Mac counts its own time: which app is in front, paused while idle (no input for 5 minutes), while the screen sleeps
-///   and while it is locked. macOS gives apps no access to its own Screen Time data, so this only counts from when AirBridge runs.
+/// - This Mac's own time comes from the records macOS keeps (MacUsageHistory: today from midnight and the days before AirBridge
+///   ran) once Full Disk Access is on. Without it AirBridge counts live: which app is in front, paused while idle (no input for
+///   5 minutes), while the screen sleeps and while it is locked, only from when AirBridge runs.
 /// - This Mac's numbers also go to other computers that advertise `screentime_sink` (another Mac with the widget).
 ///
 /// Nothing leaves your own paired devices. Threading: received messages and the snapshot live on `queue`; the tracker runs on
@@ -118,6 +119,15 @@ nonisolated final class ScreenTimeHub: @unchecked Sendable {
     private var started = false
     private var lastSend = Date.distantPast
     private var calendar: Calendar { .current }
+    /// This Mac's time from macOS's own records, when AirBridge may read them (Full Disk Access). Used instead of the live count.
+    private var history: STAccumulator?
+    private var historyReading = false
+    private var lastHistoryRead = Date.distantPast
+    /// Whether macOS's records could be read the last time (for Settings).
+    private(set) var historyAvailable = false
+    private static let historyEvery: TimeInterval = 120
+    /// The power log's display and sleep changes, re-read at most every 10 minutes (it takes a second or two).
+    nonisolated(unsafe) private static var power: (read: Date, breaks: [MacUsageHistory.Break]) = (.distantPast, [])
 
     private var file: URL? { ScreenTimeShared.folder()?.appendingPathComponent("this-mac.json") }
 
@@ -139,8 +149,71 @@ nonisolated final class ScreenTimeHub: @unchecked Sendable {
         let dnc = DistributedNotificationCenter.default()
         dnc.addObserver(forName: NSNotification.Name("com.apple.screenIsLocked"), object: nil, queue: .main) { _ in MainActor.assumeIsolated { LocalScreenTime.shared.pause() } }
         dnc.addObserver(forName: NSNotification.Name("com.apple.screenIsUnlocked"), object: nil, queue: .main) { _ in MainActor.assumeIsolated { LocalScreenTime.shared.resume() } }
+        dnc.addObserver(forName: NSNotification.Name("com.apple.screenIsUnlocked"), object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated { LocalScreenTime.shared.unlocked() }
+        }
         switched(to: NSWorkspace.shared.frontmostApplication)
         timer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { _ in MainActor.assumeIsolated { LocalScreenTime.shared.tick() } }
+        refreshHistory(force: true)
+    }
+
+    private func unlocked() {
+        guard ScreenTimeHub.trackingEnabled else { return }
+        acc.unlock(at: Date(), calendar: calendar)
+    }
+
+    /// Reads macOS's records again (off the main thread), at most every two minutes unless `force`.
+    func refreshHistory(force: Bool = false) {
+        guard ScreenTimeHub.trackingEnabled, !historyReading, force || Date().timeIntervalSince(lastHistoryRead) >= Self.historyEvery else { return }
+        historyReading = true
+        lastHistoryRead = Date()
+        let cal = calendar
+        DispatchQueue.global(qos: .utility).async {
+            let now = Date()
+            let since = cal.date(byAdding: .day, value: -(ScreenTimeShared.keepDays - 1), to: cal.startOfDay(for: now)) ?? now
+            if now.timeIntervalSince(LocalScreenTime.power.read) > 600 {
+                LocalScreenTime.power = (now, MacUsageHistory.powerBreaks(MacUsageHistory.readPowerLog()))
+            }
+            let r = MacUsageHistory.read(since: since, now: now, power: LocalScreenTime.power.breaks)
+            let acc: STAccumulator? = r.spans.isEmpty ? nil
+                : MacUsageHistory.accumulate(r.spans, unlocks: r.unlocks, since: since, calendar: cal, name: LocalScreenTime.appName)
+            var st = r.status
+            if let acc { st.days = acc.days.mapValues { Int($0.seconds.rounded()) } }
+            LocalScreenTime.writeStatus(st)
+            let bundles = Array(Set(r.spans.map(\.bundle)))
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    let me = LocalScreenTime.shared
+                    me.historyReading = false
+                    me.history = acc
+                    me.historyAvailable = acc != nil
+                    for b in bundles { me.saveIcon(bundleId: b) }
+                    me.publish()
+                }
+            }
+        }
+    }
+
+    /// What was found, for checking against Apple's Screen Time: ScreenTime/mac-history.json in the shared folder.
+    nonisolated private static func writeStatus(_ st: MacUsageHistory.Status) {
+        guard let url = ScreenTimeShared.folder()?.appendingPathComponent("mac-history.json") else { return }
+        let enc = JSONEncoder()
+        enc.dateEncodingStrategy = .iso8601
+        enc.outputFormatting = [.prettyPrinted, .sortedKeys]
+        try? enc.encode(st).write(to: url, options: .atomic)
+    }
+
+    /// An app's name from its bundle id (the installed app's display name).
+    nonisolated static func appName(_ bundleId: String) -> String {
+        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId) else { return bundleId }
+        return FileManager.default.displayName(atPath: url.path).replacingOccurrences(of: ".app", with: "")
+    }
+
+    /// An app's category from its Info.plist, else from the list of well-known apps.
+    nonisolated static func appCategory(_ bundleId: String) -> String? {
+        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId),
+           let c = STCategory.fromApple(Bundle(url: url)?.infoDictionary?["LSApplicationCategoryType"] as? String) { return c }
+        return STCategory.guess(bundleId)
     }
 
     /// The setting was switched: stop counting now, or start again.
@@ -152,6 +225,7 @@ nonisolated final class ScreenTimeHub: @unchecked Sendable {
         close(at: Date())
         guard ScreenTimeHub.trackingEnabled, !paused, let app, let id = app.bundleIdentifier, !Self.ignored.contains(id) else { return }
         current = (id, app.localizedName ?? id, Date())
+        acc.open(id: id, name: app.localizedName ?? id, at: Date(), calendar: calendar)
         saveIcon(for: app, id: id)
     }
 
@@ -177,6 +251,7 @@ nonisolated final class ScreenTimeHub: @unchecked Sendable {
         if let c = current { close(at: Date()); current = (c.id, c.name, Date()) }
         publish()
         sendIfDue(force: false)
+        refreshHistory()
     }
 
     private func close(at end: Date) {
@@ -194,8 +269,17 @@ nonisolated final class ScreenTimeHub: @unchecked Sendable {
         ScreenTimeHub.shared.storeLocal(thisMac())
     }
 
+    private var categories: [String: String?] = [:]
+
     private func thisMac() -> STDevice {
-        acc.device(id: Identity.id, name: Identity.name, platform: "macos", now: Date(), calendar: calendar)
+        let source = history ?? acc
+        return source.device(id: Identity.id, name: Identity.name, platform: "macos", now: Date(), calendar: calendar,
+                             maxDays: ScreenTimeShared.keepDays) { [self] id in
+            if let c = categories[id] { return c }
+            let c = Self.appCategory(id)
+            categories[id] = c
+            return c
+        }
     }
 
     /// Sends this Mac's report to other computers that show screen time (another Mac).
@@ -212,8 +296,18 @@ nonisolated final class ScreenTimeHub: @unchecked Sendable {
         ScreenTimeHub.shared.send(dev, icons: icons, force: force)
     }
 
+    /// The icon of an app that may not be running (apps found in macOS's records).
+    private func saveIcon(bundleId: String) {
+        guard !STStore.hasIcon(appId: bundleId), let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId) else { return }
+        savePNG(NSWorkspace.shared.icon(forFile: url.path), id: bundleId)
+    }
+
     private func saveIcon(for app: NSRunningApplication, id: String) {
         guard !STStore.hasIcon(appId: id), let icon = app.icon else { return }
+        savePNG(icon, id: id)
+    }
+
+    private func savePNG(_ icon: NSImage, id: String) {
         let size = NSSize(width: 64, height: 64)
         let img = NSImage(size: size)
         img.lockFocus()
