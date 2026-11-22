@@ -195,6 +195,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
                     try? NSBitmapImageRep(cgImage: cg).representation(using: .png, properties: [:])?.write(to: folder.appendingPathComponent("debug-menu.png"))
                 }
             }
+            if url.path == "/screentime_close" { ScreenTimeWindow.shared.debugClose() }
             if url.path == "/screentime_snapshot" {
                 ScreenTimeWindow.shared.debugSnapshot(range: q.first(where: { $0.name == "range" })?.value,
                                                       filter: q.first(where: { $0.name == "filter" })?.value,
