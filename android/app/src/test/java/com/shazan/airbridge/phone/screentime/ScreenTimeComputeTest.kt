@@ -168,4 +168,54 @@ class ScreenTimeComputeTest {
             Event(t(22, 10, 40), "a", PAUSED, "A1"), Event(t(22, 11), "a", RESUMED, "A1"), Event(t(22, 11, 10), "a", PAUSED, "A1")).getValue("2026-11-22")
         assertEquals(900.0, d.seconds, 0.01)
     }
+
+    // ---- Android 10+: counted while visible (Digital Wellbeing's rule)
+
+    private fun visible(vararg e: Event, now: Long = t(22, 23)) =
+        ScreenTimeCompute.compute(e.toList(), now, zone, home, untilStopped = true)
+
+    @Test fun anAppUnderAnotherAppsDialogKeepsCounting() {
+        val d = visible(
+            Event(t(22, 10), "a", RESUMED, "A1"), Event(t(22, 10, 5), "a", PAUSED, "A1"),
+            Event(t(22, 10, 5), "perm", RESUMED, "Dialog"), Event(t(22, 10, 6), "perm", PAUSED, "Dialog"),
+            Event(t(22, 10, 6), "a", RESUMED, "A1"), Event(t(22, 10, 6), "perm", STOPPED, "Dialog"),
+            Event(t(22, 10, 20), "a", PAUSED, "A1"), Event(t(22, 10, 20), "a", STOPPED, "A1")).getValue("2026-11-22")
+        assertEquals(1200.0, d.apps.getValue("a"), 0.01)
+        assertEquals(60.0, d.apps.getValue("perm"), 0.01)
+    }
+
+    @Test fun pausedButStillVisibleCountsUntilTheScreenTurnsOff() {
+        val d = visible(Event(t(22, 10), "a", RESUMED, "A1"), Event(t(22, 10, 5), "a", PAUSED, "A1"),
+            Event(t(22, 10, 15), "", SCREEN_NON_INTERACTIVE)).getValue("2026-11-22")
+        assertEquals(900.0, d.seconds, 0.01)
+    }
+
+    @Test fun switchingToAnotherAppEndsTheFirstWhenItStops() {
+        val d = visible(
+            Event(t(22, 10), "a", RESUMED, "A1"), Event(t(22, 10, 10), "a", PAUSED, "A1"),
+            Event(t(22, 10, 10), "b", RESUMED, "B1"), Event(t(22, 10, 10, 1), "a", STOPPED, "A1"),
+            Event(t(22, 10, 25), "b", PAUSED, "B1"), Event(t(22, 10, 25), "b", STOPPED, "B1")).getValue("2026-11-22")
+        assertEquals(601.0, d.apps.getValue("a"), 0.01)
+        assertEquals(900.0, d.apps.getValue("b"), 0.01)
+    }
+
+    @Test fun screensInsideOneAppStillCountAsOneStretch() {
+        val d = visible(
+            Event(t(22, 10), "r", RESUMED, "Main"), Event(t(22, 10, 5), "r", PAUSED, "Main"),
+            Event(t(22, 10, 5), "r", RESUMED, "Comments"), Event(t(22, 10, 5, 1), "r", STOPPED, "Main"),
+            Event(t(22, 10, 15), "r", PAUSED, "Comments"), Event(t(22, 10, 15), "r", STOPPED, "Comments")).getValue("2026-11-22")
+        assertEquals(900.0, d.seconds, 0.01)
+    }
+
+    @Test fun goingHomeEndsEverythingAtOnce() {
+        val homePkg = home.first()
+        val d = visible(Event(t(22, 10), "a", RESUMED, "A1"), Event(t(22, 10, 7), homePkg, RESUMED, "Home"),
+            Event(t(22, 10, 7, 1), "a", STOPPED, "A1")).getValue("2026-11-22")
+        assertEquals(420.0, d.seconds, 0.01)
+    }
+
+    @Test fun anAppStillShowingCountsUpToNow() {
+        val d = visible(Event(t(22, 22, 30), "a", RESUMED, "A1")).getValue("2026-11-22")
+        assertEquals(1800.0, d.seconds, 0.01)
+    }
 }
