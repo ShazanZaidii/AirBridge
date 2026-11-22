@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<!-- Self-check for this PC's screen time (docs/protocol.md 15): splitting time by hour and day, the message, saving.
+	     Pure logic, runs on any OS: dotnet run (project AirBridge.ScreenTimeTests) (exit code 0 = all passed). -->
+	<PropertyGroup>
+		<OutputType>Exe</OutputType>
+		<TargetFramework>net8.0</TargetFramework>
+		<RollForward>Major</RollForward>
+		<Nullable>enable</Nullable>
+		<ImplicitUsings>disable</ImplicitUsings>
+		<TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+	</PropertyGroup>
+	<ItemGroup>
+		<Compile Include="../AirBridge/Net/ScreenTimeCore.cs" Link="Shared/ScreenTimeCore.cs" />
+	</ItemGroup>
+</Project>
