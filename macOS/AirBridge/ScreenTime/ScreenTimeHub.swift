@@ -34,9 +34,10 @@ nonisolated final class ScreenTimeHub: @unchecked Sendable {
             switch type {
             case "screen_time":
                 guard let dev = STWire.device(from: msg, id: peer.id, name: peer.name, platform: peer.platform, now: Date()) else { return }
+                let isNew = !snapshot.devices.contains { $0.id == dev.id }
                 snapshot.upsert(dev)
                 STStore.save(snapshot)
-                scheduleReload()
+                scheduleReload(soon: isNew)
             case "screen_time_icon":
                 guard let (id, png) = STWire.icon(from: msg) else { return }
                 if STStore.saveIcon(png, appId: id) { scheduleReload() }
@@ -50,7 +51,7 @@ nonisolated final class ScreenTimeHub: @unchecked Sendable {
         queue.async { [self] in
             snapshot.remove(deviceId: deviceId)
             STStore.save(snapshot)
-            scheduleReload()
+            scheduleReload(soon: true)
         }
     }
 
@@ -94,14 +95,32 @@ nonisolated final class ScreenTimeHub: @unchecked Sendable {
         }
     }
 
-    /// The widget is told at most every 15 s; WidgetKit rate-limits reloads anyway.
-    private func scheduleReload() {
+    /// WidgetKit gives an app running in the background only a few dozen widget redraws a day and ignores the rest, so a
+    /// redraw is asked for at most every 10 minutes while the numbers tick along (`soon`: a device's first report or a
+    /// forgotten device, 15 s).
+    private static let reloadEvery: TimeInterval = 600
+    private var lastReload = Date.distantPast
+
+    private func scheduleReload(soon: Bool = false) {
         guard !reloadScheduled else { return }
+        let wait = soon ? 15 : max(15, Self.reloadEvery - Date().timeIntervalSince(lastReload))
         reloadScheduled = true
-        queue.asyncAfter(deadline: .now() + 15) { [self] in
+        queue.asyncAfter(deadline: .now() + wait) { [self] in
             reloadScheduled = false
+            lastReload = Date()
             WidgetCenter.shared.reloadTimelines(ofKind: ScreenTimeShared.widgetKind)
         }
+    }
+
+    /// A new AirBridge version is running: redraw the widget once, so it uses the new widget code (an old drawing stays on
+    /// screen until WidgetKit redraws it).
+    func reloadAfterUpdate() {
+        let build = (Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "") + "|" +
+            String(Int((try? Bundle.main.executableURL?.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate?.timeIntervalSince1970) ?? 0) ?? 0)
+        let key = "ScreenTimeWidgetBuild"
+        guard UserDefaults.standard.string(forKey: key) != build else { return }
+        UserDefaults.standard.set(build, forKey: key)
+        WidgetCenter.shared.reloadAllTimelines()
     }
 }
 

@@ -52,6 +52,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         DropDock.shared.start()
         PhoneNotifCenter.shared.start()
         LocalScreenTime.shared.start() // this Mac's screen time for the AirBridge widget
+        ScreenTimeHub.shared.reloadAfterUpdate()
         LoginItem.applyDefault()
     }
 
@@ -183,6 +184,17 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
             }
             // airbridge://debug/airweb_close — closes only the window (AirWeb keeps running).
             if url.path == "/airweb_close" { AirWebWindow.shared.debugCloseWindow() }
+            // airbridge://debug/menu_snapshot?tab=phone — the menu panel with Settings open, drawn into ScreenTime/debug-menu.png.
+            if url.path == "/menu_snapshot" {
+                if let tab = q.first(where: { $0.name == "tab" })?.value { UserDefaults.standard.set(tab, forKey: "MenuSettingsTab") }
+                let view = MenuView(model: AppModel.shared, startWithSettingsOpen: true, flat: true)
+                    .background(Color(nsColor: .windowBackgroundColor)).environment(\.colorScheme, .dark)
+                let r = ImageRenderer(content: view)
+                r.scale = 1
+                if let cg = r.cgImage, let folder = ScreenTimeShared.folder() {
+                    try? NSBitmapImageRep(cgImage: cg).representation(using: .png, properties: [:])?.write(to: folder.appendingPathComponent("debug-menu.png"))
+                }
+            }
             if url.path == "/screentime_snapshot" {
                 ScreenTimeWindow.shared.debugSnapshot(range: q.first(where: { $0.name == "range" })?.value,
                                                       filter: q.first(where: { $0.name == "filter" })?.value,
@@ -431,6 +443,8 @@ struct MenuView: View {
     @ObservedObject var model: AppModel
     /// Test rigs only (airbridge://debug/render_menu?settings=1): start with Settings open.
     var startWithSettingsOpen = false
+    /// Debug snapshots only: draw the panel without its scroll view, Settings open.
+    var flat = false
     @Environment(\.openWindow) private var openWindow
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showPairing = false
@@ -448,8 +462,28 @@ struct MenuView: View {
     @AppStorage(PhoneNotifSettings.soundsKey) private var phoneSounds = true
     @AppStorage(DevicePowerSources.showKey) private var showPhoneBattery = true
     @AppStorage(ScreenTimeHub.trackKey) private var trackScreenTime = true
+    /// Which Settings tab is showing (remembered).
+    @AppStorage("MenuSettingsTab") private var settingsTab = SettingsTab.general.rawValue
+    /// The panel's natural height, so it can scroll instead of running off a short screen.
+    @State private var contentHeight: CGFloat = 0
 
     var body: some View {
+        // The panel sizes to its content, but never taller than the screen: past that it scrolls.
+        let limit = max(320, (NSScreen.main?.visibleFrame.height ?? 900) - 24)
+        if flat {
+            panel
+        } else {
+        ScrollView(.vertical) {
+            panel
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { contentHeight = $0 }
+        }
+        .scrollBounceBehavior(.basedOnSize)
+        .scrollIndicators(contentHeight > limit ? .automatic : .hidden)
+        .frame(width: 320, height: contentHeight > 0 ? min(contentHeight, limit) : nil)
+        }
+    }
+
+    private var panel: some View {
         VStack(alignment: .leading, spacing: 12) {
             header
 
@@ -499,15 +533,19 @@ struct MenuView: View {
 
             actionBar
 
-            HStack(spacing: Theme.sm) {
+            HStack(spacing: 6) {
                 Button { openAndFront("arrangement", title: "AirBridge Display Arrangement") } label: {
                     ToolPill(title: "Displays", icon: "rectangle.3.group")
                 }
                 .help("Arrange where your devices sit around this screen")
                 Button { openAndFront("filters", title: "Clipboard Filters") } label: {
-                    ToolPill(title: "Clipboard filters", icon: "line.3.horizontal.decrease.circle")
+                    ToolPill(title: "Clipboard", icon: "line.3.horizontal.decrease.circle")
                 }
-                .help("Choose what clipboard content is shared")
+                .help("Clipboard filters: choose what clipboard content is shared")
+                Button { ScreenTimeWindow.shared.show() } label: {
+                    ToolPill(title: "Screen Time", icon: "hourglass")
+                }
+                .help("Screen time on every device, day by day")
             }
             .buttonStyle(.plain)
 
@@ -524,7 +562,7 @@ struct MenuView: View {
             Divider()
 
             VStack(alignment: .leading, spacing: 0) {
-                ExpandRow(isExpanded: $showSettings) {
+                ExpandRow(isExpanded: Binding(get: { showSettings || flat }, set: { showSettings = $0 })) {
                     Label("Settings", systemImage: "gearshape")
                 } content: {
                     settingsList.padding(.horizontal, Theme.sm)
@@ -598,19 +636,26 @@ struct MenuView: View {
         .animation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.8), value: phoneNotifs.unseen)
     }
 
-    /// Everything that's set once and rarely touched again.
+    /// Everything that's set once and rarely touched again, in three short tabs so the panel stays on screen.
     private var settingsList: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            dropSettingsSection
-            phoneSettingsSection
-            if !model.screenCaptureAllowed {
-                Button { model.requestScreenCapture() } label: {
-                    Label("Let phones show this Mac's screen…", systemImage: "rectangle.on.rectangle")
+        let tab = SettingsTab(rawValue: settingsTab) ?? .general
+        return VStack(alignment: .leading, spacing: 0) {
+            SettingsTabs(selection: $settingsTab)
+                .padding(.top, Theme.sm)
+                .padding(.bottom, Theme.xs)
+            switch tab {
+            case .general:
+                dropSettingsSection
+                if !model.screenCaptureAllowed {
+                    Button { model.requestScreenCapture() } label: {
+                        Label("Let phones show this Mac's screen…", systemImage: "rectangle.on.rectangle")
+                    }
                 }
+            case .phone: phoneSettingsSection
+            case .screenTime: screenTimeSettingsSection
             }
         }
         .buttonStyle(MenuRowButtonStyle())
-        .padding(.top, Theme.xs)
     }
 
     /// Connected phones that can show their screen here (§8.7, phone as source).
@@ -862,6 +907,8 @@ struct MenuView: View {
             SettingToggleRow(icon: "clock.arrow.circlepath", title: "Tidy up finished transfers",
                              hint: "Hide their cards after 5 seconds", isOn: $autoHideCards)
                 .onChange(of: autoHideCards) { TransferHUD.shared.settingsChanged() }
+            SettingToggleRow(icon: "power", title: "Open at login", hint: "Phones reconnect and screen time counts from the start",
+                             isOn: Binding(get: { LoginItem.isOn }, set: { LoginItem.set($0) }))
         }
         .fixedSize(horizontal: false, vertical: true)
         .padding(.top, Theme.xs)
@@ -878,11 +925,17 @@ struct MenuView: View {
             SettingToggleRow(icon: "battery.75percent", title: "Phone battery", hint: "List it in the Batteries widget",
                              isOn: $showPhoneBattery)
                 .onChange(of: showPhoneBattery) { _, _ in DevicePowerSources.shared.refresh() }
+        }
+        .fixedSize(horizontal: false, vertical: true)
+        .padding(.top, Theme.xs)
+    }
+
+    /// This Mac's screen time for the AirBridge widget and page.
+    private var screenTimeSettingsSection: some View {
+        VStack(alignment: .leading, spacing: Theme.xs) {
             SettingToggleRow(icon: "hourglass", title: "This Mac's screen time", hint: "Count it for the AirBridge widget",
                              isOn: $trackScreenTime)
                 .onChange(of: trackScreenTime) { _, _ in LocalScreenTime.shared.settingChanged() }
-            SettingToggleRow(icon: "power", title: "Open at login", hint: "So screen time counts from the start of the day",
-                             isOn: Binding(get: { LoginItem.isOn }, set: { LoginItem.set($0) }))
             SettingActionRow(icon: "clock.arrow.circlepath", title: "This Mac's past screen time",
                              hint: LocalScreenTime.shared.historyAvailable ? "Read from macOS's own records" : "Needs Full Disk Access to fill in the whole day",
                              action: LocalScreenTime.shared.historyAvailable ? "On" : "Turn on") {
@@ -892,7 +945,7 @@ struct MenuView: View {
                 }
                 LocalScreenTime.shared.refreshHistory(force: true)
             }
-            SettingActionRow(icon: "hourglass", title: "Screen Time", hint: "Every device, day by day", action: "Open") {
+            SettingActionRow(icon: "chart.bar.xaxis", title: "Screen Time", hint: "Every device, day by day", action: "Open") {
                 ScreenTimeWindow.shared.show()
             }
         }
