@@ -1,6 +1,9 @@
 package com.shazan.airbridge.phone.screentime
 
+import com.shazan.airbridge.phone.screentime.ScreenTimeCompute.AppOut
 import com.shazan.airbridge.phone.screentime.ScreenTimeCompute.Event
+import com.shazan.airbridge.phone.screentime.ScreenTimeCompute.KEYGUARD_HIDDEN
+import com.shazan.airbridge.phone.screentime.ScreenTimeCompute.NOTIFICATION
 import com.shazan.airbridge.phone.screentime.ScreenTimeCompute.KEYGUARD_SHOWN
 import com.shazan.airbridge.phone.screentime.ScreenTimeCompute.PAUSED
 import com.shazan.airbridge.phone.screentime.ScreenTimeCompute.RESUMED
@@ -86,7 +89,7 @@ class ScreenTimeComputeTest {
         assertTrue(compute().isEmpty())
     }
 
-    @Test fun thePayloadHasTodaysHoursAndAppsAndOnlyTotalsForEarlierDays() {
+    @Test fun thePayloadHasHoursAndAppsForEveryDay() {
         val days = compute(
             Event(t(21, 9), "com.youtube", RESUMED), Event(t(21, 10), "com.youtube", PAUSED),
             Event(t(22, 9), "com.whatsapp", RESUMED), Event(t(22, 9, 30), "com.whatsapp", PAUSED),
@@ -96,7 +99,7 @@ class ScreenTimeComputeTest {
         val (yesterday, today) = p
         assertEquals("2026-11-21", yesterday.day)
         assertEquals(3600L, yesterday.seconds)
-        assertNull(yesterday.hours); assertNull(yesterday.apps)
+        assertEquals(3600L, yesterday.hours!![9]); assertEquals(listOf("com.youtube"), yesterday.apps!!.map { it.id })
         assertEquals(5400L, today.seconds)
         assertEquals(24, today.hours!!.size)
         assertEquals(1800L, today.hours!![9])
@@ -115,7 +118,8 @@ class ScreenTimeComputeTest {
         assertEquals("2026-11-22", p.last().day)
         assertEquals(20, p.last().apps!!.size)
         assertEquals("app29", p.last().apps!!.first().id) // 59 s, the longest
-        assertEquals(listOf("app29", "app28"), ScreenTimeCompute.topApps(days, "2026-11-22", 2))
+        // Icons go to the most used apps of all the days sent: "a" had an hour every day.
+        assertEquals(listOf("a", "app29"), ScreenTimeCompute.topApps(days, "2026-11-22", 2))
     }
 
     // ---- screens inside one app (the Reddit bug: post -> comments stopped the count)
@@ -217,5 +221,55 @@ class ScreenTimeComputeTest {
     @Test fun anAppStillShowingCountsUpToNow() {
         val d = visible(Event(t(22, 22, 30), "a", RESUMED, "A1")).getValue("2026-11-22")
         assertEquals(1800.0, d.seconds, 0.01)
+    }
+
+    // ---- opens, notifications, unlocks, first use (the detail page's Digital Wellbeing numbers)
+
+    @Test fun opensCountComingOnScreenNotScreensInside() {
+        val d = visible(
+            Event(t(22, 9, 0), "", KEYGUARD_HIDDEN),
+            Event(t(22, 9, 1), "r", RESUMED, "Main"), Event(t(22, 9, 2), "r", RESUMED, "Post"), Event(t(22, 9, 2, 1), "r", STOPPED, "Main"),
+            Event(t(22, 9, 5), "", SCREEN_NON_INTERACTIVE),
+            Event(t(22, 12, 0), "", KEYGUARD_HIDDEN), Event(t(22, 12, 0, 2), "r", RESUMED, "Post"),
+            Event(t(22, 12, 3), "r", STOPPED, "Post")).getValue("2026-11-22")
+        assertEquals(2, d.opens.getValue("r"))
+        assertEquals(2, d.unlocks)
+        assertEquals(9 * 3600, d.first)
+    }
+
+    @Test fun notificationsCountPerApp() {
+        val d = visible(Event(t(22, 8), "com.whatsapp", NOTIFICATION), Event(t(22, 8, 1), "com.whatsapp", NOTIFICATION),
+            Event(t(22, 8, 2), "com.reddit", NOTIFICATION)).getValue("2026-11-22")
+        assertEquals(2, d.notifs.getValue("com.whatsapp"))
+        assertEquals(1, d.notifs.getValue("com.reddit"))
+    }
+
+    @Test fun payloadHasEveryDayWithAppsAndTheNewNumbers() {
+        val days = visible(
+            Event(t(21, 10), "a", RESUMED, "A"), Event(t(21, 10, 30), "a", STOPPED, "A"),
+            Event(t(22, 7, 30), "", KEYGUARD_HIDDEN), Event(t(22, 7, 31), "b", NOTIFICATION),
+            Event(t(22, 8), "a", RESUMED, "A"), Event(t(22, 8, 10), "a", STOPPED, "A"))
+        val p = ScreenTimeCompute.payload(days, "2026-11-22", { it.uppercase() }, category = { if (it == "a") "social" else null })
+        assertEquals(listOf("2026-11-21", "2026-11-22"), p.map { it.day })
+        assertEquals(1800L, p[0].apps!!.single().seconds)
+        assertEquals(24, p[0].hours!!.size)
+        val today = p[1]
+        assertEquals(1, today.unlocks); assertEquals(1, today.notifs); assertEquals(7 * 3600 + 30 * 60, today.first)
+        assertEquals(listOf("a", "b"), today.apps!!.map { it.id })   // b only sent a notification
+        assertEquals(AppOut("a", "A", 600, opens = 1, notifs = 0, cat = "social"), today.apps!![0])
+        assertEquals(AppOut("b", "B", 0, opens = 0, notifs = 1, cat = null), today.apps!![1])
+    }
+
+    @Test fun iconsAreForTheWeeksMostUsedApps() {
+        val days = visible(
+            Event(t(21, 10), "old", RESUMED, "A"), Event(t(21, 12), "old", STOPPED, "A"),
+            Event(t(22, 10), "new", RESUMED, "A"), Event(t(22, 10, 5), "new", STOPPED, "A"))
+        assertEquals(listOf("old", "new"), ScreenTimeCompute.topApps(days, "2026-11-22", 5))
+    }
+
+    @Test fun androidCategoriesMapToTheProtocolWords() {
+        assertEquals("social", ScreenTimeCompute.categoryName(4))
+        assertEquals("games", ScreenTimeCompute.categoryName(0))
+        assertEquals(null, ScreenTimeCompute.categoryName(-1))
     }
 }

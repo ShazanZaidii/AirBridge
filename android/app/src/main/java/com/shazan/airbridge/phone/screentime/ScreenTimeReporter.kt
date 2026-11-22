@@ -32,7 +32,7 @@ object ScreenTimeReporter {
     const val CAP_SINK = "screentime_sink"
     private const val PERIOD_MS = 5L * 60 * 1000
     private const val DAYS = 7
-    private const val ICONS = 8
+    private const val ICONS = 16
     private const val ICON_PX = 96
 
     private val worker: Handler by lazy { Handler(HandlerThread("screen-time").apply { start() }.looper) }
@@ -95,7 +95,7 @@ object ScreenTimeReporter {
         val days = ScreenTimeCompute.compute(list, now, zone, ignored(), untilStopped = android.os.Build.VERSION.SDK_INT >= 29)
         val key = today.toString()
         val pm = app.packageManager
-        val msg = ScreenTimeCompute.message(days, key, { pkg -> label(pm, pkg) }, maxDays = DAYS)
+        val msg = ScreenTimeCompute.message(days, key, { pkg -> label(pm, pkg) }, maxDays = DAYS, category = { pkg -> category(pm, pkg) })
         return Report(msg, ScreenTimeCompute.topApps(days, key, ICONS))
     }
 
@@ -108,6 +108,10 @@ object ScreenTimeReporter {
         } catch (_: Throwable) {}
         return out
     }
+
+    private fun category(pm: PackageManager, pkg: String): String? = try {
+        if (android.os.Build.VERSION.SDK_INT >= 26) ScreenTimeCompute.categoryName(pm.getApplicationInfo(pkg, 0).category) else null
+    } catch (_: Throwable) { null }
 
     private fun label(pm: PackageManager, pkg: String): String = try {
         pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString().take(80)
