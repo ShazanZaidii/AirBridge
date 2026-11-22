@@ -1,7 +1,7 @@
 import Foundation
 import IOKit.ps
 
-// Checks Devices/DevicePowerSources.swift against the real system battery list (what the Batteries widget reads).
+// Checks Widgets/Integration/DevicePowerSources.swift against the real system battery list (what the Batteries widget reads).
 @_silgen_name("IOPSCopyPowerSourcesByType") func _copyByType(_ t: Int32) -> Unmanaged<CFTypeRef>?
 @_silgen_name("IOPSCopyPowerSourcesList") func _list(_ blob: CFTypeRef) -> Unmanaged<CFArray>?
 @_silgen_name("IOPSGetPowerSourceDescription") func _desc(_ blob: CFTypeRef, _ ps: CFTypeRef) -> Unmanaged<CFDictionary>?

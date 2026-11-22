@@ -4,5 +4,5 @@
 set -e
 here=$(cd "$(dirname "$0")" && pwd)
 out=${TMPDIR:-/tmp}/airbridge-batterycheck
-swiftc -swift-version 5 -o "$out" "$here/../../AirBridge/Devices/DevicePowerSources.swift" "$here/../../AirBridge/PeerBus.swift" "$here/main.swift"
+swiftc -swift-version 5 -o "$out" "$here/../../Widgets/Integration/DevicePowerSources.swift" "$here/../../AirBridge/PeerBus.swift" "$here/main.swift"
 "$out"
