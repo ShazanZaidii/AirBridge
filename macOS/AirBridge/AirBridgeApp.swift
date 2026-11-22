@@ -80,6 +80,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
             ShareInbox.open(batch: batch)
         case "pair":
             PeerManager.shared.pair(link: url)
+        case "screentime":
+            // A click on the AirBridge Screen Time widget.
+            ScreenTimeWindow.shared.show(device: STLink.device(in: url))
         #if DEBUG
         case "debug":
             // airbridge://debug/action?name=mission_control&via=coredock — test one action path locally.
@@ -180,6 +183,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
             }
             // airbridge://debug/airweb_close — closes only the window (AirWeb keeps running).
             if url.path == "/airweb_close" { AirWebWindow.shared.debugCloseWindow() }
+            if url.path == "/screentime_snapshot" {
+                ScreenTimeWindow.shared.debugSnapshot(range: q.first(where: { $0.name == "range" })?.value,
+                                                      filter: q.first(where: { $0.name == "filter" })?.value,
+                                                      expand: q.contains { $0.name == "expand" },
+                                                      dark: q.first(where: { $0.name == "light" }) == nil)
+            }
             // airbridge://debug/airweb_stop — closes AirWeb.
             if url.path == "/airweb_stop" { AirWebWindow.shared.stop() }
             // airbridge://debug/pro_setup?to=ID — the Pro Mirroring setup window.
@@ -874,6 +883,18 @@ struct MenuView: View {
                 .onChange(of: trackScreenTime) { _, _ in LocalScreenTime.shared.settingChanged() }
             SettingToggleRow(icon: "power", title: "Open at login", hint: "So screen time counts from the start of the day",
                              isOn: Binding(get: { LoginItem.isOn }, set: { LoginItem.set($0) }))
+            SettingActionRow(icon: "clock.arrow.circlepath", title: "This Mac's past screen time",
+                             hint: LocalScreenTime.shared.historyAvailable ? "Read from macOS's own records" : "Needs Full Disk Access to fill in the whole day",
+                             action: LocalScreenTime.shared.historyAvailable ? "On" : "Turn on") {
+                if !LocalScreenTime.shared.historyAvailable,
+                   let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") {
+                    NSWorkspace.shared.open(url)
+                }
+                LocalScreenTime.shared.refreshHistory(force: true)
+            }
+            SettingActionRow(icon: "hourglass", title: "Screen Time", hint: "Every device, day by day", action: "Open") {
+                ScreenTimeWindow.shared.show()
+            }
         }
         .fixedSize(horizontal: false, vertical: true)
         .padding(.top, Theme.xs)

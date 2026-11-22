@@ -159,4 +159,202 @@ check("an icon that is not a PNG is refused", STWire.icon(from: ["id": "x", "png
 check("an oversized icon is refused", STWire.icon(from: ["id": "x", "png": (png + Data(count: 100 * 1024)).base64EncodedString()]) == nil && STWire.iconMessage(id: "x", png: Data(count: 100 * 1024)) == nil)
 check("an icon with no id is refused", STWire.icon(from: ["png": png.base64EncodedString()]) == nil)
 
+
+// ---- macOS's own records (Biome SEGB files, protobuf records)
+
+/// Little-endian bytes.
+func le<T: FixedWidthInteger>(_ v: T) -> Data { withUnsafeBytes(of: v.littleEndian) { Data($0) } }
+func le(_ v: Double) -> Data { le(v.bitPattern) }
+func pvarint(_ v: UInt64) -> Data { var v = v, out = Data(); repeat { var b = UInt8(v & 0x7F); v >>= 7; if v != 0 { b |= 0x80 }; out.append(b) } while v != 0; return out }
+func pfield(_ n: Int, varint v: UInt64) -> Data { pvarint(UInt64(n << 3)) + pvarint(v) }
+func pfield(_ n: Int, double v: Double) -> Data { pvarint(UInt64(n << 3 | 1)) + le(v) }
+func pfield(_ n: Int, string v: String) -> Data { let d = Data(v.utf8); return pvarint(UInt64(n << 3 | 2)) + pvarint(UInt64(d.count)) + d }
+func cocoa(_ d: Date) -> Double { d.timeIntervalSince1970 - MacUsageHistory.cocoaOffset }
+func tm(_ h: Int, _ m: Int, _ s: Int = 0, day: Int = 22) -> Date { cal.date(from: DateComponents(year: 2026, month: 11, day: day, hour: h, minute: m, second: s))! }
+func focusRecord(_ bundle: String, _ starting: Bool, _ t: Date, display: UInt64? = nil) -> Data {
+    var d = Data([0x0A, 0x01, 0x41]) // field 1 (bytes) first, as real records have other fields too
+    d += pfield(3, varint: starting ? 1 : 0) + pfield(4, double: cocoa(t)) + pfield(6, string: bundle)
+    if let display { d += pfield(13, varint: display) }
+    return d
+}
+
+/// A SEGB v2 file: header, entries (8-byte header + payload, padded to 4), trailer of (end offset, state, time).
+func segb2(_ items: [(payload: Data, state: Int32, time: Double)]) -> Data {
+    var body = Data(), trailer = Data()
+    for it in items {
+        body += le(UInt32(0)) + le(Int32(0)) + it.payload
+        let end = Int32(body.count)
+        trailer += le(end) + le(it.state) + le(it.time)
+        while body.count % 4 != 0 { body.append(0) }
+    }
+    return Data("SEGB".utf8) + le(Int32(items.count)) + le(0.0) + Data(count: 16) + body + trailer
+}
+/// A SEGB v1 file: 56-byte header (end of data first, magic last), records with a 32-byte header, padded to 8.
+func segb1(_ items: [(payload: Data, state: Int32, time: Double)]) -> Data {
+    var body = Data()
+    for it in items {
+        body += le(Int32(it.payload.count)) + le(it.state) + le(it.time) + le(it.time) + le(UInt32(0)) + le(Int32(0)) + it.payload
+        while (56 + body.count) % 8 != 0 { body.append(0) }
+    }
+    return le(UInt32(56 + body.count)) + Data(count: 48) + Data("SEGB".utf8) + body
+}
+
+let r1 = focusRecord("com.apple.Safari", true, tm(9, 0)), r2 = focusRecord("com.apple.dt.Xcode", true, tm(9, 30)), r3 = Data([0x08, 0x01])
+let v2 = SEGB.entries(segb2([(r1, 1, 1), (r2, 1, 2), (r3, 3, 3)]))
+check("SEGB v2: written records are read, deleted ones skipped", v2.map(\.payload) == [r1, r2])
+check("SEGB v2: the record time comes from the trailer", v2.map(\.time) == [1, 2])
+let v1 = SEGB.entries(segb1([(r1, 1, 5), (r3, 3, 6), (r2, 1, 7)]))
+check("SEGB v1: written records are read in order", v1.map(\.payload) == [r1, r2] && v1.map(\.time) == [5, 7])
+check("not a SEGB file gives nothing", SEGB.entries(Data("hello world, not segb at all, really not".utf8)).isEmpty && SEGB.entries(Data()).isEmpty)
+check("a truncated SEGB v2 file does not crash", SEGB.entries(segb2([(r1, 1, 1)]).prefix(40)).isEmpty)
+
+let pf = MiniProto.fields(focusRecord("com.apple.Safari", false, tm(9, 0), display: 1))
+check("protobuf: varint, double and string fields", MiniProto.int(pf[3]) == 0 && MiniProto.string(pf[6]) == "com.apple.Safari"
+      && MiniProto.double(pf[4]) == cocoa(tm(9, 0)) && MiniProto.int(pf[13]) == 1)
+check("protobuf: garbage does not crash", MiniProto.fields(Data([0xFF, 0xFF, 0xFF])).isEmpty || true)
+let f1 = MacUsageHistory.focus(SEGB.Entry(time: 0, payload: r1))
+check("App.InFocus record: app, front, time", f1 == MacUsageHistory.Focus(time: tm(9, 0), bundle: "com.apple.Safari", starting: true))
+check("App.InFocus: iPhone Mirroring apps are not this Mac's", MacUsageHistory.focus(SEGB.Entry(time: 0, payload: focusRecord("com.burbn.instagram", true, tm(9, 0), display: 4))) == nil)
+check("Device.ScreenLocked record", MacUsageHistory.lock(SEGB.Entry(time: cocoa(tm(10, 0)), payload: pfield(1, varint: 1))) == MacUsageHistory.Break(time: tm(10, 0), off: true))
+check("Backlight record: level 0 is dark", MacUsageHistory.backlight(SEGB.Entry(time: 0, payload: pfield(1, double: cocoa(tm(11, 0))) + pfield(2, varint: 0)))?.off == true)
+
+typealias F = MacUsageHistory.Focus
+typealias B = MacUsageHistory.Break
+func secs(_ spans: [MacUsageHistory.Span], _ b: String) -> Int { Int(spans.filter { $0.bundle == b }.map { $0.end.timeIntervalSince($0.start) }.reduce(0, +)) }
+let sp = MacUsageHistory.spans(focus: [F(time: tm(9, 0), bundle: "s", starting: true), F(time: tm(9, 30), bundle: "x", starting: true),
+                                       F(time: tm(10, 40), bundle: "x", starting: false)],
+                               breaks: [B(time: tm(10, 0), off: true), B(time: tm(10, 20), off: false)], now: tm(12, 0))
+check("history: the next app ends the last one", secs(sp, "s") == 1800)
+check("history: a lock stops counting, the unlock carries on with the app in front", secs(sp, "x") == 1800 + 1200)
+let sp2 = MacUsageHistory.spans(focus: [F(time: tm(9, 0), bundle: "s", starting: true), F(time: tm(9, 10), bundle: "com.apple.loginwindow", starting: true),
+                                        F(time: tm(9, 50), bundle: "com.apple.loginwindow", starting: false)], breaks: [], now: tm(10, 0))
+check("history: the lock screen coming up stops counting, going away resumes", secs(sp2, "s") == 600 + 600)
+let sp3 = MacUsageHistory.spans(focus: [F(time: tm(1, 0), bundle: "s", starting: true)], breaks: [], now: tm(12, 0))
+check("history: a missed sleep never counts more than 4 hours", secs(sp3, "s") == 4 * 3600)
+let sp4 = MacUsageHistory.spans(focus: [F(time: tm(9, 0), bundle: "s", starting: true)], breaks: [B(time: tm(9, 5), off: true)], now: tm(12, 0))
+check("history: nothing counts while dark or locked at the end", secs(sp4, "s") == 300)
+let sp5 = MacUsageHistory.spans(focus: [F(time: tm(9, 0), bundle: "s", starting: true), F(time: tm(9, 10), bundle: "s", starting: true)], breaks: [], now: tm(9, 20))
+check("history: the same app reported twice is one stretch", sp5.count == 1 && secs(sp5, "s") == 1200)
+let hacc = MacUsageHistory.accumulate(sp, unlocks: MacUsageHistory.unlocks(focus: [], locks: [B(time: tm(8, 59), off: false), B(time: tm(10, 0), off: true), B(time: tm(10, 20), off: false)]),
+                                      since: tm(0, 0), calendar: cal, name: { $0.uppercased() })
+let hday = hacc.days["2026-11-22"]
+check("history: opens and unlocks are counted", hday?.apps["x"]?.opens == 2 && hday?.apps["s"]?.opens == 1 && hday?.unlocks == 2)
+check("history: first use is the first unlock", hday?.first == 8 * 3600 + 59 * 60)
+check("history: names come from the name function", hday?.apps["x"]?.name == "X")
+check("history: unlocks without a lock stream come from the lock screen leaving",
+      MacUsageHistory.unlocks(focus: [F(time: tm(7, 0), bundle: "com.apple.loginwindow", starting: false)], locks: []) == [tm(7, 0)])
+
+let plog = """
+Time stamp                Domain              \tMessage
+2026-11-22 09:20:00 +0530 Notification        \tDisplay is turned off
+2026-11-22 09:25:00 +0530 Sleep               \tEntering Sleep state due to 'Idle Sleep'
+2026-11-22 09:40:00 +0530 DarkWake            \tDarkWake from Deep Idle
+2026-11-22 10:00:00 +0530 Wake                \tWake from Deep Idle [CDNVA] : due to UserActivity
+2026-11-22 10:00:01 +0530 Notification        \tDisplay is turned on
+2026-11-22 10:05:00 +0530 Assertions          \tPID 1 Created PreventUserIdleSystemSleep
+"""
+let pb = MacUsageHistory.powerBreaks(plog)
+check("power log: display off, sleep, wake and display on; the rest skipped", pb.map(\.off) == [true, true, false, false])
+check("power log: times are read with their zone", pb.first?.time == tm(9, 20))
+let sp6 = MacUsageHistory.spans(focus: [F(time: tm(9, 0), bundle: "s", starting: true), F(time: tm(10, 0, 5), bundle: "com.apple.loginwindow", starting: true),
+                                        F(time: tm(10, 1), bundle: "com.apple.loginwindow", starting: false)], breaks: pb, now: tm(10, 31))
+check("power log: the sleep is not counted; after the unlock the app counts again", secs(sp6, "s") == 1200 + 5 + 1800)
+
+// ---- the new numbers on the wire
+
+var full = STAccumulator()
+full.add(id: "a", name: "A", from: tm(9, 0, day: 21), to: tm(9, 30, day: 21), calendar: cal)
+full.open(id: "a", name: "A", at: tm(9, 0, day: 21), calendar: cal)
+full.unlock(at: tm(8, 0, day: 21), calendar: cal)
+full.add(id: "a", name: "A", from: tm(10, 0), to: tm(10, 10), calendar: cal)
+let fdev = full.device(id: "m", name: "Mac", platform: "macos", now: tm(12, 0), calendar: cal) { $0 == "a" ? "productivity" : nil }
+check("every day carries its hours now", fdev.days.allSatisfy { $0.hours?.count == 24 } && fdev.days.first?.hours?[9] == 1800)
+check("opens, unlocks, first use and category go out", fdev.days.first?.apps?.first?.opens == 1 && fdev.days.first?.unlocks == 1
+      && fdev.days.first?.first == 8 * 3600 && fdev.days.first?.apps?.first?.cat == "productivity")
+let wmsg = STWire.message(for: fdev)
+let wback = STWire.device(from: wmsg, id: "m", name: "Mac", platform: "macos", now: now)
+check("the new numbers survive the wire", wback?.days.first?.unlocks == 1 && wback?.days.first?.first == 8 * 3600
+      && wback?.days.first?.apps?.first?.opens == 1 && wback?.days.first?.apps?.first?.cat == "productivity")
+let odd = STWire.device(from: ["days": [["day": key(0), "s": 60, "unlocks": -4, "notifs": 9_999_999, "first": 90_000,
+                                          "apps": [["id": "z", "name": "Z", "s": 60, "cat": "weapons", "opens": 3]]]]],
+                        id: "p", name: "P", platform: "android", now: now)
+check("counts are clamped, a bad first use and an unknown category are dropped",
+      odd?.days.first?.unlocks == 0 && odd?.days.first?.notifs == 100_000 && odd?.days.first?.first == nil
+      && odd?.days.first?.apps?.first?.cat == nil && odd?.days.first?.apps?.first?.opens == 3)
+let oldStyle = STWire.device(from: ["days": [["day": key(0), "s": 60]]], id: "p", name: "P", platform: "android", now: now)
+check("a device without the new numbers still works", oldStyle?.days.first?.unlocks == nil && oldStyle?.days.first?.seconds == 60)
+let oldJSON = Data(#"{"days":{"2026-11-22":{"seconds":60,"hours":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,60],"apps":{"a":{"name":"A","seconds":60}}}}}"#.utf8)
+check("a Mac's saved tracking from before still loads", (try? JSONDecoder().decode(STAccumulator.self, from: oldJSON))?.days["2026-11-22"]?.seconds == 60)
+
+// ---- categories
+
+check("Apple categories map to ours", STCategory.fromApple("public.app-category.developer-tools") == "productivity"
+      && STCategory.fromApple("public.app-category.action-games") == "games" && STCategory.fromApple("public.app-category.social-networking") == "social")
+check("well-known apps get a category", STCategory.guess("com.instagram.android") == "social" && STCategory.guess("com.zeptonow.customer") == "shopping"
+      && STCategory.guess("com.google.android.youtube") == "entertainment" && STCategory.guess("com.unknown.thing") == nil)
+check("a device's own category wins", STCategory.of(STApp(id: "com.instagram.android", name: "I", seconds: 1, cat: "games")) == "games")
+
+// ---- the Screen Time page
+
+var page = STSnapshot()
+page.upsert(STDevice(id: "phone", name: "Phone", platform: "android", updated: now, days: [
+    STDay(day: key(1), seconds: 3 * 3600, hours: hours([20: 3 * 3600]), apps: [STApp(id: "com.instagram.android", name: "Instagram", seconds: 3 * 3600, opens: 10, notifs: 4)],
+          unlocks: 30, notifs: 50, first: 7 * 3600),
+    STDay(day: key(0), seconds: 2 * 3600, hours: hours([9: 3600, 20: 3600]),
+          apps: [STApp(id: "com.instagram.android", name: "Instagram", seconds: 5400, opens: 6, notifs: 2, cat: "social"),
+                 STApp(id: "com.whatsapp", name: "WhatsApp", seconds: 1800, opens: 3, notifs: 9)],
+          unlocks: 20, notifs: 40, first: 6 * 3600 + 30 * 60)]))
+page.upsert(STDevice(id: "mac", name: "Mac", platform: "macos", updated: now, days: [
+    STDay(day: key(0), seconds: 3600, hours: hours([9: 1800, 14: 1800]),
+          apps: [STApp(id: "com.apple.dt.Xcode", name: "Xcode", seconds: 2400, opens: 2), STApp(id: "com.instagram.android", name: "Instagram", seconds: 1200)],
+          unlocks: 3, first: 8 * 3600)]))
+page.upsert(STDevice(id: "pc", name: "PC", platform: "windows", updated: now, days: [STDay(day: key(0), seconds: 600, hours: nil, apps: [STApp(id: "code.exe", name: "Code", seconds: 600)])]))
+
+let today = STReport.make(page, filter: .all, range: .day, anchor: now, now: now, calendar: cal)
+check("page: today's total across every device", today.total == 2 * 3600 + 3600 + 600)
+check("page: the same app on two devices is one row with both platforms",
+      today.apps.first?.id == "com.instagram.android" && today.apps.first?.seconds == 5400 + 1200 && today.apps.first?.platforms == ["android", "macos"])
+check("page: opens and notifications add up per app", today.apps.first?.opens == 6 && today.apps.first?.notifs == 2)
+check("page: hourly bars per device group", today.bars.first(where: { $0.bucket == 9 && $0.group == .mobile })?.seconds == 3600
+      && today.bars.first(where: { $0.bucket == 9 && $0.group == .mac })?.seconds == 1800)
+check("page: pickups and notifications only from devices that count them", today.unlocks == 23 && today.notifs == 40)
+check("page: first use is the earliest device's", today.firstUse == 6 * 3600 + 30 * 60)
+// "now" is 20:30: yesterday's phone hours put all 3 h at 20:00-21:00, so by 20:30 it had 1.5 h; the PC (no hours) has no
+// earlier day. Today is compared with that, not with yesterday's whole day.
+check("page: today is compared with the days before up to the same time", today.baseline == 3 * 3600 / 2)
+let endOfToday = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: now))!
+let afterToday = STReport.make(page, filter: .all, range: .day, anchor: now, now: endOfToday.addingTimeInterval(3600), calendar: cal)
+check("page: a finished day is compared with whole days", afterToday.baseline == 3 * 3600)
+var noHours = STSnapshot()
+noHours.upsert(STDevice(id: "o", name: "Old", platform: "android", updated: now, days: [STDay(day: key(1), seconds: 7200, hours: nil, apps: nil),
+                                                                                      STDay(day: key(0), seconds: 60, hours: nil, apps: nil)]))
+check("page: without earlier hours there is no comparison for today", STReport.make(noHours, filter: .all, range: .day, anchor: now, now: now, calendar: cal).baseline == nil)
+check("page: categories", today.categories.first?.category == "social" && today.categories.contains { $0.category == "productivity" })
+check("page: devices sorted by time, with when they last reported", today.devices.map(\.id) == ["phone", "mac", "pc"])
+check("page: there is earlier data, nothing later than today", today.hasEarlier && !today.hasLater)
+var calMon = cal; calMon.firstWeekday = 2
+let todayMon = STReport.make(page, filter: .all, range: .day, anchor: now, now: now, calendar: calMon)
+check("page: each app has its week (Monday-first)", todayMon.apps.first?.week.reduce(0, +) == 3 * 3600 + 5400 + 1200)
+check("page: with Sunday-first weeks, Sunday starts a new week", today.apps.first?.week.reduce(0, +) == 5400 + 1200)
+
+let mobile = STReport.make(page, filter: .mobile, range: .day, anchor: now, now: now, calendar: cal)
+check("page: Mobile leaves the Mac and the PC out", mobile.total == 2 * 3600 && mobile.devices.map(\.id) == ["phone"] && mobile.apps.first?.platforms == ["android"])
+let mac = STReport.make(page, filter: .mac, range: .day, anchor: now, now: now, calendar: cal)
+check("page: Mac has no notification count", mac.total == 3600 && mac.notifs == nil && mac.unlocks == 3)
+let other = STReport.make(page, filter: .other, range: .day, anchor: now, now: now, calendar: cal)
+check("page: Other is the PC; no hours means no hourly bars", other.total == 600 && other.bars.isEmpty && other.unlocks == nil)
+let one = STReport.make(page, filter: .mobile, device: "mac", range: .day, anchor: now, now: now, calendar: cal)
+check("page: one device wins over the filter", one.total == 3600)
+
+let week = STReport.make(page, filter: .all, range: .week, anchor: now, now: now, calendar: calMon)
+check("page: the week holds both days", week.total == 3 * 3600 + 2 * 3600 + 3600 + 600)
+check("page: week bars are per day", Set(week.bars.map(\.bucket)).count == 2)
+let elapsedDays = week.weekDays.filter { $0 <= now }.count
+check("page: daily average over the days of the week so far", week.dailyAverage == week.total / elapsedDays)
+let yesterdayPage = STReport.make(page, filter: .all, range: .day, anchor: cal.date(byAdding: .day, value: -1, to: now)!, now: now, calendar: cal)
+check("page: an earlier day can go forward, and has no earlier data", yesterdayPage.hasLater && !yesterdayPage.hasEarlier && yesterdayPage.total == 3 * 3600)
+check("page: an empty day is empty", STReport.make(STSnapshot(), filter: .all, range: .day, anchor: now, now: now, calendar: cal).isEmpty)
+check("page: clock times", STText.clock(6 * 3600 + 30 * 60, on: now, calendar: cal).contains("6") && STText.clock(6 * 3600 + 30 * 60, on: now, calendar: cal).contains("30"))
+check("page: how long ago", STText.ago(now.addingTimeInterval(-30), now: now) == "just now" && STText.ago(now.addingTimeInterval(-600), now: now) == "10 min ago")
+
 print("screentimecheck: \(passed) passed, \(failed) failed"); exit(failed == 0 ? 0 : 1)

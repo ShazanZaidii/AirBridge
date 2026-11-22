@@ -5,11 +5,14 @@ import Foundation
 
 /// Time spent in apps, per day, per hour, per app. Codable so the Mac's own tracking survives restarts.
 nonisolated struct STAccumulator: Codable, Equatable {
-    nonisolated struct App: Codable, Equatable { var name: String; var seconds: Double }
+    nonisolated struct App: Codable, Equatable { var name: String; var seconds: Double; var opens: Int? = nil }
     nonisolated struct Day: Codable, Equatable {
         var seconds: Double = 0
         var hours: [Double] = Array(repeating: 0, count: 24)
         var apps: [String: App] = [:]
+        var unlocks: Int? = nil
+        /// First use, seconds after midnight.
+        var first: Int? = nil
     }
 
     var days: [String: Day] = [:]
@@ -40,6 +43,33 @@ nonisolated struct STAccumulator: Codable, Equatable {
         }
     }
 
+    /// App `id` came to the front at `at`.
+    mutating func open(id: String, name: String, at: Date, calendar: Calendar) {
+        guard !id.isEmpty else { return }
+        let key = STSummary.dayKey(at, calendar: calendar)
+        var day = days[key] ?? Day()
+        var app = day.apps[id] ?? App(name: name, seconds: 0)
+        app.opens = (app.opens ?? 0) + 1
+        if !name.isEmpty { app.name = name }
+        day.apps[id] = app
+        Self.markFirst(&day, at, calendar)
+        days[key] = day
+    }
+
+    /// The Mac was unlocked at `at`.
+    mutating func unlock(at: Date, calendar: Calendar) {
+        let key = STSummary.dayKey(at, calendar: calendar)
+        var day = days[key] ?? Day()
+        day.unlocks = (day.unlocks ?? 0) + 1
+        Self.markFirst(&day, at, calendar)
+        days[key] = day
+    }
+
+    private static func markFirst(_ day: inout Day, _ at: Date, _ calendar: Calendar) {
+        let sec = Int(at.timeIntervalSince(calendar.startOfDay(for: at)))
+        if day.first.map({ sec < $0 }) ?? true { day.first = sec }
+    }
+
     /// Keeps only the newest `keep` days.
     mutating func prune(keep: Int) {
         guard days.count > keep else { return }
@@ -48,17 +78,18 @@ nonisolated struct STAccumulator: Codable, Equatable {
 
     /// The device as the widget and the protocol see it: the newest `maxDays` days, today with hours and apps.
     func device(id: String, name: String, platform: String, now: Date, calendar: Calendar,
-                maxDays: Int = 14, maxApps: Int = 20) -> STDevice {
+                maxDays: Int = 14, maxApps: Int = 20, category: (String) -> String? = { _ in nil }) -> STDevice {
         let todayKey = STSummary.dayKey(now, calendar: calendar)
-        let keys = days.keys.sorted().suffix(maxDays)
+        let keys = days.keys.filter { $0 <= todayKey }.sorted().suffix(maxDays)
         let out: [STDay] = keys.map { k in
             let d = days[k]!
-            let apps = d.apps.map { STApp(id: $0.key, name: $0.value.name, seconds: Int($0.value.seconds.rounded())) }
+            let apps = d.apps.map { STApp(id: $0.key, name: $0.value.name, seconds: Int($0.value.seconds.rounded()), opens: $0.value.opens) }
                 .filter { $0.seconds > 0 }
                 .sorted { $0.seconds != $1.seconds ? $0.seconds > $1.seconds : $0.id < $1.id }
-            return STDay(day: k, seconds: Int(d.seconds.rounded()),
-                         hours: k == todayKey ? d.hours.map { Int($0.rounded()) } : nil,
-                         apps: Array(apps.prefix(maxApps)))
+                .prefix(maxApps)
+                .map { a -> STApp in var a = a; a.cat = category(a.id); return a }
+            return STDay(day: k, seconds: Int(d.seconds.rounded()), hours: d.hours.map { Int($0.rounded()) },
+                         apps: Array(apps), unlocks: d.unlocks, first: d.first)
         }
         return STDevice(id: id, name: name, platform: platform, updated: now, days: out)
     }
@@ -75,7 +106,18 @@ nonisolated enum STWire {
         let days: [[String: Any]] = device.days.suffix(maxDays).map { d in
             var o: [String: Any] = ["day": d.day, "s": d.seconds]
             if let h = d.hours, h.count == 24 { o["hours"] = h }
-            if let a = d.apps, !a.isEmpty { o["apps"] = a.prefix(maxApps).map { ["id": $0.id, "name": $0.name, "s": $0.seconds] as [String: Any] } }
+            if let u = d.unlocks { o["unlocks"] = u }
+            if let n = d.notifs { o["notifs"] = n }
+            if let f = d.first { o["first"] = f }
+            if let a = d.apps, !a.isEmpty {
+                o["apps"] = a.prefix(maxApps).map { app -> [String: Any] in
+                    var j: [String: Any] = ["id": app.id, "name": app.name, "s": app.seconds]
+                    if let v = app.opens { j["opens"] = v }
+                    if let v = app.notifs { j["notifs"] = v }
+                    if let v = app.cat { j["cat"] = v }
+                    return j
+                }
+            }
             return o
         }
         return ["t": "screen_time", "days": days]
@@ -98,10 +140,13 @@ nonisolated enum STWire {
                 apps = a.prefix(maxApps).compactMap { e -> STApp? in
                     guard let e = e as? [String: Any], let aid = e["id"] as? String, !aid.isEmpty, let secs = number(e["s"]) else { return nil }
                     let nm = (e["name"] as? String).map { String($0.prefix(80)) } ?? aid
-                    return STApp(id: String(aid.prefix(200)), name: nm, seconds: min(86_400, max(0, secs)))
+                    return STApp(id: String(aid.prefix(200)), name: nm, seconds: min(86_400, max(0, secs)),
+                                 opens: count(e["opens"]), notifs: count(e["notifs"]), cat: STCategory.valid(e["cat"] as? String))
                 }
             }
-            days.append(STDay(day: key, seconds: min(86_400, max(0, s)), hours: hours, apps: apps))
+            let first = number(o["first"]).flatMap { (0..<86_400).contains($0) ? $0 : nil }
+            days.append(STDay(day: key, seconds: min(86_400, max(0, s)), hours: hours, apps: apps,
+                              unlocks: count(o["unlocks"]), notifs: count(o["notifs"]), first: first))
         }
         return STDevice(id: id, name: name, platform: platform, updated: now, days: days)
     }
@@ -112,6 +157,9 @@ nonisolated enum STWire {
               let y = Int(p[0]), let m = Int(p[1]), let d = Int(p[2]) else { return false }
         return (2000...2200).contains(y) && (1...12).contains(m) && (1...31).contains(d)
     }
+
+    /// A count a day can hold (0 to 100 000), or nil.
+    private static func count(_ v: Any?) -> Int? { number(v).map { min(100_000, max(0, $0)) } }
 
     private static func number(_ v: Any?) -> Int? {
         switch v {
