@@ -32,13 +32,22 @@ import SwiftUI
             w.delegate = self
             w.setFrameAutosaveName("AirBridgeScreenTime")
             if w.frame.origin == .zero { w.center() }
+            // Come to the desktop (Space) the user is on, not stay on the one where it was first opened.
+            w.collectionBehavior.insert(.moveToActiveSpace)
             window = w
         }
-        NSApp.activate(ignoringOtherApps: true)
-        window?.makeKeyAndOrderFront(nil)
+        guard let w = window else { return }
+        if w.isMiniaturized { w.deminiaturize(nil) }
+        NSApp.activate()
+        w.makeKeyAndOrderFront(nil)
+        w.orderFrontRegardless()
     }
 
     func windowWillClose(_ notification: Notification) { model.close() }
+
+    #if DEBUG
+    func debugClose() { window?.close() }
+    #endif
 }
 
 enum AppSort: String, CaseIterable { case time, opens, notifs }
@@ -656,8 +665,18 @@ private struct UsageChart: View {
         .chartXScale(domain: -0.6...(Double(buckets) - 0.4))
         .chartYScale(domain: 0...top)
         .chartXAxis {
-            AxisMarks(values: day ? [0, 6, 12, 18] : Array(0..<7)) { v in
-                AxisValueLabel { if let i = v.as(Int.self) { Text(xLabel(i)).font(.system(size: 11)).foregroundStyle(Ink.tertiary) } }
+            if day {
+                AxisMarks(values: Array(0..<24)) { v in
+                    let i = v.as(Int.self) ?? 0
+                    AxisTick(length: i % 3 == 0 ? 5 : 3, stroke: StrokeStyle(lineWidth: 1)).foregroundStyle(i % 3 == 0 ? Ink.tertiary : Ink.hairline)
+                    if i % 3 == 0 {
+                        AxisValueLabel(anchor: .top) { Text(xLabel(i)).font(.system(size: 11)).foregroundStyle(Ink.tertiary) }
+                    }
+                }
+            } else {
+                AxisMarks(values: Array(0..<7)) { v in
+                    AxisValueLabel { if let i = v.as(Int.self) { Text(xLabel(i)).font(.system(size: 11)).foregroundStyle(Ink.tertiary) } }
+                }
             }
         }
         .chartYAxis {
@@ -1079,3 +1098,4 @@ extension ScreenTimeWindow {
     }
 }
 #endif
+
