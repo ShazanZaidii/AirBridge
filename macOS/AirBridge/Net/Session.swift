@@ -335,8 +335,11 @@ nonisolated final class Session: @unchecked Sendable {
             }
         case "clip":
             ClipboardSync.receive(msg, from: peerId)
+        case "screen_time", "screen_time_icon":
+            // §15: another device's screen time, shown in the AirBridge widget (ScreenTime/ScreenTimeHub.swift).
+            ScreenTimeHub.shared.receive(from: peerInfo, type: t, msg)
         case "dev_battery":
-            // The phone's battery level, listed in macOS's own battery list (Devices/DevicePowerSources.swift).
+            // The phone's battery level, listed in macOS's own battery list (Widgets/Integration/DevicePowerSources.swift).
             DevicePowerSources.shared.receive(from: peerId, msg)
         case _ where t.hasPrefix("xfer_"):
             transfers?.handle(t, msg)
