@@ -51,6 +51,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         InputInterceptor.shared.start()
         DropDock.shared.start()
         PhoneNotifCenter.shared.start()
+        LocalScreenTime.shared.start() // this Mac's screen time for the AirBridge widget
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -436,6 +437,7 @@ struct MenuView: View {
     @AppStorage(PhoneNotifSettings.showCallsKey) private var showPhoneCalls = true
     @AppStorage(PhoneNotifSettings.soundsKey) private var phoneSounds = true
     @AppStorage(DevicePowerSources.showKey) private var showPhoneBattery = true
+    @AppStorage(ScreenTimeHub.trackKey) private var trackScreenTime = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -866,6 +868,9 @@ struct MenuView: View {
             SettingToggleRow(icon: "battery.75percent", title: "Phone battery", hint: "List it in the Batteries widget",
                              isOn: $showPhoneBattery)
                 .onChange(of: showPhoneBattery) { _, _ in DevicePowerSources.shared.refresh() }
+            SettingToggleRow(icon: "hourglass", title: "This Mac's screen time", hint: "Count it for the AirBridge widget",
+                             isOn: $trackScreenTime)
+                .onChange(of: trackScreenTime) { _, _ in LocalScreenTime.shared.settingChanged() }
         }
         .fixedSize(horizontal: false, vertical: true)
         .padding(.top, Theme.xs)
