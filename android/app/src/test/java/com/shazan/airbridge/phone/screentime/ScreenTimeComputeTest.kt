@@ -117,4 +117,55 @@ class ScreenTimeComputeTest {
         assertEquals("app29", p.last().apps!!.first().id) // 59 s, the longest
         assertEquals(listOf("app29", "app28"), ScreenTimeCompute.topApps(days, "2026-11-22", 2))
     }
+
+    // ---- screens inside one app (the Reddit bug: post -> comments stopped the count)
+
+    @Test fun openingAnotherScreenInsideTheAppKeepsCounting() {
+        // Android reports the new screen resumed first, then the old one stopped.
+        val d = compute(
+            Event(t(22, 10), "com.reddit.frontpage", RESUMED, "Main"),
+            Event(t(22, 10, 5), "com.reddit.frontpage", RESUMED, "Comments"),
+            Event(t(22, 10, 5, 1), "com.reddit.frontpage", STOPPED, "Main"),
+            Event(t(22, 10, 15), "com.reddit.frontpage", PAUSED, "Comments")).getValue("2026-11-22")
+        assertEquals(900.0, d.seconds, 0.01)
+    }
+
+    @Test fun goingBackToTheFirstScreenKeepsCountingToo() {
+        val d = compute(
+            Event(t(22, 10), "r", RESUMED, "Main"), Event(t(22, 10, 0, 1), "r", PAUSED, "Main"),
+            Event(t(22, 10, 0, 1), "r", RESUMED, "Post"), Event(t(22, 10, 0, 2), "r", STOPPED, "Main"),
+            Event(t(22, 10, 8), "r", PAUSED, "Post"), Event(t(22, 10, 8), "r", RESUMED, "Main"),
+            Event(t(22, 10, 8, 1), "r", STOPPED, "Post"), Event(t(22, 10, 20), "r", PAUSED, "Main")).getValue("2026-11-22")
+        assertEquals(1200.0, d.seconds, 0.01)
+    }
+
+    @Test fun anAppStopsCountingWhenItsLastScreenLeaves() {
+        val d = compute(
+            Event(t(22, 10), "x", RESUMED, "A"), Event(t(22, 10, 2), "x", RESUMED, "B"),
+            Event(t(22, 10, 2), "x", STOPPED, "A"), Event(t(22, 10, 6), "x", PAUSED, "B"),
+            Event(t(22, 10, 30), "", SCREEN_NON_INTERACTIVE)).getValue("2026-11-22")
+        assertEquals(360.0, d.seconds, 0.01)
+    }
+
+    @Test fun switchingAppsStillMovesTheTimeToTheNewApp() {
+        val d = compute(
+            Event(t(22, 10), "a", RESUMED, "A1"), Event(t(22, 10, 10), "b", RESUMED, "B1"),
+            Event(t(22, 10, 10, 1), "a", STOPPED, "A1"), Event(t(22, 10, 25), "b", PAUSED, "B1")).getValue("2026-11-22")
+        assertEquals(600.0, d.apps.getValue("a"), 0.01)
+        assertEquals(900.0, d.apps.getValue("b"), 0.01)
+    }
+
+    @Test fun theOldAppStoppingLateDoesNotEndTheNewOne() {
+        val d = compute(
+            Event(t(22, 10), "a", RESUMED, "A1"), Event(t(22, 10, 10), "b", RESUMED, "B1"),
+            Event(t(22, 10, 12), "a", STOPPED, "A1"), Event(t(22, 10, 30), "b", PAUSED, "B1")).getValue("2026-11-22")
+        assertEquals(1200.0, d.apps.getValue("b"), 0.01)
+    }
+
+    @Test fun afterTheScreenTurnsOffNothingIsLeftShowing() {
+        val d = compute(
+            Event(t(22, 10), "a", RESUMED, "A1"), Event(t(22, 10, 5), "", SCREEN_NON_INTERACTIVE),
+            Event(t(22, 10, 40), "a", PAUSED, "A1"), Event(t(22, 11), "a", RESUMED, "A1"), Event(t(22, 11, 10), "a", PAUSED, "A1")).getValue("2026-11-22")
+        assertEquals(900.0, d.seconds, 0.01)
+    }
 }

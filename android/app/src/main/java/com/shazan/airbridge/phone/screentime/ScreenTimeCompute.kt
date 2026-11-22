@@ -10,8 +10,10 @@ import java.time.temporal.ChronoUnit
  * Turns Android's app usage events into screen time per day, per hour and per app (docs/protocol.md §15).
  * Pure Kotlin (no Android types), so ScreenTimeComputeTest checks it on the JVM.
  *
- * An app counts from the moment it comes to the front until it leaves it, the screen turns off, the lock screen shows
- * or the phone shuts down. The home screen and the system UI are not counted, like Android's own Digital Wellbeing.
+ * An app counts while any of its screens (activities) is showing: from the first one coming to the front until the last one
+ * leaves, the screen turns off, the lock screen shows or the phone shuts down. Opening another screen inside the same app
+ * (a post, then its comments) is reported as "new screen resumed" and only then "old screen stopped", so screens are tracked
+ * one by one, the way Android's own Digital Wellbeing does, or that app would stop counting at every tap. The home screen and the system UI are not counted, like Android's own Digital Wellbeing.
  */
 object ScreenTimeCompute {
     // The UsageEvents.Event constants this needs.
@@ -26,7 +28,8 @@ object ScreenTimeCompute {
     /** The longest single stretch counted at once (a missed "screen off" never counts as a whole night). */
     const val MAX_SEGMENT_MS = 4L * 3600 * 1000
 
-    data class Event(val time: Long, val pkg: String, val type: Int)
+    /** [cls] is the activity (screen) class the event is about. */
+    data class Event(val time: Long, val pkg: String, val type: Int, val cls: String = "")
 
     class Day {
         var seconds = 0.0
@@ -37,6 +40,8 @@ object ScreenTimeCompute {
     /** Screen time per day ("yyyy-MM-dd" in [zone]) from [events]. An app still in front at [now] counts up to [now]. */
     fun compute(events: List<Event>, now: Long, zone: ZoneId, ignore: Set<String>): Map<String, Day> {
         val days = HashMap<String, Day>()
+        /** Screens of each app that are showing now. */
+        val showing = HashMap<String, MutableSet<String>>()
         var curPkg: String? = null
         var curStart = 0L
         fun close(at: Long) {
@@ -47,12 +52,20 @@ object ScreenTimeCompute {
         for (e in events.sortedBy { it.time }) {
             when (e.type) {
                 RESUMED -> {
-                    if (curPkg == e.pkg) continue
-                    close(e.time)
-                    if (e.pkg !in ignore && e.pkg.isNotEmpty()) { curPkg = e.pkg; curStart = e.time }
+                    if (e.pkg.isEmpty()) continue
+                    if (e.pkg in ignore) { close(e.time); showing.clear(); continue } // home screen: nothing is in use
+                    showing.getOrPut(e.pkg) { mutableSetOf() }.add(e.cls)
+                    if (curPkg != e.pkg) { close(e.time); curPkg = e.pkg; curStart = e.time }
                 }
-                PAUSED, STOPPED -> if (curPkg == e.pkg) close(e.time)
-                SCREEN_NON_INTERACTIVE, KEYGUARD_SHOWN, DEVICE_SHUTDOWN -> close(e.time)
+                PAUSED, STOPPED -> {
+                    val set = showing[e.pkg] ?: continue
+                    set.remove(e.cls)
+                    if (set.isEmpty()) {
+                        showing.remove(e.pkg)
+                        if (curPkg == e.pkg) close(e.time) // the app's last screen left
+                    }
+                }
+                SCREEN_NON_INTERACTIVE, KEYGUARD_SHOWN, DEVICE_SHUTDOWN -> { close(e.time); showing.clear() }
             }
         }
         close(now)
