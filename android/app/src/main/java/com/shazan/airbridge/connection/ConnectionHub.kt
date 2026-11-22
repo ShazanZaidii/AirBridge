@@ -221,6 +221,7 @@ object ConnectionHub : PeerBus.Transport {
         com.shazan.airbridge.phone.PhoneRelay.onPeerReady(id) // §13: notification state, resync, current call
         com.shazan.airbridge.phone.calls.CallAudioInfo.onPeerReady(id) // §13.4: Bluetooth facts for call audio
         com.shazan.airbridge.phone.DeviceBattery.onPeerReady(id) // the battery level, for a computer that lists it
+        com.shazan.airbridge.phone.screentime.ScreenTimeReporter.onPeerReady(id) // screen time, for a computer with the widget
     }
 
     fun onClosed(s: Session, outcome: Outcome) {

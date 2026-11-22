@@ -76,6 +76,7 @@ object PhoneRelay {
         PhonePresence.init(app)
         BeaconAdvertiser.init(app)
         DeviceBattery.init(app)
+        com.shazan.airbridge.phone.screentime.ScreenTimeReporter.init(app) // §15 screen time for the AirBridge widget
     }
 
     fun onListenerConnected() = worker.post {
