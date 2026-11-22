@@ -199,7 +199,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
                 ScreenTimeWindow.shared.debugSnapshot(range: q.first(where: { $0.name == "range" })?.value,
                                                       filter: q.first(where: { $0.name == "filter" })?.value,
                                                       expand: q.contains { $0.name == "expand" },
-                                                      dark: q.first(where: { $0.name == "light" }) == nil)
+                                                      dark: q.first(where: { $0.name == "light" }) == nil,
+                                                      back: Int(q.first(where: { $0.name == "back" })?.value ?? "") ?? 0)
             }
             // airbridge://debug/airweb_stop — closes AirWeb.
             if url.path == "/airweb_stop" { AirWebWindow.shared.stop() }
