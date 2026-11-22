@@ -90,7 +90,7 @@ object ScreenTimeReporter {
         val e = UsageEvents.Event()
         while (it.hasNextEvent()) {
             it.getNextEvent(e)
-            list.add(ScreenTimeCompute.Event(e.timeStamp, e.packageName ?: "", e.eventType))
+            list.add(ScreenTimeCompute.Event(e.timeStamp, e.packageName ?: "", e.eventType, e.className ?: ""))
         }
         val days = ScreenTimeCompute.compute(list, now, zone, ignored())
         val key = today.toString()
