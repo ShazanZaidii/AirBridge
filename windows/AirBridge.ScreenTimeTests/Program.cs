@@ -31,7 +31,10 @@ Check("today has 24 hours", ((JsonArray)today["hours"]!).Count == 24 && (long)to
 var apps = (JsonArray)today["apps"]!;
 Check("today's apps, most used first, with names", (string)apps[0]!["id"]! == "code.exe" && (string)apps[0]!["name"]! == "Visual Studio Code" && (long)apps[0]!["s"]! == 3600);
 var tomorrow = days.Select(x => (JsonObject)x!).First(o => (string)o["day"]! == "2026-11-23");
-Check("other days carry only a total", tomorrow["hours"] == null && tomorrow["apps"] == null && (long)tomorrow["s"]! == 900);
+Check("a day after today (clock moved back) carries only a total", tomorrow["hours"] == null && tomorrow["apps"] == null && (long)tomorrow["s"]! == 900);
+var twoDays = new ScreenTimeAccumulator(); twoDays.Add("code.exe", "Code", T(21, 9), T(21, 10)); twoDays.Add("code.exe", "Code", T(22, 9), T(22, 9, 30));
+var yday = ((JsonArray)twoDays.Message(T(22, 12))["days"]!).Select(x => (JsonObject)x!).First(o => (string)o["day"]! == "2026-11-21");
+Check("earlier days carry their hours and apps too", ((JsonArray)yday["hours"]!).Count == 24 && (long)yday["hours"]![9]! == 3600 && (string)yday["apps"]![0]!["id"]! == "code.exe");
 var lots = new ScreenTimeAccumulator(); for (int i = 0; i < 30; i++) lots.Add($"app{i}.exe", $"A{i}", T(22, 12, i), T(22, 12, i, 30 + i));
 var lm = (JsonObject)((JsonArray)lots.Message(T(22, 13))["days"]!)[0]!;
 Check("at most 20 apps", ((JsonArray)lm["apps"]!).Count == 20);

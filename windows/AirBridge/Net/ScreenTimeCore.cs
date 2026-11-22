@@ -56,7 +56,8 @@ namespace AirBridge.Net
             foreach (var k in Days.Keys.OrderBy(k => k, StringComparer.Ordinal).SkipLast(keep).ToList()) Days.Remove(k);
         }
 
-        /// <summary>The <c>screen_time</c> message: the newest days, today with its hours and top apps.</summary>
+        /// <summary>The <c>screen_time</c> message: the newest days, each up to today with its hours and top apps (for the Mac's
+        /// Screen Time page, which steps back through days and weeks).</summary>
         public JsonObject Message(DateTime nowLocal, int maxDays = 14, int maxApps = 20)
         {
             string today = DayKey(nowLocal);
@@ -65,7 +66,7 @@ namespace AirBridge.Net
             {
                 var d = Days[key];
                 var o = new JsonObject { ["day"] = key, ["s"] = (long)Math.Round(d.Seconds) };
-                if (key == today)
+                if (string.CompareOrdinal(key, today) <= 0)
                 {
                     var hours = new JsonArray();
                     foreach (var h in d.Hours) hours.Add((long)Math.Round(h));
