@@ -76,10 +76,14 @@ struct ToolPill: View {
     let icon: String
     @State private var hovering = false
     var body: some View {
-        Label(title, systemImage: icon)
+        HStack(spacing: 4) {
+            Image(systemName: icon)
+            Text(title)
+        }
             .font(.caption)
             .lineLimit(1)
-            .padding(.horizontal, 10)
+            .minimumScaleFactor(0.85)
+            .padding(.horizontal, 6)
             .padding(.vertical, 6)
             .frame(maxWidth: .infinity)
             .background(Capsule().fill(Color.primary.opacity(hovering ? 0.10 : 0.05)))
@@ -123,5 +127,49 @@ struct SettingActionRow: View {
         .buttonStyle(.plain)
         .onHover { h in withAnimation(.easeOut(duration: 0.12)) { hovering = h } }
         .accessibilityLabel(title)
+    }
+}
+
+/// The tabs of the menu's Settings.
+enum SettingsTab: String, CaseIterable {
+    case general, phone, screenTime
+    var title: String {
+        switch self {
+        case .general: "General"
+        case .phone: "Phone"
+        case .screenTime: "Screen time"
+        }
+    }
+}
+
+/// Three-way tab switch in the style of "Ring on this Mac": the highlight slides between the tabs.
+struct SettingsTabs: View {
+    @Binding var selection: String
+    @Namespace private var pill
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(SettingsTab.allCases, id: \.rawValue) { t in
+                let on = selection == t.rawValue
+                Button {
+                    withAnimation(reduceMotion ? nil : .spring(response: 0.32, dampingFraction: 0.78)) { selection = t.rawValue }
+                } label: {
+                    Text(t.title)
+                        .font(.caption.weight(on ? .semibold : .regular))
+                        .foregroundStyle(on ? Color(nsColor: .windowBackgroundColor) : .primary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 5)
+                        .background {
+                            if on { Capsule().fill(Color.primary.opacity(0.85)).matchedGeometryEffect(id: "tab", in: pill) }
+                        }
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(on ? .isSelected : [])
+            }
+        }
+        .padding(2)
+        .background(Capsule().fill(Color.primary.opacity(0.07)))
     }
 }
