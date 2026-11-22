@@ -27,6 +27,8 @@ class AirBridgeApp : Application() {
         com.shazan.airbridge.phone.PhoneRelay.init(this)
         // Input half: routes control messages from PeerBus even before the accessibility service is on.
         InputRouter.install(this)
+        // Accessibility services that an update dropped: put back, or one tap to turn on.
+        com.shazan.airbridge.control.accessibility.A11yKeeper.onAppStart(this)
         // OEM gesture switches the trackpad turned off and could not put back (crash / kill).
         com.shazan.airbridge.control.trackpad.OsGestureGuard.restore(this)
         // Accessibility services off while a UPI app is in front (Paytm refuses to pay otherwise); repairs a pause a kill left.

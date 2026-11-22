@@ -477,6 +477,7 @@
     <string name="pp_copied">કમાન્ડ કૉપિ થયો</string>
     <string name="pp_notif_title">AirBridge કંટ્રોલ બંધ છે</string>
     <string name="pp_notif_text">પેમેન્ટ એપ માટે તે બંધ કરાયો હતો. ફરી ચાલુ કરવા ટૅપ કરો.</string>
+    <string name="a11y_after_update_text">AirBridge અપડેટ થયું ત્યારે તે બંધ થઈ ગયું. ફરી ચાલુ કરવા ટૅપ કરો.</string>
     <string name="xfer_cancel_recv_q">%1$s મેળવવાનું રદ કરવું?</string>
     <string name="xfer_cancel_send_q">%1$s મોકલવાનું રદ કરવું?</string>
     <string name="xfer_cancel_keep">ચાલુ રાખો</string>

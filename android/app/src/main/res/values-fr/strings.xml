@@ -486,6 +486,7 @@
     <string name="pp_copied">Commande copiée</string>
     <string name="pp_notif_title">Le contrôle AirBridge est coupé</string>
     <string name="pp_notif_text">Il a été coupé pour une appli de paiement. Touchez pour le réactiver.</string>
+    <string name="a11y_after_update_text">Il s’est coupé pendant la mise à jour d’AirBridge. Touchez pour le réactiver.</string>
     <string name="xfer_cancel_recv_q">Annuler la réception de %1$s ?</string>
     <string name="xfer_cancel_send_q">Annuler l\'envoi de %1$s ?</string>
     <string name="xfer_cancel_keep">Continuer</string>
