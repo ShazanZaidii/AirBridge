@@ -92,7 +92,7 @@ object ScreenTimeReporter {
             it.getNextEvent(e)
             list.add(ScreenTimeCompute.Event(e.timeStamp, e.packageName ?: "", e.eventType, e.className ?: ""))
         }
-        val days = ScreenTimeCompute.compute(list, now, zone, ignored())
+        val days = ScreenTimeCompute.compute(list, now, zone, ignored(), untilStopped = android.os.Build.VERSION.SDK_INT >= 29)
         val key = today.toString()
         val pm = app.packageManager
         val msg = ScreenTimeCompute.message(days, key, { pkg -> label(pm, pkg) }, maxDays = DAYS)

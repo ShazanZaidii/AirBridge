@@ -13,7 +13,12 @@ import java.time.temporal.ChronoUnit
  * An app counts while any of its screens (activities) is showing: from the first one coming to the front until the last one
  * leaves, the screen turns off, the lock screen shows or the phone shuts down. Opening another screen inside the same app
  * (a post, then its comments) is reported as "new screen resumed" and only then "old screen stopped", so screens are tracked
- * one by one, the way Android's own Digital Wellbeing does, or that app would stop counting at every tap. The home screen and the system UI are not counted, like Android's own Digital Wellbeing.
+ * one by one, or that app would stop counting at every tap. The home screen and the system UI are not counted.
+ *
+ * With [compute]'s `untilStopped` (Android 10 and newer, which report when a screen stops being visible) an app counts while
+ * it is *visible*, until its last screen stops, not only while it has focus. That is how Android's own Digital Wellbeing
+ * counts: an app stays visible (and counted) under a permission dialog, a share sheet, the assistant or another app's small
+ * window on top. Two apps visible at once (split screen) both count, as in Digital Wellbeing.
  */
 object ScreenTimeCompute {
     // The UsageEvents.Event constants this needs.
@@ -23,6 +28,7 @@ object ScreenTimeCompute {
     const val SCREEN_NON_INTERACTIVE = 16
     const val KEYGUARD_SHOWN = 17
     const val STOPPED = 23
+    const val DESTROYED = 24
     const val DEVICE_SHUTDOWN = 26
 
     /** The longest single stretch counted at once (a missed "screen off" never counts as a whole night). */
@@ -37,8 +43,46 @@ object ScreenTimeCompute {
         val apps = HashMap<String, Double>()
     }
 
-    /** Screen time per day ("yyyy-MM-dd" in [zone]) from [events]. An app still in front at [now] counts up to [now]. */
-    fun compute(events: List<Event>, now: Long, zone: ZoneId, ignore: Set<String>): Map<String, Day> {
+    /**
+     * Screen time per day ("yyyy-MM-dd" in [zone]) from [events]. An app still showing at [now] counts up to [now].
+     * [untilStopped]: count apps while visible (needs the "stopped" events of Android 10+), else while in focus.
+     */
+    fun compute(events: List<Event>, now: Long, zone: ZoneId, ignore: Set<String>, untilStopped: Boolean = false): Map<String, Day> =
+        if (untilStopped) computeVisible(events, now, zone, ignore) else computeFocused(events, now, zone, ignore)
+
+    /** Android 10+: each app counts from its first screen showing until its last screen stops (apps can overlap). */
+    private fun computeVisible(events: List<Event>, now: Long, zone: ZoneId, ignore: Set<String>): Map<String, Day> {
+        val days = HashMap<String, Day>()
+        val visible = HashMap<String, MutableSet<String>>()
+        val since = HashMap<String, Long>()
+        fun close(pkg: String, at: Long) {
+            val start = since.remove(pkg) ?: return
+            visible.remove(pkg)
+            add(days, pkg, start, minOf(at, start + MAX_SEGMENT_MS), zone)
+        }
+        fun closeAll(at: Long) { for (p in since.keys.toList()) close(p, at); visible.clear() }
+        for (e in events.sortedBy { it.time }) {
+            when (e.type) {
+                RESUMED -> {
+                    if (e.pkg.isEmpty()) continue
+                    if (e.pkg in ignore) { closeAll(e.time); continue } // home screen or recents: nothing is in use
+                    visible.getOrPut(e.pkg) { mutableSetOf() }.add(e.cls)
+                    if (e.pkg !in since) since[e.pkg] = e.time
+                }
+                STOPPED, DESTROYED -> {
+                    val set = visible[e.pkg] ?: continue
+                    set.remove(e.cls)
+                    if (set.isEmpty()) close(e.pkg, e.time) // the app's last screen is gone
+                }
+                SCREEN_NON_INTERACTIVE, KEYGUARD_SHOWN, DEVICE_SHUTDOWN -> closeAll(e.time)
+            }
+        }
+        closeAll(now)
+        return days
+    }
+
+    /** Older Android: the app in focus counts, one at a time, until its last screen pauses. */
+    private fun computeFocused(events: List<Event>, now: Long, zone: ZoneId, ignore: Set<String>): Map<String, Day> {
         val days = HashMap<String, Day>()
         /** Screens of each app that are showing now. */
         val showing = HashMap<String, MutableSet<String>>()
