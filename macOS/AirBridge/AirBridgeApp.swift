@@ -52,6 +52,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         DropDock.shared.start()
         PhoneNotifCenter.shared.start()
         LocalScreenTime.shared.start() // this Mac's screen time for the AirBridge widget
+        LoginItem.applyDefault()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -871,6 +872,8 @@ struct MenuView: View {
             SettingToggleRow(icon: "hourglass", title: "This Mac's screen time", hint: "Count it for the AirBridge widget",
                              isOn: $trackScreenTime)
                 .onChange(of: trackScreenTime) { _, _ in LocalScreenTime.shared.settingChanged() }
+            SettingToggleRow(icon: "power", title: "Open at login", hint: "So screen time counts from the start of the day",
+                             isOn: Binding(get: { LoginItem.isOn }, set: { LoginItem.set($0) }))
         }
         .fixedSize(horizontal: false, vertical: true)
         .padding(.top, Theme.xs)

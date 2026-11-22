@@ -215,7 +215,7 @@ private struct TrendChart: View {
             if axes {
                 AxisMarks(position: .trailing, values: .automatic(desiredCount: 3)) { v in
                     AxisGridLine().foregroundStyle(.secondary.opacity(0.25))
-                    AxisValueLabel { if let h = v.as(Double.self) { Text(h == 0 ? "0" : "\(Int(h.rounded()))h").font(.caption2) } }
+                    AxisValueLabel { if let h = v.as(Double.self) { Text(axisLabel(h)).font(.caption2) } }
                 }
             }
         }
@@ -325,6 +325,14 @@ private struct EmptyStateView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
+}
+
+/// An axis value in hours as a short label: "0", "20m", "1h", "1.5h", "8h".
+func axisLabel(_ hours: Double) -> String {
+    if hours <= 0 { return "0" }
+    if hours < 1 { return "\(Int((hours * 60).rounded()))m" }
+    let r = (hours * 2).rounded() / 2
+    return r == r.rounded() ? "\(Int(r))h" : String(format: "%.1fh", r)
 }
 
 /// The same pictures the AirBridge battery entries use.
