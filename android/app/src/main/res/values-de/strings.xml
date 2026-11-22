@@ -477,6 +477,7 @@
     <string name="pp_copied">Befehl kopiert</string>
     <string name="pp_notif_title">AirBridge-Steuerung ist aus</string>
     <string name="pp_notif_text">Sie wurde für eine Zahlungs-App ausgeschaltet. Tippe, um sie wieder einzuschalten.</string>
+    <string name="a11y_after_update_text">Beim Update von AirBridge wurde sie ausgeschaltet. Tippe, um sie wieder einzuschalten.</string>
     <string name="xfer_cancel_recv_q">Empfang von %1$s abbrechen?</string>
     <string name="xfer_cancel_send_q">Senden von %1$s abbrechen?</string>
     <string name="xfer_cancel_keep">Weitermachen</string>

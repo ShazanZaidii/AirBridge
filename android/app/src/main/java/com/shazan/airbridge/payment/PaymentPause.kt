@@ -336,6 +336,9 @@ object PaymentPause {
 
     private fun leftover(ctx: Context): List<String> = EnabledServices.split(prefs(ctx).getString(PREF_REMOVED, null))
 
+    /** The entries AirBridge took out itself (payment app, no device) and will put back. */
+    fun removedEntries(ctx: Context): List<String> = leftover(ctx)
+
     /** A payment app is in front: services off. */
     private fun pause(ctx: Context, app: String) = synchronized(lock) {
         val cr = ctx.contentResolver
