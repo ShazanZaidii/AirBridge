@@ -3,7 +3,8 @@ import CoreGraphics
 
 /// Whether widgets sit on the desktop, and whether they can be seen right now (no app window covering them). macOS has no
 /// notification for "the desktop is in view", so this looks at the window list (owners and positions only, no permission
-/// needed) at the moments it can change: switching desktops or apps, an app hiding or quitting, waking. Then:
+/// needed) when it can change (switching desktops or apps, an app hiding or quitting, waking) and, only while widgets sit on
+/// the desktop, every 3 seconds (Show Desktop sends no event). Then:
 /// - desktop comes into view: fresh numbers and a redraw at once;
 /// - staying on the desktop: again every 5 minutes;
 /// - desktop widgets covered: every 30 minutes (ScreenTimeHub's background pace).
@@ -30,29 +31,31 @@ import CoreGraphics
         check()
     }
 
+    private var present = false
+    private var lastPull = Date.distantPast
+
     func check() {
-        let state = Self.look()
-        let cameIntoView = state.visible && !visible
+        // Nobody sees the desktop while the screen is locked or asleep.
+        let state = ScreenTimeHub.screenInUse() ? Self.look() : (present: present, visible: false)
+        // Fresh numbers when the desktop comes into view, and every 5 minutes while it stays in view.
+        let pull = state.visible && (!visible || Date().timeIntervalSince(lastPull) >= 300)
         #if DEBUG
-        if let u = ScreenTimeShared.folder()?.appendingPathComponent("desktop-watch.txt") {
-            let line = "\(Date()) present=\(state.present) visible=\(state.visible)\(cameIntoView ? " -> pull" : "")\n"
+        if state.present != present || state.visible != visible || pull, let u = ScreenTimeShared.folder()?.appendingPathComponent("desktop-watch.txt") {
+            let line = "\(Date()) present=\(state.present) visible=\(state.visible)\(pull ? " -> pull" : "")\n"
             if let h = try? FileHandle(forWritingTo: u) { h.seekToEndOfFile(); h.write(Data(line.utf8)); try? h.close() }
             else { try? Data(line.utf8).write(to: u) }
         }
         #endif
+        if state.present != present || state.visible != visible { ScreenTimeHub.shared.setDesktop(present: state.present, visible: state.visible) }
+        present = state.present
         visible = state.visible
-        ScreenTimeHub.shared.setDesktop(present: state.present, visible: state.visible)
-        if cameIntoView { ScreenTimeHub.shared.pullNow() }
+        if pull { lastPull = Date(); ScreenTimeHub.shared.pullNow() }
+        // Show Desktop (four-finger spread), hot corners and Stage Manager send apps no event, so while widgets sit on the
+        // desktop the window list is read every 3 seconds (about a millisecond). Without desktop widgets: a look every 5
+        // minutes, in case some are added.
         timer?.invalidate()
-        timer = nil
-        if state.visible {
-            // Staying on the desktop: fresh numbers every 5 minutes (drawn only if they changed).
-            timer = Timer.scheduledTimer(withTimeInterval: 300, repeats: false) { _ in
-                MainActor.assumeIsolated {
-                    DesktopWidgetWatch.shared.visible = false // so the next check counts as "in view" and pulls
-                    DesktopWidgetWatch.shared.check()
-                }
-            }
+        timer = Timer.scheduledTimer(withTimeInterval: present ? 3 : 300, repeats: false) { _ in
+            MainActor.assumeIsolated { DesktopWidgetWatch.shared.check() }
         }
     }
 
