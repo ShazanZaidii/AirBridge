@@ -233,6 +233,31 @@ nonisolated struct STReport: Sendable, Equatable {
 
 /// Times of day and counts for the page.
 nonisolated enum STText {
+    /// Whether the user's clock is 24-hour: the macOS setting (Date & Time, "24-hour time"), else the region's habit.
+    static func uses24Hour(locale: Locale = .autoupdatingCurrent) -> Bool {
+        !(DateFormatter.dateFormat(fromTemplate: "j", options: 0, locale: locale) ?? "HH").contains("a")
+    }
+
+    /// An hour of the day as an axis label: "13:00" on a 24-hour clock, "1 PM" on a 12-hour one (the calendar's AM/PM words).
+    static func hour(_ h: Int, h24: Bool, calendar: Calendar) -> String {
+        let h = ((h % 24) + 24) % 24
+        if h24 { return String(format: "%02d:00", h) }
+        let twelve = h % 12 == 0 ? 12 : h % 12
+        return "\(twelve) \(h < 12 ? calendar.amSymbol : calendar.pmSymbol)"
+    }
+
+    /// The step that keeps at most `maxLabels` labels over `span` positions.
+    static func step(span: Int, maxLabels: Int) -> Int {
+        max(1, Int((Double(max(1, span)) / Double(max(1, maxLabels))).rounded(.up)))
+    }
+
+    /// Label positions that end at `last` (the current hour or today) and step back by `step`, never before `first`. So the
+    /// axis always names "now", and the other labels fall into place around it.
+    static func ticksBack(from last: Int, step: Int, first: Int = 0) -> [Int] {
+        guard last >= first, step > 0 else { return [] }
+        return Array(stride(from: last, through: first, by: -step).reversed())
+    }
+
     /// Seconds after midnight as a clock time in `calendar`'s locale ("7:42 AM" / "07:42").
     static func clock(_ secondsAfterMidnight: Int, on day: Date, calendar: Calendar) -> String {
         let d = calendar.startOfDay(for: day).addingTimeInterval(TimeInterval(secondsAfterMidnight))

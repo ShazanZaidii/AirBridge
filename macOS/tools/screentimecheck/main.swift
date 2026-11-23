@@ -357,4 +357,15 @@ check("page: an empty day is empty", STReport.make(STSnapshot(), filter: .all, r
 check("page: clock times", STText.clock(6 * 3600 + 30 * 60, on: now, calendar: cal).contains("6") && STText.clock(6 * 3600 + 30 * 60, on: now, calendar: cal).contains("30"))
 check("page: how long ago", STText.ago(now.addingTimeInterval(-30), now: now) == "just now" && STText.ago(now.addingTimeInterval(-600), now: now) == "10 min ago")
 
+// ---- axis labels: they end at "now" and follow the 12/24-hour setting
+var en = Calendar(identifier: .gregorian); en.locale = Locale(identifier: "en_US")
+check("24-hour labels", STText.hour(13, h24: true, calendar: en) == "13:00" && STText.hour(0, h24: true, calendar: en) == "00:00")
+check("12-hour labels with AM/PM", STText.hour(13, h24: false, calendar: en) == "1 PM" && STText.hour(0, h24: false, calendar: en) == "12 AM"
+      && STText.hour(12, h24: false, calendar: en) == "12 PM" && STText.hour(9, h24: false, calendar: en) == "9 AM")
+check("the region decides when there is no override", STText.uses24Hour(locale: Locale(identifier: "de_DE")) && !STText.uses24Hour(locale: Locale(identifier: "en_US")))
+check("labels end at the current hour", STText.ticksBack(from: 13, step: 3) == [1, 4, 7, 10, 13])
+check("labels end at today", STText.ticksBack(from: 13, step: 2) == [1, 3, 5, 7, 9, 11, 13] && STText.ticksBack(from: 6, step: 1) == [0, 1, 2, 3, 4, 5, 6])
+check("a label step that fits", STText.step(span: 14, maxLabels: 7) == 2 && STText.step(span: 7, maxLabels: 7) == 1 && STText.step(span: 24, maxLabels: 6) == 4)
+check("just after midnight there is one label", STText.ticksBack(from: 0, step: 3) == [0])
+
 print("screentimecheck: \(passed) passed, \(failed) failed"); exit(failed == 0 ? 0 : 1)

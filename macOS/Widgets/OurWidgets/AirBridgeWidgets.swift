@@ -235,15 +235,54 @@ private struct TrendChart: View {
                 }
             }
         }
+        .chartXScale(domain: xDomain, range: .plotDimension(padding: axes ? 14 : 4))
         .chartXAxis {
             if axes {
-                if hourly {
-                    AxisMarks(values: .stride(by: .hour, count: 6)) { _ in AxisValueLabel(format: .dateTime.hour(.twoDigits(amPM: .omitted))).font(.caption2) }
-                } else {
-                    AxisMarks(values: .stride(by: .day, count: max(1, pts.count / 5))) { _ in AxisValueLabel(format: .dateTime.weekday(.abbreviated)).font(.caption2) }
+                let ticks = tickDates
+                AxisMarks(values: ticks) { v in
+                    // The current hour sits flush right (it is at the very edge, "now"); today's day fits centred.
+                    let d = v.as(Date.self) ?? .distantPast
+                    AxisValueLabel(anchor: hourly && d == ticks.last && ticks.count > 1 ? .topTrailing : .top) {
+                        Text(label(d)).font(.caption2.weight(isNow(d) ? .semibold : .regular))
+                    }
                 }
             }
         }
+    }
+
+    private var cal: Calendar { .current }
+
+    /// Hourly (a first day): midnight to now. Daily: the first day to today.
+    private var xDomain: ClosedRange<Date> {
+        let pts = points
+        if hourly {
+            let start = cal.startOfDay(for: pts.last?.date ?? Date())
+            return start...max(start.addingTimeInterval(3600), pts.last?.date ?? start)
+        }
+        let first = pts.first?.date ?? Date(), last = pts.last?.date ?? first
+        return first...max(last, first.addingTimeInterval(86_400))
+    }
+
+    /// Labels that end at "now": today's day, or the current hour, and step back from it so they fit.
+    private var tickDates: [Date] {
+        let pts = points
+        if hourly {
+            guard let last = pts.last?.date else { return [] }
+            let start = cal.startOfDay(for: last)
+            let hour = cal.component(.hour, from: last)
+            return STText.ticksBack(from: hour, step: STText.step(span: hour + 1, maxLabels: 5))
+                .compactMap { cal.date(byAdding: .hour, value: $0, to: start) }
+        }
+        return STText.ticksBack(from: pts.count - 1, step: STText.step(span: pts.count, maxLabels: 7)).map { pts[$0].date }
+    }
+
+    private func label(_ d: Date) -> String {
+        hourly ? STText.hour(cal.component(.hour, from: d), h24: STText.uses24Hour(), calendar: cal)
+               : d.formatted(.dateTime.weekday(.abbreviated))
+    }
+
+    private func isNow(_ d: Date) -> Bool {
+        hourly ? cal.isDate(d, equalTo: Date(), toGranularity: .hour) : cal.isDateInToday(d)
     }
 }
 

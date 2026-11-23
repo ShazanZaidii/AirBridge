@@ -491,8 +491,7 @@ private struct Summary: View {
         for b in r.bars { by[b.bucket, default: 0] += b.seconds }
         guard let top = by.max(by: { $0.value != $1.value ? $0.value < $1.value : $0.key > $1.key }), top.value > 0 else { return ("–", "Nothing yet") }
         if r.range == .day {
-            let d = model.calendar.date(bySettingHour: top.key, minute: 0, second: 0, of: r.start) ?? r.start
-            return (d.formatted(.dateTime.hour().minute()), "\(STFormat.duration(top.value)) in that hour")
+            return (STText.hour(top.key, h24: STText.uses24Hour(), calendar: model.calendar), "\(STFormat.duration(top.value)) in that hour")
         }
         let name = top.key < r.weekDays.count ? r.weekDays[top.key].formatted(.dateTime.weekday(.wide)) : "–"
         return (name, STFormat.duration(top.value))
@@ -666,16 +665,26 @@ private struct UsageChart: View {
         .chartYScale(domain: 0...top)
         .chartXAxis {
             if day {
+                let labelled = Set(hourTicks)
                 AxisMarks(values: Array(0..<24)) { v in
                     let i = v.as(Int.self) ?? 0
-                    AxisTick(length: i % 3 == 0 ? 5 : 3, stroke: StrokeStyle(lineWidth: 1)).foregroundStyle(i % 3 == 0 ? Ink.tertiary : Ink.hairline)
-                    if i % 3 == 0 {
-                        AxisValueLabel(anchor: .top) { Text(xLabel(i)).font(.system(size: 11)).foregroundStyle(Ink.tertiary) }
+                    let on = labelled.contains(i)
+                    AxisTick(length: on ? 5 : 3, stroke: StrokeStyle(lineWidth: 1)).foregroundStyle(on ? Ink.tertiary : Ink.hairline)
+                    if on {
+                        AxisValueLabel(anchor: .top) {
+                            Text(xLabel(i)).font(.system(size: 11, weight: i == nowHour ? .semibold : .regular))
+                                .foregroundStyle(i == nowHour ? Ink.text : Ink.tertiary)
+                        }
                     }
                 }
             } else {
                 AxisMarks(values: Array(0..<7)) { v in
-                    AxisValueLabel { if let i = v.as(Int.self) { Text(xLabel(i)).font(.system(size: 11)).foregroundStyle(Ink.tertiary) } }
+                    AxisValueLabel(anchor: .top) {
+                        if let i = v.as(Int.self) {
+                            let today = i < r.weekDays.count && model.calendar.isDateInToday(r.weekDays[i])
+                            Text(xLabel(i)).font(.system(size: 11, weight: today ? .semibold : .regular)).foregroundStyle(today ? Ink.text : Ink.tertiary)
+                        }
+                    }
                 }
             }
         }
@@ -709,11 +718,19 @@ private struct UsageChart: View {
         return (0..<buckets).contains(b) ? b : nil
     }
 
+    /// Today: the current hour (nil on other days).
+    private var nowHour: Int? {
+        model.calendar.isDate(r.start, inSameDayAs: model.now) ? model.calendar.component(.hour, from: model.now) : nil
+    }
+
+    /// Labelled hours: on today they end at the current hour and step back by 3; other days 00, 03 … 21.
+    private var hourTicks: [Int] {
+        if let h = nowHour { return STText.ticksBack(from: h, step: 3) }
+        return Array(stride(from: 0, to: 24, by: 3))
+    }
+
     private func xLabel(_ i: Int) -> String {
-        if day {
-            let d = model.calendar.date(bySettingHour: i, minute: 0, second: 0, of: r.start) ?? r.start
-            return d.formatted(.dateTime.hour().minute())
-        }
+        if day { return STText.hour(i, h24: STText.uses24Hour(), calendar: model.calendar) }
         guard i < r.weekDays.count else { return "" }
         return r.weekDays[i].formatted(.dateTime.weekday(.abbreviated))
     }
