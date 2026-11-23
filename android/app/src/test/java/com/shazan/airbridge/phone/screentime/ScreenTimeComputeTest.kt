@@ -272,4 +272,43 @@ class ScreenTimeComputeTest {
         assertEquals("games", ScreenTimeCompute.categoryName(0))
         assertEquals(null, ScreenTimeCompute.categoryName(-1))
     }
+
+    // ---- home screens are matched by screen, not by app (vivo: Settings is a backup home and also the App Lock prompt)
+
+    private val vivoHome = setOf("com.android.systemui", "com.android.launcher3/com.android.launcher3.Launcher",
+        "com.android.settings/com.android.settings.FallbackHome")
+
+    @Test fun anAppLockPromptOverInstagramDoesNotEndIt() {
+        // What the phone recorded at 02:02 on 23 Nov: launcher, App Lock (a Settings screen), Instagram, a second App Lock
+        // check while Instagram stays on screen, then home 20 minutes later.
+        val d = ScreenTimeCompute.compute(listOf(
+            Event(t(23, 2, 2, 0), "com.android.launcher3", RESUMED, "com.android.launcher3.Launcher"),
+            Event(t(23, 2, 2, 7), "com.android.settings", RESUMED, "com.vivo.settings.secret.PasswordActivity"),
+            Event(t(23, 2, 2, 9), "com.android.settings", PAUSED, "com.vivo.settings.secret.PasswordActivity"),
+            Event(t(23, 2, 2, 9), "com.instagram.android", RESUMED, "com.instagram.mainactivity.InstagramMainActivity"),
+            Event(t(23, 2, 2, 10), "com.android.settings", STOPPED, "com.vivo.settings.secret.PasswordActivity"),
+            Event(t(23, 2, 5, 0), "com.android.settings", RESUMED, "com.vivo.settings.secret.PasswordActivityMultiWindow"),
+            Event(t(23, 2, 5, 2), "com.android.settings", STOPPED, "com.vivo.settings.secret.PasswordActivityMultiWindow"),
+            Event(t(23, 2, 22, 44), "com.android.launcher3", RESUMED, "com.android.launcher3.Launcher"),
+            Event(t(23, 2, 22, 45), "com.instagram.android", STOPPED, "com.instagram.mainactivity.InstagramMainActivity"),
+        ), t(23, 3), zone, vivoHome, untilStopped = true).getValue("2026-11-23")
+        assertEquals((20 * 60 + 35).toDouble(), d.apps.getValue("com.instagram.android"), 0.01)
+        // The App Lock prompt itself counts as Settings, like any screen.
+        assertTrue((d.apps["com.android.settings"] ?: 0.0) > 0)
+    }
+
+    @Test fun theRealHomeScreenStillEndsEverything() {
+        val d = ScreenTimeCompute.compute(listOf(
+            Event(t(23, 10), "a", RESUMED, "A"),
+            Event(t(23, 10, 5), "com.android.launcher3", RESUMED, "com.android.launcher3.Launcher"),
+            Event(t(23, 10, 30), "a", STOPPED, "A"),
+        ), t(23, 11), zone, vivoHome, untilStopped = true).getValue("2026-11-23")
+        assertEquals(300.0, d.apps.getValue("a"), 0.01)
+    }
+
+    @Test fun homeMatching() {
+        assertTrue(ScreenTimeCompute.isHome(Event(0, "com.android.systemui", RESUMED, "Anything"), vivoHome))
+        assertTrue(ScreenTimeCompute.isHome(Event(0, "com.android.settings", RESUMED, "com.android.settings.FallbackHome"), vivoHome))
+        assertTrue(!ScreenTimeCompute.isHome(Event(0, "com.android.settings", RESUMED, "com.vivo.settings.secret.PasswordActivity"), vivoHome))
+    }
 }

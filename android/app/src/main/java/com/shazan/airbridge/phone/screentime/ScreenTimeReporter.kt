@@ -103,8 +103,10 @@ object ScreenTimeReporter {
     private fun ignored(): Set<String> {
         val out = mutableSetOf("com.android.systemui")
         try {
+            // The home *screens* ("pkg/Class"), not their whole apps: some phones list Settings as a backup home, and its
+            // other screens (App Lock, Wi-Fi…) are ordinary use, not "went home".
             app.packageManager.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME), PackageManager.MATCH_DEFAULT_ONLY)
-                .mapNotNullTo(out) { it.activityInfo?.packageName }
+                .mapNotNullTo(out) { r -> r.activityInfo?.let { "${it.packageName}/${it.name}" } }
         } catch (_: Throwable) {}
         return out
     }
