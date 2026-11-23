@@ -9,6 +9,7 @@ import SwiftUI
     func show() {
         PhoneNotifCenter.shared.unseen = 0
         PhoneNotifCenter.shared.checkPermission()
+        AppWindows.closeMenuPanel() // the menu bar panel would sit on top of the window
         // Become a regular app before the window exists, and open a fresh window when the old one isn't on this desktop
         // (or the user is in a full-screen app): macOS then puts it on a normal desktop and takes the user there in one
         // move, instead of flashing it and jumping to a desktop without it.
@@ -63,7 +64,11 @@ struct PhoneNotifsView: View {
             notices
                 .padding(.horizontal, 16)
             if groups.isEmpty {
-                empty.padding(16)
+                VStack(spacing: 12) {
+                    empty
+                    BlockedSection(center: center)
+                }
+                .padding(16)
             } else if flat {
                 list
             } else {
@@ -76,6 +81,7 @@ struct PhoneNotifsView: View {
     }
 
     private var list: some View {
+        VStack(alignment: .leading, spacing: 0) {
                     LazyVStack(alignment: .leading, spacing: 12) {
                         ForEach(groups) { g in
                             GroupCard(group: g, center: center, showPhone: multiplePhones)
@@ -86,6 +92,10 @@ struct PhoneNotifsView: View {
                     .padding(.top, 4)
                     .padding(.bottom, 16)
                     .animation(reduceMotion ? nil : .easeOut(duration: 0.22), value: center.store.items.keys.sorted())
+        BlockedSection(center: center)
+            .padding(.horizontal, 16)
+            .padding(.bottom, 16)
+        }
     }
 
     private var header: some View {
@@ -263,6 +273,15 @@ private struct NotifRow: View {
                 TimelineView(.periodic(from: .now, by: 30)) { ctx in
                     Text(Self.age(n.ts, now: ctx.date)).font(.system(size: 11)).foregroundStyle(Ink.tertiary).monospacedDigit().lineLimit(1)
                 }
+                Button { center.block(n) } label: {
+                    Image(systemName: "eye.slash").font(.system(size: 9, weight: .bold)).foregroundStyle(Ink.secondary)
+                        .frame(width: 18, height: 18)
+                        .background(Circle().fill(Ink.raised))
+                }
+                .buttonStyle(.plain)
+                .opacity(hovering ? 1 : 0)
+                .help("Don't show this exact notification on this Mac again (it still shows on the phone)")
+                .accessibilityLabel("Don't show this again")
                 Button { center.dismiss(n) } label: {
                     Image(systemName: "xmark").font(.system(size: 9, weight: .bold)).foregroundStyle(Ink.secondary)
                         .frame(width: 18, height: 18)
@@ -342,6 +361,7 @@ private struct NotifRow: View {
                 Button("Open on Phone") { center.openOnPhone(n) }
                 Button("Clear") { center.dismiss(n) }
             }
+            Button("Don't Show This Again") { center.block(n) }
             Button("Copy Text") {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString([n.title, n.body].filter { !$0.isEmpty }.joined(separator: "\n"), forType: .string)
@@ -386,4 +406,57 @@ struct AppIconView: View {
         .clipShape(RoundedRectangle(cornerRadius: size * 0.24, style: .continuous))
         .accessibilityHidden(true)
     }
+}
+
+/// Notifications blocked on this Mac, each with Unblock. Collapsed by default.
+private struct BlockedSection: View {
+    @ObservedObject var center: PhoneNotifCenter
+    @State private var open = false
+
+    var body: some View {
+        if !center.blocks.isEmpty {
+            VStack(alignment: .leading, spacing: 0) {
+                Button { withAnimation(.easeOut(duration: 0.2)) { open.toggle() } } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "eye.slash").font(.system(size: 11, weight: .medium)).foregroundStyle(Ink.secondary)
+                        Text("Blocked on this Mac").font(.system(size: 12.5, weight: .medium))
+                        Text("\(center.blocks.count)").font(.system(size: 11, weight: .medium)).foregroundStyle(Ink.tertiary).monospacedDigit()
+                        Spacer()
+                        Image(systemName: "chevron.down").font(.system(size: 9.5, weight: .bold)).foregroundStyle(Ink.tertiary)
+                            .rotationEffect(.degrees(open ? 180 : 0))
+                    }
+                    .padding(.horizontal, 14).padding(.vertical, 11)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                if open {
+                    Text("Only notifications with exactly this text are blocked. Other notifications from the same app still come through, and your phone still shows these.")
+                        .font(.system(size: 11.5)).foregroundStyle(Ink.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 14).padding(.bottom, 8)
+                    ForEach(center.blocks) { b in
+                        Rectangle().fill(Ink.hairline).frame(height: 1)
+                        HStack(alignment: .top, spacing: 10) {
+                            AppIconView(image: center.icon(for: b.pkg), size: 18)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(b.title.isEmpty ? b.app : b.title).font(.system(size: 12.5, weight: .medium)).lineLimit(1)
+                                if !b.text.isEmpty { Text(b.text).font(.system(size: 12)).foregroundStyle(Ink.secondary).lineLimit(2) }
+                                Text(b.app).font(.system(size: 11)).foregroundStyle(Ink.tertiary)
+                            }
+                            Spacer(minLength: 8)
+                            BlockedUnblockButton { center.unblock(b) }
+                        }
+                        .padding(.horizontal, 14).padding(.vertical, 10)
+                    }
+                }
+            }
+            .background(RoundedRectangle(cornerRadius: Ink.radius, style: .continuous).fill(Ink.surface))
+            .overlay(RoundedRectangle(cornerRadius: Ink.radius, style: .continuous).strokeBorder(Ink.hairline, lineWidth: 1))
+        }
+    }
+}
+
+private struct BlockedUnblockButton: View {
+    let action: () -> Void
+    var body: some View { QuietButton(title: "Unblock", small: true, action: action) }
 }

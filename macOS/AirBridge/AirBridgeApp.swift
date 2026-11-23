@@ -201,6 +201,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
             // airbridge://debug/notif_sample — sample notifications in the list; …/notif_snapshot[?light=1] — the list drawn into
             // ScreenTime/debug-notifs.png in the shared folder.
             if url.path == "/notif_sample" { PhoneNotifCenter.shared.debugInjectSamples() }
+            // …/notif_block_sample blocks the sample Instagram one; …/notif_unblock_samples removes sample blocks again.
+            if url.path == "/notif_block_sample", let n = PhoneNotifCenter.shared.store.items.values.first(where: { $0.key == "s3" }) {
+                PhoneNotifCenter.shared.block(n)
+            }
+            if url.path == "/notif_unblock_samples" {
+                for b in PhoneNotifCenter.shared.blocks where b.pkg == "com.instagram.android" && b.title == "zoya.k" { PhoneNotifCenter.shared.unblock(b) }
+            }
             if url.path == "/notif_snapshot" {
                 let view = PhoneNotifsView(center: PhoneNotifCenter.shared, model: AppModel.shared, flat: true)
                     .frame(width: 420).environment(\.colorScheme, q.contains { $0.name == "light" } ? .light : .dark)

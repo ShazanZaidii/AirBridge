@@ -28,6 +28,10 @@ enum PhoneNotifSettings {
     @Published var unseen = 0
     /// Last failure to show in the list window, e.g. "Couldn't send the reply".
     @Published var lastError: String?
+    /// Notifications the user blocked on this Mac (exact app + title + text; the phone still shows them).
+    @Published private(set) var blocks: [PhoneNotifBlock] = PhoneNotifCenter.loadBlocks()
+    private static let blocksKey = "PhoneNotifBlocks"
+
     /// Why banners can't appear on this Mac (permission off, banners set to none), or nil when they can.
     @Published private(set) var bannerProblem: String?
 
@@ -149,8 +153,10 @@ enum PhoneNotifSettings {
     }
 
     private func applyStore(_ m: [String: Any], from phone: String) {
+        defer { if !blocks.isEmpty { dropBlocked() } } // a resync can bring blocked ones back
         switch store.apply(m, from: phone) {
         case .posted(let n, _):
+            if PhoneNotifBlock.isBlocked(n, by: blocks) { return } // dropped by the defer: no banner, no count
             if n.alert {
                 unseen += 1
                 deliver(n)
@@ -319,6 +325,40 @@ enum PhoneNotifSettings {
                 }
             }
         }
+    }
+
+    // MARK: Blocked notifications
+
+    /// Never show this exact notification (this app, this title and text) on this Mac again. The phone isn't told: it keeps
+    /// showing it there.
+    func block(_ n: PhoneNotif) {
+        let b = PhoneNotifBlock(n)
+        guard !blocks.contains(b) else { return }
+        blocks.append(b)
+        saveBlocks()
+        dropBlocked()
+    }
+
+    func unblock(_ b: PhoneNotifBlock) {
+        blocks.removeAll { $0 == b }
+        saveBlocks()
+    }
+
+    /// Takes blocked notifications out of the list and their banners down (on this Mac only).
+    private func dropBlocked() {
+        let ids = store.items.values.filter { PhoneNotifBlock.isBlocked($0, by: blocks) }.map(\.id)
+        guard !ids.isEmpty else { return }
+        for id in ids { _ = store.remove(id: id) }
+        removeBanners(ids)
+    }
+
+    private static func loadBlocks() -> [PhoneNotifBlock] {
+        guard let d = UserDefaults.standard.data(forKey: blocksKey) else { return [] }
+        return (try? JSONDecoder().decode([PhoneNotifBlock].self, from: d)) ?? []
+    }
+
+    private func saveBlocks() {
+        if let d = try? JSONEncoder().encode(blocks) { UserDefaults.standard.set(d, forKey: Self.blocksKey) }
     }
 
     // MARK: Permission

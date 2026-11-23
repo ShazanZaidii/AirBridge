@@ -45,6 +45,11 @@ import SwiftUI
         }
     }
 
+    /// Hides the menu bar panel (it floats above other windows): called when the panel opens one of AirBridge's windows.
+    static func closeMenuPanel() {
+        for w in NSApp.windows where w.isVisible && String(describing: type(of: w)).contains("MenuBarExtra") { w.orderOut(nil) }
+    }
+
     /// A window the user opened and can switch to: titled windows and the phone mirror window — not the menu
     /// bar popover, HUD panels, banners or off-screen helpers. Minimised windows still count (they're in the Dock).
     static func isAppWindow(_ w: NSWindow) -> Bool {
