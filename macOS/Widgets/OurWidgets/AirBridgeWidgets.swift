@@ -129,10 +129,10 @@ private let lineColor = Color(red: 0.36, green: 0.62, blue: 1.0)   // AirBridge 
 /// found its grey too light), lighter than near-black. White and a soft grey in light mode.
 enum WidgetTone {
     static let top = Color(nsColor: NSColor(name: nil) { a in
-        a.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? NSColor(srgbRed: 38 / 255, green: 38 / 255, blue: 40 / 255, alpha: 1) : .white
+        a.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? NSColor(srgbRed: 30 / 255, green: 30 / 255, blue: 32 / 255, alpha: 1) : .white
     })
     static let band = Color(nsColor: NSColor(name: nil) { a in
-        a.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? NSColor(srgbRed: 31 / 255, green: 31 / 255, blue: 33 / 255, alpha: 1)
+        a.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? NSColor(srgbRed: 28 / 255, green: 28 / 255, blue: 30 / 255, alpha: 1)
             : NSColor(srgbRed: 246 / 255, green: 246 / 255, blue: 248 / 255, alpha: 1)
     })
 }
