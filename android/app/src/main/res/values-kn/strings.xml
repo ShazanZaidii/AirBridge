@@ -478,6 +478,7 @@
     <string name="pp_notif_title">AirBridge ನಿಯಂತ್ರಣ ಆಫ್ ಆಗಿದೆ</string>
     <string name="pp_notif_text">ಪಾವತಿ ಆ್ಯಪ್‌ಗಾಗಿ ಆಫ್ ಮಾಡಲಾಗಿತ್ತು. ಮತ್ತೆ ಆನ್ ಮಾಡಲು ಟ್ಯಾಪ್ ಮಾಡಿ.</string>
     <string name="a11y_after_update_text">AirBridge ಅಪ್‌ಡೇಟ್ ಆದಾಗ ಇದು ಆಫ್ ಆಯಿತು. ಮತ್ತೆ ಆನ್ ಮಾಡಲು ಟ್ಯಾಪ್ ಮಾಡಿ.</string>
+    <string name="notif_contents_hidden">ವಿಷಯ ಮರೆಮಾಡಲಾಗಿದೆ</string>
     <string name="xfer_cancel_recv_q">%1$s ಸ್ವೀಕರಿಸುವುದನ್ನು ರದ್ದುಗೊಳಿಸಬೇಕೇ?</string>
     <string name="xfer_cancel_send_q">%1$s ಕಳುಹಿಸುವುದನ್ನು ರದ್ದುಗೊಳಿಸಬೇಕೇ?</string>
     <string name="xfer_cancel_keep">ಮುಂದುವರಿಸಿ</string>

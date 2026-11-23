@@ -478,6 +478,7 @@
     <string name="pp_notif_title">AirBridge నియంత్రణ ఆఫ్‌లో ఉంది</string>
     <string name="pp_notif_text">చెల్లింపు యాప్ కోసం ఆఫ్ చేయబడింది. మళ్లీ ఆన్ చేయడానికి నొక్కండి.</string>
     <string name="a11y_after_update_text">AirBridge అప్‌డేట్ అయినప్పుడు ఇది ఆఫ్ అయింది. మళ్లీ ఆన్ చేయడానికి నొక్కండి.</string>
+    <string name="notif_contents_hidden">కంటెంట్ దాచబడింది</string>
     <string name="xfer_cancel_recv_q">%1$s స్వీకరించడాన్ని రద్దు చేయాలా?</string>
     <string name="xfer_cancel_send_q">%1$s పంపడాన్ని రద్దు చేయాలా?</string>
     <string name="xfer_cancel_keep">కొనసాగించు</string>

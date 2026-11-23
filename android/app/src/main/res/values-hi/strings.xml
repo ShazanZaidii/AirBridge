@@ -478,6 +478,7 @@
     <string name="pp_notif_title">AirBridge कंट्रोल बंद है</string>
     <string name="pp_notif_text">भुगतान ऐप के लिए इसे बंद किया गया था। दोबारा चालू करने के लिए टैप करें।</string>
     <string name="a11y_after_update_text">AirBridge अपडेट होने पर यह बंद हो गया। वापस चालू करने के लिए टैप करें।</string>
+    <string name="notif_contents_hidden">सामग्री छिपी हुई है</string>
     <string name="xfer_cancel_recv_q">%1$s को पाना रद्द करें?</string>
     <string name="xfer_cancel_send_q">%1$s को भेजना रद्द करें?</string>
     <string name="xfer_cancel_keep">जारी रखें</string>
