@@ -104,7 +104,11 @@ object ScreenTimeCompute {
             when (e.type) {
                 RESUMED -> {
                     if (e.pkg.isEmpty()) continue
-                    if (isHome(e, ignore)) { closeAll(e.time); continue } // home screen or recents: nothing is in use
+                    // The home screen is not screen time, but it does not end the others either: an app counts until Android says
+                    // it stopped being visible (as Android and Digital Wellbeing count). vivo's launcher can resume in the
+                    // background while the app stays in front (23 Nov, 12:35: Instagram kept going for 4.7 minutes); going home
+                    // for real stops the app a second later anyway.
+                    if (isHome(e, ignore)) continue
                     visible.getOrPut(e.pkg) { mutableSetOf() }.add(e.cls)
                     if (e.pkg !in since) { since[e.pkg] = e.time; opened(days, e.pkg, e.time, zone) }
                 }
