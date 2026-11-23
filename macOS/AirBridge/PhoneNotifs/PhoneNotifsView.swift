@@ -33,6 +33,7 @@ import SwiftUI
                              styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                              backing: .buffered, defer: false)
             w.title = "Notifications"
+            w.titleVisibility = .hidden // the header below says it; the title next to the buttons only repeated it
             w.titlebarAppearsTransparent = true
             w.isReleasedWhenClosed = false
             w.contentView = container
@@ -72,7 +73,7 @@ struct PhoneNotifsView: View {
         VStack(alignment: .leading, spacing: 0) {
             header
                 .padding(.horizontal, 20)
-                .padding(.top, 40)
+                .padding(.top, 38)   // just under the window buttons (title bar ~28 pt)
                 .padding(.bottom, 14)
             notices
                 .padding(.horizontal, 16)
@@ -88,7 +89,8 @@ struct PhoneNotifsView: View {
                 ScrollView { list }
             }
         }
-        .frame(minWidth: 340, minHeight: 320)
+        // Pinned to the top: with little content SwiftUI otherwise centres it, and the header floated down the window.
+        .frame(minWidth: 340, maxWidth: .infinity, minHeight: 320, maxHeight: .infinity, alignment: .top)
         // Under the (transparent) title bar, like the Screen Time page: one charcoal surface from the top edge, with the
         // header just below the window buttons.
         .ignoresSafeArea(.container, edges: .top)
@@ -172,7 +174,8 @@ struct PhoneNotifsView: View {
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: 280)
             }
-            .frame(maxWidth: .infinity, minHeight: 200)
+            // Down to the same 16-point margin as the sides, so the window reads as one even frame.
+            .frame(maxWidth: .infinity, minHeight: 200, maxHeight: .infinity)
         }
     }
 }

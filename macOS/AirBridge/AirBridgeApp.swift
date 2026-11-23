@@ -211,8 +211,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
                 for b in PhoneNotifCenter.shared.blocks where b.pkg == "com.instagram.android" && b.title == "zoya.k" { PhoneNotifCenter.shared.unblock(b) }
             }
             if url.path == "/notif_snapshot" {
-                let view = PhoneNotifsView(center: PhoneNotifCenter.shared, model: AppModel.shared, flat: true)
-                    .frame(width: 420).environment(\.colorScheme, q.contains { $0.name == "light" } ? .light : .dark)
+                let h = Double(q.first(where: { $0.name == "h" })?.value ?? "") ?? 0
+                let view = PhoneNotifsView(center: PhoneNotifCenter.shared, model: AppModel.shared, flat: h == 0)
+                    .frame(width: 380, height: h > 0 ? h : nil).environment(\.colorScheme, q.contains { $0.name == "light" } ? .light : .dark)
                 let r = ImageRenderer(content: view)
                 r.scale = 1
                 if let cg = r.cgImage, let folder = ScreenTimeShared.folder() {
