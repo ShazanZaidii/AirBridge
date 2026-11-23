@@ -479,6 +479,16 @@
     <string name="pp_notif_text">చెల్లింపు యాప్ కోసం ఆఫ్ చేయబడింది. మళ్లీ ఆన్ చేయడానికి నొక్కండి.</string>
     <string name="a11y_after_update_text">AirBridge అప్‌డేట్ అయినప్పుడు ఇది ఆఫ్ అయింది. మళ్లీ ఆన్ చేయడానికి నొక్కండి.</string>
     <string name="notif_contents_hidden">కంటెంట్ దాచబడింది</string>
+    <string name="pn_block_title">బ్లాక్ చేసిన నోటిఫికేషన్‌లు</string>
+    <string name="pn_block_none">ఏవీ లేవు</string>
+    <string name="pn_block_count">%1$d బ్లాక్ చేయబడ్డాయి</string>
+    <string name="pn_block_header">మీరు ఎప్పటికీ చూడకూడదనుకునే నోటిఫికేషన్‌ను బ్లాక్ చేయండి. ఆ యాప్ నుండి సరిగ్గా అదే టెక్స్ట్ ఉన్న నోటిఫికేషన్‌లు మాత్రమే బ్లాక్ అవుతాయి, కాబట్టి దాని ఇతర నోటిఫికేషన్‌లు వస్తూనే ఉంటాయి. AirBridge వాటిని కనిపించిన వెంటనే తీసివేస్తుంది, కాబట్టి అవి మీ కంప్యూటర్‌లకు కూడా చేరవు.</string>
+    <string name="pn_block_now">ఇప్పుడు మీ ఫోన్‌లో</string>
+    <string name="pn_block_blocked">బ్లాక్ చేసినవి</string>
+    <string name="pn_block_action">బ్లాక్ చేయి</string>
+    <string name="pn_unblock_action">అన్‌బ్లాక్ చేయి</string>
+    <string name="pn_block_empty_now">ఇప్పుడు మీ ఫోన్‌లో నోటిఫికేషన్‌లు లేవు. బ్లాక్ చేయాల్సింది కనిపించినప్పుడు ఈ పేజీని మళ్లీ తెరవండి.</string>
+    <string name="pn_block_no_access">ముందుగా AirBridgeకు నోటిఫికేషన్ యాక్సెస్ ఇవ్వండి.</string>
     <string name="xfer_cancel_recv_q">%1$s స్వీకరించడాన్ని రద్దు చేయాలా?</string>
     <string name="xfer_cancel_send_q">%1$s పంపడాన్ని రద్దు చేయాలా?</string>
     <string name="xfer_cancel_keep">కొనసాగించు</string>

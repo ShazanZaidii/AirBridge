@@ -30,6 +30,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -92,6 +93,8 @@ fun PhoneNotifsSection() {
     var explainAccess by remember { mutableStateOf(false) }
     var explainCalls by remember { mutableStateOf(false) }
     var showApps by remember { mutableStateOf(false) }
+    var showBlocks by remember { mutableStateOf(false) }
+    val blocks by com.shazan.airbridge.phone.notifications.NotifBlocks.flow.collectAsState()
     val listenerName = stringResource(R.string.pn_listener_name)
 
     // Access granted while the switch was on: the listener connects by itself; refresh the computers' hint.
@@ -135,6 +138,7 @@ fun PhoneNotifsSection() {
         )
     }
     if (showApps) AppMuteDialog(onDismiss = { showApps = false })
+    if (showBlocks) BlockedNotifsDialog(onDismiss = { showBlocks = false })
 
     SectionHeader(stringResource(R.string.pn_section))
     AbCard {
@@ -177,6 +181,16 @@ fun PhoneNotifsSection() {
                 else pluralStringResource(R.plurals.pn_apps_muted, muted.size, muted.size),
                 trailing = {
                     TextButton(onClick = { showApps = true }, modifier = Modifier.height(Dimens.touch)) { Text(stringResource(R.string.open)) }
+                },
+            )
+        }
+        if (access) {
+            RowDivider()
+            InfoRow(
+                title = stringResource(R.string.pn_block_title),
+                subtitle = if (blocks.isEmpty()) stringResource(R.string.pn_block_none) else stringResource(R.string.pn_block_count, blocks.size),
+                trailing = {
+                    TextButton(onClick = { showBlocks = true }, modifier = Modifier.height(Dimens.touch)) { Text(stringResource(R.string.open)) }
                 },
             )
         }
@@ -315,4 +329,90 @@ private fun rememberResumeTickPn(): Int {
         onDispose { owner.lifecycle.removeObserver(obs) }
     }
     return tick
+}
+
+/**
+ * Block exact notifications: the ones on the phone now, each with Block, and the blocked ones with Unblock. A block matches
+ * only that app with exactly that title and text (NotifBlocks), so the app's other notifications still come through.
+ */
+@Composable
+private fun BlockedNotifsDialog(onDismiss: () -> Unit) {
+    val ctx = LocalContext.current
+    val blocks by com.shazan.airbridge.phone.notifications.NotifBlocks.flow.collectAsState()
+    var refresh by remember { mutableIntStateOf(0) }
+    val current = remember(refresh, blocks) { blockCandidates(ctx, blocks) }
+    LaunchedEffect(Unit) { com.shazan.airbridge.phone.notifications.NotifBlocks.init(ctx) }
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        AbScaffold(title = stringResource(R.string.pn_block_title), onBack = onDismiss) {
+            LazyColumn(Modifier.fillMaxSize()) {
+                item {
+                    Text(stringResource(R.string.pn_block_header), style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = Dimens.xs, vertical = Dimens.sm))
+                }
+                item { SectionHeader(stringResource(R.string.pn_block_now)) }
+                if (current == null) {
+                    item { BlockNote(stringResource(R.string.pn_block_no_access)) }
+                } else if (current.isEmpty()) {
+                    item { BlockNote(stringResource(R.string.pn_block_empty_now)) }
+                } else {
+                    items(current, key = { it.pkg + "\u0001" + it.title + "\u0001" + it.text }) { c ->
+                        BlockRow(c, stringResource(R.string.pn_block_action)) {
+                            com.shazan.airbridge.phone.notifications.NotifBlocks.add(ctx, c)
+                            refresh++
+                        }
+                    }
+                }
+                if (blocks.isNotEmpty()) {
+                    item { SectionHeader(stringResource(R.string.pn_block_blocked)) }
+                    items(blocks, key = { "b" + it.pkg + "\u0001" + it.title + "\u0001" + it.text }) { b ->
+                        BlockRow(b, stringResource(R.string.pn_unblock_action)) {
+                            com.shazan.airbridge.phone.notifications.NotifBlocks.remove(ctx, b)
+                            refresh++
+                        }
+                    }
+                }
+                item { Spacer(Modifier.height(Dimens.xl)) }
+            }
+        }
+    }
+}
+
+/** The notifications on the phone now that could be blocked (clearable, with words), or null without notification access. */
+private fun blockCandidates(ctx: android.content.Context, blocks: List<com.shazan.airbridge.phone.notifications.NotifBlocks.Block>):
+    List<com.shazan.airbridge.phone.notifications.NotifBlocks.Block>? {
+    val l = com.shazan.airbridge.phone.notifications.PhoneNotificationListener.instance ?: return null
+    val pm = ctx.packageManager
+    return l.snapshot().map { it.first }
+        .filter { it.isClearable && it.packageName != ctx.packageName }
+        .mapNotNull { sbn ->
+            val (t, x) = com.shazan.airbridge.phone.notifications.NotifBlocks.titleText(sbn)
+            if (t.isNullOrBlank() && x.isNullOrBlank()) return@mapNotNull null
+            val app = try { pm.getApplicationLabel(pm.getApplicationInfo(sbn.packageName, 0)).toString() } catch (_: Throwable) { sbn.packageName }
+            com.shazan.airbridge.phone.notifications.NotifBlocks.make(sbn.packageName, app, t, x)
+        }
+        .distinct()
+        .filterNot { it in blocks }
+}
+
+@Composable
+private fun BlockNote(text: String) {
+    Text(text, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(horizontal = Dimens.xs, vertical = Dimens.sm))
+}
+
+@Composable
+private fun BlockRow(b: com.shazan.airbridge.phone.notifications.NotifBlocks.Block, action: String, onClick: () -> Unit) {
+    Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(horizontal = Dimens.xs, vertical = Dimens.xs),
+        verticalAlignment = Alignment.CenterVertically) {
+        AppIcon(b.pkg)
+        Spacer(Modifier.width(Dimens.md))
+        Column(Modifier.weight(1f)) {
+            Text(b.title.ifEmpty { b.app }, style = MaterialTheme.typography.bodyLarge, maxLines = 1)
+            if (b.text.isNotEmpty()) Text(b.text, style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2)
+            Text(b.app, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+        }
+        TextButton(onClick = onClick, modifier = Modifier.height(Dimens.touch)) { Text(action) }
+    }
 }

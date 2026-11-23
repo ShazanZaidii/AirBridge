@@ -488,6 +488,16 @@
     <string name="pp_notif_text">Il a été coupé pour une appli de paiement. Touchez pour le réactiver.</string>
     <string name="a11y_after_update_text">Il s’est coupé pendant la mise à jour d’AirBridge. Touchez pour le réactiver.</string>
     <string name="notif_contents_hidden">Contenu masqué</string>
+    <string name="pn_block_title">Notifications bloquées</string>
+    <string name="pn_block_none">Aucune</string>
+    <string name="pn_block_count">%1$d bloquée(s)</string>
+    <string name="pn_block_header">Bloquez une notification que vous ne voulez jamais voir. Seules les notifications de cette appli avec exactement le même texte sont bloquées : ses autres notifications continuent d’arriver. AirBridge les efface dès qu’elles apparaissent, elles n’atteignent donc pas non plus vos ordinateurs.</string>
+    <string name="pn_block_now">Sur votre téléphone maintenant</string>
+    <string name="pn_block_blocked">Bloquées</string>
+    <string name="pn_block_action">Bloquer</string>
+    <string name="pn_unblock_action">Débloquer</string>
+    <string name="pn_block_empty_now">Aucune notification sur votre téléphone pour l’instant. Rouvrez cette page quand celle à bloquer apparaît.</string>
+    <string name="pn_block_no_access">Autorisez d’abord l’accès aux notifications pour AirBridge.</string>
     <string name="xfer_cancel_recv_q">Annuler la réception de %1$s ?</string>
     <string name="xfer_cancel_send_q">Annuler l\'envoi de %1$s ?</string>
     <string name="xfer_cancel_keep">Continuer</string>

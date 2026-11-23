@@ -26,6 +26,13 @@ class PhoneNotificationListener : NotificationListenerService() {
 
     override fun onNotificationPosted(sbn: StatusBarNotification?, rankingMap: RankingMap?) {
         sbn ?: return
+        // A notification the user blocked (exact app, title and text): cleared at once, never forwarded.
+        NotifBlocks.init(applicationContext)
+        if (NotifBlocks.blocks(sbn)) {
+            dismiss(sbn.key)
+            Log.i(TAG, "blocked notification from ${sbn.packageName} cleared")
+            return
+        }
         PhoneRelay.onPosted(sbn, importanceOf(sbn, rankingMap))
     }
 

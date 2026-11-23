@@ -479,6 +479,16 @@
     <string name="pp_notif_text">पेमेंट ॲपसाठी तो बंद केला होता. पुन्हा चालू करण्यासाठी टॅप करा.</string>
     <string name="a11y_after_update_text">AirBridge अपडेट झाल्यावर हे बंद झाले. पुन्हा सुरू करण्यासाठी टॅप करा.</string>
     <string name="notif_contents_hidden">मजकूर लपवलेला आहे</string>
+    <string name="pn_block_title">ब्लॉक केलेल्या सूचना</string>
+    <string name="pn_block_none">काहीही नाही</string>
+    <string name="pn_block_count">%1$d ब्लॉक</string>
+    <string name="pn_block_header">जी सूचना तुम्हाला कधीच पाहायची नाही ती ब्लॉक करा. फक्त त्याच अ‍ॅपच्या अगदी त्याच मजकुराच्या सूचना ब्लॉक होतात, त्यामुळे त्याच्या इतर सूचना येत राहतील. AirBridge त्या दिसताच काढून टाकते, त्यामुळे त्या तुमच्या कॉम्प्युटरपर्यंतही पोहोचत नाहीत.</string>
+    <string name="pn_block_now">आत्ता तुमच्या फोनवर</string>
+    <string name="pn_block_blocked">ब्लॉक केलेल्या</string>
+    <string name="pn_block_action">ब्लॉक करा</string>
+    <string name="pn_unblock_action">अनब्लॉक करा</string>
+    <string name="pn_block_empty_now">आत्ता तुमच्या फोनवर कोणतीही सूचना नाही. जी ब्लॉक करायची आहे ती दिसल्यावर हे पेज पुन्हा उघडा.</string>
+    <string name="pn_block_no_access">आधी AirBridge ला सूचना अ‍ॅक्सेस द्या.</string>
     <string name="xfer_cancel_recv_q">%1$s मिळवणे रद्द करायचे?</string>
     <string name="xfer_cancel_send_q">%1$s पाठवणे रद्द करायचे?</string>
     <string name="xfer_cancel_keep">सुरू ठेवा</string>

@@ -479,6 +479,16 @@
     <string name="pp_notif_text">પેમેન્ટ એપ માટે તે બંધ કરાયો હતો. ફરી ચાલુ કરવા ટૅપ કરો.</string>
     <string name="a11y_after_update_text">AirBridge અપડેટ થયું ત્યારે તે બંધ થઈ ગયું. ફરી ચાલુ કરવા ટૅપ કરો.</string>
     <string name="notif_contents_hidden">સામગ્રી છુપાયેલી છે</string>
+    <string name="pn_block_title">બ્લૉક કરેલી સૂચનાઓ</string>
+    <string name="pn_block_none">કોઈ નહીં</string>
+    <string name="pn_block_count">%1$d બ્લૉક</string>
+    <string name="pn_block_header">જે સૂચના તમે ક્યારેય જોવા નથી માંગતા તેને બ્લૉક કરો. ફક્ત તે જ ઍપની બરાબર એ જ લખાણવાળી સૂચનાઓ બ્લૉક થાય છે, તેથી તેની બીજી સૂચનાઓ આવતી રહેશે. AirBridge તેમને દેખાતાં જ દૂર કરે છે, તેથી તે તમારા કમ્પ્યુટર સુધી પણ પહોંચતી નથી.</string>
+    <string name="pn_block_now">હમણાં તમારા ફોન પર</string>
+    <string name="pn_block_blocked">બ્લૉક કરેલી</string>
+    <string name="pn_block_action">બ્લૉક કરો</string>
+    <string name="pn_unblock_action">અનબ્લૉક કરો</string>
+    <string name="pn_block_empty_now">હમણાં તમારા ફોન પર કોઈ સૂચના નથી. જે બ્લૉક કરવી છે તે દેખાય ત્યારે આ પેજ ફરી ખોલો.</string>
+    <string name="pn_block_no_access">પહેલાં AirBridge ને સૂચના ઍક્સેસ આપો.</string>
     <string name="xfer_cancel_recv_q">%1$s મેળવવાનું રદ કરવું?</string>
     <string name="xfer_cancel_send_q">%1$s મોકલવાનું રદ કરવું?</string>
     <string name="xfer_cancel_keep">ચાલુ રાખો</string>
