@@ -38,7 +38,7 @@ nonisolated final class ScreenTimeHub: @unchecked Sendable {
                 let isNew = !snapshot.devices.contains { $0.id == dev.id }
                 snapshot.upsert(dev)
                 STStore.save(snapshot)
-                if Date() < liveUntil { reloadNow() } else { scheduleReload(soon: isNew) }
+                if isLive { reloadSoon(0.6) } else { scheduleReload(soon: isNew) }
                 DispatchQueue.main.async { MainActor.assumeIsolated { ScreenTimeWindow.shared.model.reloadIfOpen() } }
             case "screen_time_icon":
                 guard let (id, png) = STWire.icon(from: msg) else { return }
@@ -72,7 +72,7 @@ nonisolated final class ScreenTimeHub: @unchecked Sendable {
         queue.async { [self] in
             snapshot.upsert(device)
             STStore.save(snapshot)
-            scheduleReload()
+            if isLive { reloadSoon(0.6) } else { scheduleReload() }
         }
     }
 
@@ -127,22 +127,30 @@ nonisolated final class ScreenTimeHub: @unchecked Sendable {
         queue.async { [self] in
             liveUntil = Date().addingTimeInterval(20)
             for p in peers { _ = PeerManager.shared.send(to: p.id, ["t": "screen_time_request"]) }
+            reloadSoon(2.5) // in case no device answers
         }
         onMain {
             LocalScreenTime.shared.publishNow()
             LocalScreenTime.shared.refreshHistory(force: true)
         }
-        queue.asyncAfter(deadline: .now() + 1.5) { [self] in reloadNow() }
     }
 
-    private var lastImmediate = Date.distantPast
+    /// The Screen Time page is open: every new report redraws the widget too.
+    func setPageOpen(_ open: Bool) { queue.async { [self] in pageOpen = open } }
+    private var pageOpen = false
+    private var isLive: Bool { pageOpen || Date() < liveUntil }
+    private var pendingReload: DispatchWorkItem?
 
-    /// Redraw now (coalesced to one per second).
-    private func reloadNow() {
-        guard Date().timeIntervalSince(lastImmediate) > 1 else { return }
-        lastImmediate = Date()
-        lastReload = Date()
-        WidgetCenter.shared.reloadTimelines(ofKind: ScreenTimeShared.widgetKind)
+    /// Redraw shortly, after the last of a burst of fresh numbers (each new one pushes it back), so the widget always draws
+    /// the final numbers, never the ones from just before the phone's answer.
+    private func reloadSoon(_ delay: TimeInterval) {
+        pendingReload?.cancel()
+        let w = DispatchWorkItem { [self] in
+            lastReload = Date()
+            WidgetCenter.shared.reloadTimelines(ofKind: ScreenTimeShared.widgetKind)
+        }
+        pendingReload = w
+        queue.asyncAfter(deadline: .now() + delay, execute: w)
     }
 
     /// A new AirBridge version is running: redraw the widget once, so it uses the new widget code (an old drawing stays on

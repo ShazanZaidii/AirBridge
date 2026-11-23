@@ -17,6 +17,7 @@ import SwiftUI
     /// Shows the page, narrowed to `device` when the widget was set to one.
     func show(device: String? = nil) {
         model.open(device: device)
+        ScreenTimeHub.shared.setPageOpen(true)
         ScreenTimeHub.shared.pullNow()
         // Become a regular app (Dock icon, own desktop handling) *before* the window exists. A window made while AirBridge is
         // still menu-bar-only can float over a full-screen app, and macOS then moves it to another desktop the moment the app
@@ -53,7 +54,10 @@ import SwiftUI
         w.makeKeyAndOrderFront(nil)
     }
 
-    func windowWillClose(_ notification: Notification) { model.close() }
+    func windowWillClose(_ notification: Notification) {
+        model.close()
+        ScreenTimeHub.shared.setPageOpen(false)
+    }
 
     #if DEBUG
     func debugClose() { window?.close() }
