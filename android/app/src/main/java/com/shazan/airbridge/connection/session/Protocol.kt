@@ -71,7 +71,9 @@ object Protocol {
             (if (canJoinWfd()) listOf(com.shazan.airbridge.connection.transport.link.LinkPolicy.CAP_JOIN) else emptyList()) +
             (if (canAdbWifi()) listOf(com.shazan.airbridge.mirror.pro.AdbWifi.CAP) else emptyList()) +
             // §13.4: we tell call-audio computers our Bluetooth name and which headset takes calls.
-            listOf(com.shazan.airbridge.phone.calls.CallAudioInfo.CAP)
+            listOf(com.shazan.airbridge.phone.calls.CallAudioInfo.CAP) +
+            // §15: answers `screen_time_request` with a fresh report.
+            listOf(com.shazan.airbridge.phone.screentime.ScreenTimeReporter.CAP_SOURCE)
     }
 
     /** §8.9: Android 11+ has Wireless debugging, which a computer's Pro mirroring uses. */
