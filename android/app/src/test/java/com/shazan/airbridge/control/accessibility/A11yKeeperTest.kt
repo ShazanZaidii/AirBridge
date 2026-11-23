@@ -1,8 +1,6 @@
 package com.shazan.airbridge.control.accessibility
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
-import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class A11yKeeperTest {
@@ -28,10 +26,4 @@ class A11yKeeperTest {
     @Test fun aServiceNeverTurnedOnIsNeverAdded() =
         assertEquals(emptyList<String>(), A11yKeeper.missing(listOf(core), listOf(core), emptyList()))
 
-    @Test fun firstStartAfterAnUpdate() {
-        assertTrue(A11yKeeper.isFirstStartAfterUpdate(seenUpdateTime = 1000, lastUpdateTime = 2000))
-        assertFalse(A11yKeeper.isFirstStartAfterUpdate(seenUpdateTime = 2000, lastUpdateTime = 2000))
-        // The very first start of this feature has nothing to compare with: no heal, only remember.
-        assertFalse(A11yKeeper.isFirstStartAfterUpdate(seenUpdateTime = 0, lastUpdateTime = 2000))
-    }
 }

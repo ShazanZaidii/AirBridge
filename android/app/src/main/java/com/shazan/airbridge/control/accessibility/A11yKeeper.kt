@@ -15,12 +15,12 @@ import com.shazan.airbridge.payment.EnabledServices
 import com.shazan.airbridge.payment.PaymentPause
 
 /**
- * Keeps AirBridge's accessibility services on across app updates.
+ * Keeps AirBridge's accessibility services on across app updates and force-stops.
  *
- * Android (and some phone makers' versions of it) can drop an app's accessibility services when the app is replaced, and the
- * app can't see it happen because it isn't running then. So AirBridge remembers which of its services you had on, kept up to
- * date while it runs, and the first time it starts after an update (Android starts it right away) it looks for services that
- * went missing:
+ * Android removes an app's accessibility services from the enabled list when the app is force-stopped (Settings > Force stop,
+ * and Android Studio does it on every Run, even a quick deploy that doesn't change the install time), and some phones also
+ * drop them when the app is replaced. The app is dead when it happens, so it can't see it. So AirBridge remembers which of
+ * its services you had on, kept up to date while it runs, and every time it starts it looks for services that went missing:
  *  - with the "auto turn on" permission (WRITE_SECURE_SETTINGS) it puts them back itself;
  *  - without it, one notification opens the exact setting to switch them back on.
  * A service you switched off yourself is never switched back on: that removal is seen while AirBridge runs and remembered.
@@ -30,7 +30,6 @@ object A11yKeeper {
     private const val TAG = "AirBridge.A11yKeeper"
     private const val PREFS = "AirBridgePrefs"
     private const val PREF_WANTED = "A11Y_WANTED"
-    private const val PREF_SEEN_UPDATE = "A11Y_SEEN_UPDATE_TIME"
     private const val NOTIF_ID = 4417
 
     private val worker: Handler by lazy { Handler(HandlerThread("a11y-keeper").apply { start() }.looper) }
@@ -42,8 +41,6 @@ object A11yKeeper {
         return wanted.filter { EnabledServices.normal(it) !in have }.distinctBy(EnabledServices::normal)
     }
 
-    /** Whether this start is the first one after an update: the install time moved since the last start we saw. Pure. */
-    fun isFirstStartAfterUpdate(seenUpdateTime: Long, lastUpdateTime: Long): Boolean = seenUpdateTime != 0L && seenUpdateTime != lastUpdateTime
 
     /** Call from Application.onCreate. Cheap; the work runs on its own thread. */
     fun onAppStart(ctx: Context) {
@@ -56,13 +53,12 @@ object A11yKeeper {
 
     private fun check(ctx: Context) {
         val p = prefs(ctx)
-        val lastUpdate = try { ctx.packageManager.getPackageInfo(ctx.packageName, 0).lastUpdateTime } catch (_: Throwable) { 0L }
         val wanted = EnabledServices.split(p.getString(PREF_WANTED, null))
-        if (isFirstStartAfterUpdate(p.getLong(PREF_SEEN_UPDATE, 0L), lastUpdate)) {
-            val gone = missing(wanted, present(ctx), PaymentPause.removedEntries(ctx))
-            if (gone.isNotEmpty()) heal(ctx, gone)
-        }
-        p.edit().putLong(PREF_SEEN_UPDATE, lastUpdate).apply()
+        // Every start, not only after an update: a force-stop (Android Studio's Run, Settings > Force stop) removes the
+        // services without changing the install time. A service the user switches off is seen while AirBridge runs and
+        // dropped from `wanted`, so it is never switched back on.
+        val gone = missing(wanted, present(ctx), PaymentPause.removedEntries(ctx))
+        if (gone.isNotEmpty()) heal(ctx, gone)
         // Remember what is on now (plus what AirBridge itself took out), but never forget a wanted service at start-up:
         // it may be the one the update dropped and the heal could not put back.
         record(ctx, keep = wanted)
@@ -76,10 +72,10 @@ object A11yKeeper {
                 Settings.Secure.putString(cr, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, EnabledServices.restore(cur, gone)) &&
                     Settings.Secure.putInt(cr, Settings.Secure.ACCESSIBILITY_ENABLED, 1)
             } catch (t: Throwable) { Log.w(TAG, "put back refused", t); false }
-            Log.i(TAG, "after the update, ${gone.size} service(s) were off: ${if (ok) "put back" else "could not put back"}")
+            Log.i(TAG, "${gone.size} service(s) went off while AirBridge wasn't running: ${if (ok) "put back" else "could not put back"}")
             if (ok) return
         }
-        Log.i(TAG, "after the update, ${gone.size} service(s) were off: asking the user")
+        Log.i(TAG, "${gone.size} service(s) went off while AirBridge wasn't running: asking the user")
         notifyTurnBackOn(ctx)
     }
 
