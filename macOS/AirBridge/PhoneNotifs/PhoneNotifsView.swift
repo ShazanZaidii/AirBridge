@@ -20,19 +20,27 @@ import SwiftUI
             window = nil
         }
         if window == nil {
-            let host = NSHostingController(rootView: PhoneNotifsView(center: PhoneNotifCenter.shared, model: AppModel.shared))
-            host.sizingOptions = [.minSize]
-            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 420, height: 780),
+            // The SwiftUI list fills a plain container that follows the window, so the window keeps the size it's given.
+            // Hosted directly, SwiftUI resized the window to the list's height right after it opened (434 points with a
+            // short list, whatever height was set).
+            let hosting = NSHostingView(rootView: PhoneNotifsView(center: PhoneNotifCenter.shared, model: AppModel.shared))
+            hosting.sizingOptions = []
+            let container = NSView(frame: NSRect(x: 0, y: 0, width: 380, height: 860))
+            hosting.frame = container.bounds
+            hosting.autoresizingMask = [.width, .height]
+            container.addSubview(hosting)
+            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 380, height: 860),
                              styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                              backing: .buffered, defer: false)
             w.title = "Notifications"
             w.titlebarAppearsTransparent = true
             w.isReleasedWhenClosed = false
-            w.contentViewController = host
+            w.contentView = container
             w.delegate = self
-            // Top right under the menu bar on the icon's screen, as tall as there is room for, beside (not over) a phone
-            // mirror or call window that's already open.
-            w.setFrame(SmartPlacement.frame(for: NSSize(width: 420, height: 780), avoiding: w), display: false)
+            w.contentMinSize = NSSize(width: 340, height: 320)
+            // Top right under the menu bar on the icon's screen, beside (not over) a phone mirror or call window that's
+            // already open. 500 tall (the user's choice; capped to the screen).
+            w.setFrame(SmartPlacement.frame(for: NSSize(width: 380, height: 500), avoiding: w), display: false)
             window = w
         }
         NSApp.activate()
@@ -75,7 +83,7 @@ struct PhoneNotifsView: View {
                 ScrollView { list }
             }
         }
-        .frame(minWidth: 360, minHeight: 320)
+        .frame(minWidth: 340, minHeight: 320)
         .background(Ink.page)
         .foregroundStyle(Ink.text)
     }
