@@ -125,14 +125,14 @@ struct ScreenTimeWidget: Widget {
 
 private let lineColor = Color(red: 0.36, green: 0.62, blue: 1.0)   // AirBridge blue
 
-/// The two greys of Apple's own Screen Time widget (measured from it): a lighter top and a slightly darker band behind the
-/// app list. White and a soft grey in light mode.
+/// Two charcoal tones: a top and a slightly darker band behind the app list. Darker than Apple's Screen Time widget (the user
+/// found its grey too light), lighter than near-black. White and a soft grey in light mode.
 enum WidgetTone {
     static let top = Color(nsColor: NSColor(name: nil) { a in
-        a.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? NSColor(srgbRed: 50 / 255, green: 50 / 255, blue: 52 / 255, alpha: 1) : .white
+        a.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? NSColor(srgbRed: 38 / 255, green: 38 / 255, blue: 40 / 255, alpha: 1) : .white
     })
     static let band = Color(nsColor: NSColor(name: nil) { a in
-        a.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? NSColor(srgbRed: 44 / 255, green: 44 / 255, blue: 45 / 255, alpha: 1)
+        a.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? NSColor(srgbRed: 31 / 255, green: 31 / 255, blue: 33 / 255, alpha: 1)
             : NSColor(srgbRed: 246 / 255, green: 246 / 255, blue: 248 / 255, alpha: 1)
     })
 }
