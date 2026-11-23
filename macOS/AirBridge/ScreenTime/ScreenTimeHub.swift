@@ -110,13 +110,46 @@ nonisolated final class ScreenTimeHub: @unchecked Sendable {
 
     private func scheduleReload(soon: Bool = false) {
         guard !reloadScheduled else { return }
-        let wait = soon ? 15 : max(15, Self.reloadEvery - Date().timeIntervalSince(lastReload))
+        let wait = soon ? 15 : max(15, backgroundEvery - Date().timeIntervalSince(lastReload))
         reloadScheduled = true
         queue.asyncAfter(deadline: .now() + wait) { [self] in
             reloadScheduled = false
-            lastReload = Date()
-            WidgetCenter.shared.reloadTimelines(ofKind: ScreenTimeShared.widgetKind)
+            // Nobody can see a widget while the screen is locked or asleep: don't spend a redraw.
+            guard Self.screenInUse() else { return }
+            drawIfChanged()
         }
+    }
+
+    /// Background pace: every 5 minutes while desktop widgets are in view, 30 while there are desktop widgets but they are
+    /// covered, an hour otherwise (Notification Center opens are caught as they happen).
+    private var desktop: (present: Bool, visible: Bool) = (false, false)
+    private var backgroundEvery: TimeInterval { desktop.visible ? 300 : (desktop.present ? 1800 : Self.reloadEvery) }
+
+    func setDesktop(present: Bool, visible: Bool) {
+        queue.async { [self] in
+            let changed = desktop != (present, visible)
+            desktop = (present, visible)
+            if changed, reloadScheduled == false { scheduleReload() }
+        }
+    }
+
+    /// The widget as last drawn (its signature): a redraw that would draw the same thing is skipped.
+    private var drawnSignature = ""
+
+    /// Redraws only if what the widget shows has changed since it was last drawn (each redraw outside AirBridge counts
+    /// against macOS's daily allowance, so none is wasted).
+    private func drawIfChanged(force: Bool = false) {
+        let sig = snapshot.widgetSignature(now: Date())
+        guard force || sig != drawnSignature else { return }
+        drawnSignature = sig
+        lastReload = Date()
+        WidgetCenter.shared.reloadTimelines(ofKind: ScreenTimeShared.widgetKind)
+    }
+
+    /// The screen is on and unlocked.
+    nonisolated static func screenInUse() -> Bool {
+        let locked = (CGSessionCopyCurrentDictionary() as? [String: Any])?["CGSSessionScreenIsLocked"] as? Bool ?? false
+        return !locked && CGDisplayIsAsleep(CGMainDisplayID()) == 0
     }
 
     /// Someone is looking (the Screen Time page or the menu bar panel opened): ask every device for its numbers now, refresh
@@ -145,10 +178,7 @@ nonisolated final class ScreenTimeHub: @unchecked Sendable {
     /// the final numbers, never the ones from just before the phone's answer.
     private func reloadSoon(_ delay: TimeInterval) {
         pendingReload?.cancel()
-        let w = DispatchWorkItem { [self] in
-            lastReload = Date()
-            WidgetCenter.shared.reloadTimelines(ofKind: ScreenTimeShared.widgetKind)
-        }
+        let w = DispatchWorkItem { [self] in drawIfChanged() }
         pendingReload = w
         queue.asyncAfter(deadline: .now() + delay, execute: w)
     }
@@ -165,7 +195,7 @@ nonisolated final class ScreenTimeHub: @unchecked Sendable {
         // the app is replaced), so it would go on drawing the old widget with the old click behaviour. End it; the system
         // starts the new one for the redraw below.
         Self.endStaleWidgetProcess()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { WidgetCenter.shared.reloadAllTimelines() }
+        queue.asyncAfter(deadline: .now() + 1) { [self] in drawnSignature = ""; WidgetCenter.shared.reloadAllTimelines() }
     }
 
     /// Ends AirBridge's widget extension process(es) that started before this app did.
