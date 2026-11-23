@@ -38,6 +38,7 @@ import SwiftUI
             w.contentView = container
             w.delegate = self
             w.contentMinSize = NSSize(width: 340, height: 320)
+            w.backgroundColor = NSColor(Ink.page)
             // Top right under the menu bar on the icon's screen, beside (not over) a phone mirror or call window that's
             // already open. 500 tall (the user's choice; capped to the screen).
             w.setFrame(SmartPlacement.frame(for: NSSize(width: 380, height: 500), avoiding: w), display: false)
@@ -48,6 +49,10 @@ import SwiftUI
     }
 
     func windowDidBecomeKey(_ notification: Notification) { PhoneNotifCenter.shared.unseen = 0 }
+
+    #if DEBUG
+    func debugClose() { window?.performClose(nil) }
+    #endif
 }
 
 // MARK: - The list, in AirBridge's charcoal design language (Design/Charcoal.swift)
@@ -84,7 +89,10 @@ struct PhoneNotifsView: View {
             }
         }
         .frame(minWidth: 340, minHeight: 320)
-        .background(Ink.page)
+        // Under the (transparent) title bar, like the Screen Time page: one charcoal surface from the top edge, with the
+        // header just below the window buttons.
+        .ignoresSafeArea(.container, edges: .top)
+        .background(Ink.page.ignoresSafeArea())
         .foregroundStyle(Ink.text)
     }
 

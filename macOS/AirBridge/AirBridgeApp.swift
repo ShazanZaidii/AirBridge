@@ -202,6 +202,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
             // ScreenTime/debug-notifs.png in the shared folder.
             if url.path == "/notif_sample" { PhoneNotifCenter.shared.debugInjectSamples() }
             if url.path == "/notif_open" { PhoneNotifsWindow.shared.show() }
+            if url.path == "/notif_close" { PhoneNotifsWindow.shared.debugClose() }
             // …/notif_block_sample blocks the sample Instagram one; …/notif_unblock_samples removes sample blocks again.
             if url.path == "/notif_block_sample", let n = PhoneNotifCenter.shared.store.items.values.first(where: { $0.key == "s3" }) {
                 PhoneNotifCenter.shared.block(n)
