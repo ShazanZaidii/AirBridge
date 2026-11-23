@@ -38,7 +38,8 @@ nonisolated final class ScreenTimeHub: @unchecked Sendable {
                 let isNew = !snapshot.devices.contains { $0.id == dev.id }
                 snapshot.upsert(dev)
                 STStore.save(snapshot)
-                scheduleReload(soon: isNew)
+                if Date() < liveUntil { reloadNow() } else { scheduleReload(soon: isNew) }
+                DispatchQueue.main.async { MainActor.assumeIsolated { ScreenTimeWindow.shared.model.reloadIfOpen() } }
             case "screen_time_icon":
                 guard let (id, png) = STWire.icon(from: msg) else { return }
                 if STStore.saveIcon(png, appId: id) { scheduleReload() }
@@ -96,10 +97,15 @@ nonisolated final class ScreenTimeHub: @unchecked Sendable {
         }
     }
 
-    /// WidgetKit gives an app running in the background only a few dozen widget redraws a day and ignores the rest, so a
-    /// redraw is asked for at most every 10 minutes while the numbers tick along (`soon`: a device's first report or a
-    /// forgotten device, 15 s).
-    private static let reloadEvery: TimeInterval = 600
+    /// Widget redraws: the numbers keep flowing into the shared file all the time (cheap), but the widget is only asked to
+    /// redraw about once an hour in the background, so it doesn't spend macOS's small daily redraw allowance. When someone
+    /// actually looks (the Screen Time page or the menu bar panel opens), `pullNow` fetches fresh numbers from the devices and
+    /// redraws at once; the widget itself also counts its drawing as stale after 5 minutes, so opening Notification Center
+    /// shows the latest saved numbers. `soon`: a device's first report or a forgotten device (15 s).
+    private static let reloadEvery: TimeInterval = 3600
+    /// Until when fresh reports redraw the widget straight away (someone is looking).
+    private var liveUntil = Date.distantPast
+    static let sourceCap = "screentime_source"
     private var lastReload = Date.distantPast
 
     private func scheduleReload(soon: Bool = false) {
@@ -111,6 +117,32 @@ nonisolated final class ScreenTimeHub: @unchecked Sendable {
             lastReload = Date()
             WidgetCenter.shared.reloadTimelines(ofKind: ScreenTimeShared.widgetKind)
         }
+    }
+
+    /// Someone is looking (the Screen Time page or the menu bar panel opened): ask every device for its numbers now, refresh
+    /// this Mac's, and redraw the widget as they arrive. Requests while AirBridge is in use don't count against the widget
+    /// redraw allowance.
+    func pullNow() {
+        let peers = PeerManager.shared.peers().filter { $0.caps.contains(Self.sourceCap) }
+        queue.async { [self] in
+            liveUntil = Date().addingTimeInterval(20)
+            for p in peers { _ = PeerManager.shared.send(to: p.id, ["t": "screen_time_request"]) }
+        }
+        onMain {
+            LocalScreenTime.shared.publishNow()
+            LocalScreenTime.shared.refreshHistory(force: true)
+        }
+        queue.asyncAfter(deadline: .now() + 1.5) { [self] in reloadNow() }
+    }
+
+    private var lastImmediate = Date.distantPast
+
+    /// Redraw now (coalesced to one per second).
+    private func reloadNow() {
+        guard Date().timeIntervalSince(lastImmediate) > 1 else { return }
+        lastImmediate = Date()
+        lastReload = Date()
+        WidgetCenter.shared.reloadTimelines(ofKind: ScreenTimeShared.widgetKind)
     }
 
     /// A new AirBridge version is running: redraw the widget once, so it uses the new widget code (an old drawing stays on
@@ -300,6 +332,12 @@ nonisolated final class ScreenTimeHub: @unchecked Sendable {
         guard let c = current else { return }
         acc.add(id: c.id, name: c.name, from: c.since, to: max(c.since, end), calendar: calendar)
         current = nil
+    }
+
+    /// Writes this Mac's numbers now (the page or menu just opened).
+    func publishNow() {
+        if let c = current { close(at: Date()); current = (c.id, c.name, Date()) }
+        publish()
     }
 
     private func publish() {
