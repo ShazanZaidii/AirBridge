@@ -49,8 +49,8 @@ class NotifFilterTest {
         val lockedHide = NotifFilter.Context(locked = true, hideSensitiveWhenLocked = true)
         val lockedShow = NotifFilter.Context(locked = true, hideSensitiveWhenLocked = false)
         val lockedUnknown = NotifFilter.Context(locked = true, hideSensitiveWhenLocked = null)
-        val d = NotifFilter.decide(base, lockedHide)
-        assertTrue(d is Decision.Skip && d.later && d.reason == "locked")
+        // Hidden contents on the lock screen: forwarded with the contents hidden, not held back.
+        assertEquals(Decision.ForwardHidden, NotifFilter.decide(base, lockedHide))
         assertEquals(Decision.Forward, NotifFilter.decide(base, lockedShow))
         assertEquals(Decision.Forward, NotifFilter.decide(base, lockedUnknown))
         val secret = NotifFilter.decide(base.copy(visibility = NotifFilter.VISIBILITY_SECRET), lockedUnknown)

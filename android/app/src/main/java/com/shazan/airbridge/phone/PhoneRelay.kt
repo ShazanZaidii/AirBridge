@@ -54,6 +54,8 @@ object PhoneRelay {
     private val active = NotifIndex<Entry>()
     /** Skipped only because the phone was locked with private content hidden: forwarded on unlock. */
     private val heldWhileLocked = HashSet<String>()
+    /** Forwarded with the contents hidden while locked; the full version goes out quietly at unlock. */
+    private val hiddenWhileLocked = HashSet<String>()
     private val gate = FloodGate<NotifWire.PhoneNotif>()
     private val sentIcons = HashMap<String, MutableSet<String>>()
     private val subs = HashMap<String, NotifWire.Command.Subscribe>()
@@ -219,6 +221,7 @@ object PhoneRelay {
         if (n != null && isCallNotification(n)) { CallWatcher.onCallNotification(null); return@post }
         val k = NotifActions.shortKey(sbn.key)
         heldWhileLocked.remove(sbn.key)
+        hiddenWhileLocked.remove(sbn.key)
         gate.forget(k)
         if (active.remove(k) != null) sendToSinks(NotifWire.remove(k))
     }
@@ -276,8 +279,26 @@ object PhoneRelay {
                 // It was forwarded before and isn't forwardable any more (became ongoing, app muted…).
                 else if (active.remove(k) != null) { gate.forget(k); sendToSinks(NotifWire.remove(k)) }
             }
+            NotifFilter.Decision.ForwardHidden -> {
+                // Like the phone's own lock screen: the app, that something arrived, nothing more. It still pops up on the
+                // computer (holding it until unlock made notifications look dropped while the phone lay locked on the desk).
+                heldWhileLocked.remove(sbn.key)
+                hiddenWhileLocked.add(sbn.key)
+                PhoneRelaySettings.markSeen(pkg)
+                val previous = active.get(k)
+                val onlyAlertOnce = n.flags and Notification.FLAG_ONLY_ALERT_ONCE != 0
+                val alert = !quiet && !(previous != null && onlyAlertOnce)
+                val pn = build(k, pkg, n, title, text, extras, style, alert).copy(
+                    title = "", text = ctx.getString(com.shazan.airbridge.R.string.notif_contents_hidden), sub = "", conv = null, msgs = emptyList(),
+                    canReply = false, replyLabel = null, actions = emptyList(),
+                )
+                if (previous != null && previous.sent.copy(alert = pn.alert) == pn) return
+                active.put(k, Entry(sbn.key, pkg, n, pn))
+                if (gate.offer(pkg, k, pn, System.currentTimeMillis())) deliver(pn) else scheduleFlush()
+            }
             NotifFilter.Decision.Forward -> {
                 heldWhileLocked.remove(sbn.key)
+                hiddenWhileLocked.remove(sbn.key)
                 PhoneRelaySettings.markSeen(pkg)
                 val previous = active.get(k)
                 val onlyAlertOnce = n.flags and Notification.FLAG_ONLY_ALERT_ONCE != 0
@@ -387,14 +408,14 @@ object PhoneRelay {
 
     /** Rebuild from the phone's current notifications (forwarding turned on, listener reconnected). */
     private fun resyncAll() {
-        active.clear(); gate.clear(); heldWhileLocked.clear()
+        active.clear(); gate.clear(); heldWhileLocked.clear(); hiddenWhileLocked.clear()
         sendToSinks(NotifWire.reset())
         PhoneNotificationListener.instance?.snapshot()?.forEach { (sbn, imp) -> handlePosted(sbn, imp, quiet = true) }
     }
 
     private fun clearAll(sendRemovals: Boolean) {
         val had = active.size > 0
-        active.clear(); gate.clear(); heldWhileLocked.clear()
+        active.clear(); gate.clear(); heldWhileLocked.clear(); hiddenWhileLocked.clear()
         worker.removeCallbacks(flush)
         if (sendRemovals && had) sendToSinks(NotifWire.reset())
     }
@@ -510,11 +531,15 @@ object PhoneRelay {
         val r = object : BroadcastReceiver() {
             override fun onReceive(c: Context?, i: Intent?) {
                 worker.post {
-                    if (heldWhileLocked.isEmpty() || !PhoneRelaySettings.notifsEnabled) return@post
+                    if ((heldWhileLocked.isEmpty() && hiddenWhileLocked.isEmpty()) || !PhoneRelaySettings.notifsEnabled) return@post
                     val held = HashSet(heldWhileLocked)
+                    val hidden = HashSet(hiddenWhileLocked)
                     heldWhileLocked.clear()
-                    PhoneNotificationListener.instance?.snapshot()?.filter { it.first.key in held }?.forEach { (sbn, imp) ->
-                        handlePosted(sbn, imp, quiet = true)
+                    hiddenWhileLocked.clear()
+                    PhoneNotificationListener.instance?.snapshot()?.forEach { (sbn, imp) ->
+                        // Held ones (never sent) pop up now; ones sent with hidden contents are completed quietly.
+                        if (sbn.key in held) handlePosted(sbn, imp, quiet = false)
+                        else if (sbn.key in hidden) handlePosted(sbn, imp, quiet = true)
                     }
                 }
             }

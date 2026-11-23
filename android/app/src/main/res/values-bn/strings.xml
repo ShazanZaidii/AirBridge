@@ -478,6 +478,7 @@
     <string name="pp_notif_title">AirBridge কন্ট্রোল বন্ধ</string>
     <string name="pp_notif_text">পেমেন্ট অ্যাপের জন্য এটি বন্ধ করা হয়েছিল। আবার চালু করতে ট্যাপ করুন।</string>
     <string name="a11y_after_update_text">AirBridge আপডেট হওয়ার সময় এটি বন্ধ হয়ে গেছে। আবার চালু করতে ট্যাপ করুন।</string>
+    <string name="notif_contents_hidden">বিষয়বস্তু লুকানো আছে</string>
     <string name="xfer_cancel_recv_q">%1$s গ্রহণ বাতিল করবেন?</string>
     <string name="xfer_cancel_send_q">%1$s পাঠানো বাতিল করবেন?</string>
     <string name="xfer_cancel_keep">চালিয়ে যান</string>
