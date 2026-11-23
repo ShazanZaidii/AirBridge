@@ -66,6 +66,14 @@ object ScreenTimeCompute {
         return days
     }
 
+    /**
+     * Whether [e] is the home screen (or system UI) coming up, which means nothing is in use. [ignore] holds whole packages
+     * ("com.android.systemui") or single screens ("pkg/full.ClassName"). Home apps are listed by screen, not package: vivo
+     * lists Settings as a backup home (its FallbackHome screen), and its App Lock screen is also part of Settings; matching
+     * the whole package made every App Lock prompt over Instagram look like "went home" and drop the rest of that stretch.
+     */
+    fun isHome(e: Event, ignore: Set<String>): Boolean = e.pkg in ignore || "${e.pkg}/${e.cls}" in ignore
+
     private fun day(days: MutableMap<String, Day>, t: Long, zone: ZoneId): Day =
         days.getOrPut(Instant.ofEpochMilli(t).atZone(zone).toLocalDate().toString()) { Day() }
 
@@ -96,7 +104,7 @@ object ScreenTimeCompute {
             when (e.type) {
                 RESUMED -> {
                     if (e.pkg.isEmpty()) continue
-                    if (e.pkg in ignore) { closeAll(e.time); continue } // home screen or recents: nothing is in use
+                    if (isHome(e, ignore)) { closeAll(e.time); continue } // home screen or recents: nothing is in use
                     visible.getOrPut(e.pkg) { mutableSetOf() }.add(e.cls)
                     if (e.pkg !in since) { since[e.pkg] = e.time; opened(days, e.pkg, e.time, zone) }
                 }
@@ -128,7 +136,7 @@ object ScreenTimeCompute {
             when (e.type) {
                 RESUMED -> {
                     if (e.pkg.isEmpty()) continue
-                    if (e.pkg in ignore) { close(e.time); showing.clear(); continue } // home screen: nothing is in use
+                    if (isHome(e, ignore)) { close(e.time); showing.clear(); continue } // home screen: nothing is in use
                     showing.getOrPut(e.pkg) { mutableSetOf() }.add(e.cls)
                     if (curPkg != e.pkg) { close(e.time); curPkg = e.pkg; curStart = e.time; opened(days, e.pkg, e.time, zone) }
                 }
