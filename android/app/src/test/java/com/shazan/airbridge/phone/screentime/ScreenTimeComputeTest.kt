@@ -211,11 +211,23 @@ class ScreenTimeComputeTest {
         assertEquals(900.0, d.seconds, 0.01)
     }
 
-    @Test fun goingHomeEndsEverythingAtOnce() {
+    @Test fun goingHomeEndsTheAppWhenItStops() {
         val homePkg = home.first()
         val d = visible(Event(t(22, 10), "a", RESUMED, "A1"), Event(t(22, 10, 7), homePkg, RESUMED, "Home"),
             Event(t(22, 10, 7, 1), "a", STOPPED, "A1")).getValue("2026-11-22")
-        assertEquals(420.0, d.seconds, 0.01)
+        assertEquals(421.0, d.seconds, 0.01)
+        assertEquals(null, d.apps[homePkg]) // the home screen itself is not screen time
+    }
+
+    @Test fun theLauncherResumingBehindAnAppDoesNotEndIt() {
+        // vivo, 23 Nov 12:35: the launcher resumed (and stopped) while Instagram stayed in front until 12:40.
+        val d = visible(
+            Event(t(22, 12, 30), "com.instagram.android", RESUMED, "Main"),
+            Event(t(22, 12, 35, 17), "com.android.launcher3", RESUMED, "Launcher"),
+            Event(t(22, 12, 35, 21), "com.android.launcher3", STOPPED, "Launcher"),
+            Event(t(22, 12, 40), "com.android.launcher3", RESUMED, "Launcher"),
+            Event(t(22, 12, 40, 1), "com.instagram.android", STOPPED, "Main")).getValue("2026-11-22")
+        assertEquals(601.0, d.apps.getValue("com.instagram.android"), 0.01)
     }
 
     @Test fun anAppStillShowingCountsUpToNow() {
@@ -292,18 +304,20 @@ class ScreenTimeComputeTest {
             Event(t(23, 2, 22, 44), "com.android.launcher3", RESUMED, "com.android.launcher3.Launcher"),
             Event(t(23, 2, 22, 45), "com.instagram.android", STOPPED, "com.instagram.mainactivity.InstagramMainActivity"),
         ), t(23, 3), zone, vivoHome, untilStopped = true).getValue("2026-11-23")
-        assertEquals((20 * 60 + 35).toDouble(), d.apps.getValue("com.instagram.android"), 0.01)
+        assertEquals((20 * 60 + 36).toDouble(), d.apps.getValue("com.instagram.android"), 0.01) // until Instagram stopped
         // The App Lock prompt itself counts as Settings, like any screen.
         assertTrue((d.apps["com.android.settings"] ?: 0.0) > 0)
     }
 
-    @Test fun theRealHomeScreenStillEndsEverything() {
+    @Test fun goingHomeStopsTheAppAndHomeIsNotCounted() {
         val d = ScreenTimeCompute.compute(listOf(
             Event(t(23, 10), "a", RESUMED, "A"),
             Event(t(23, 10, 5), "com.android.launcher3", RESUMED, "com.android.launcher3.Launcher"),
-            Event(t(23, 10, 30), "a", STOPPED, "A"),
+            Event(t(23, 10, 5, 1), "a", STOPPED, "A"),
+            Event(t(23, 10, 20), "com.android.launcher3", STOPPED, "com.android.launcher3.Launcher"),
         ), t(23, 11), zone, vivoHome, untilStopped = true).getValue("2026-11-23")
-        assertEquals(300.0, d.apps.getValue("a"), 0.01)
+        assertEquals(301.0, d.apps.getValue("a"), 0.01)
+        assertEquals(null, d.apps["com.android.launcher3"])
     }
 
     @Test fun homeMatching() {
