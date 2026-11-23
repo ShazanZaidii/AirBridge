@@ -30,6 +30,11 @@ import java.time.ZoneId
 object ScreenTimeReporter {
     private const val TAG = "AirBridge.ScreenTime"
     const val CAP_SINK = "screentime_sink"
+    /** We answer `screen_time_request` (§15) with a fresh report at once. */
+    const val CAP_SOURCE = "screentime_source"
+    /** A computer can ask at most this often (it asks when someone opens its Screen Time page or menu). */
+    private const val REQUEST_GAP_MS = 10_000L
+    private val lastRequest = HashMap<String, Long>()
     private const val PERIOD_MS = 5L * 60 * 1000
     private const val DAYS = 7
     private const val ICONS = 16
@@ -57,6 +62,15 @@ object ScreenTimeReporter {
         if (ConnectionHub.readySession(peerId)?.info()?.caps?.contains(CAP_SINK) != true) return@post
         sentIcons.remove(peerId)
         try { report()?.let { send(peerId, it) } } catch (t: Throwable) { Log.w(TAG, "ready", t) }
+    }
+
+    /** A computer wants the numbers now (someone is looking at them): send a fresh report straight away. */
+    fun onRequest(peerId: String) = worker.post {
+        if (ConnectionHub.readySession(peerId)?.info()?.caps?.contains(CAP_SINK) != true) return@post
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (now - (lastRequest[peerId] ?: 0L) < REQUEST_GAP_MS) return@post
+        lastRequest[peerId] = now
+        try { report()?.let { send(peerId, it) } } catch (t: Throwable) { Log.w(TAG, "request", t) }
     }
 
     fun hasPermission(): Boolean = try {
