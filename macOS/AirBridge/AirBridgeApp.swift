@@ -53,6 +53,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         PhoneNotifCenter.shared.start()
         LocalScreenTime.shared.start() // this Mac's screen time for the AirBridge widget
         ScreenTimeHub.shared.reloadAfterUpdate()
+        NotificationCenterWatch.shared.start() // the widget refreshes when Notification Center opens
         LoginItem.applyDefault()
     }
 
