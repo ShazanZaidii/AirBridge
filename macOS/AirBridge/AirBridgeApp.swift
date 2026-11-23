@@ -198,6 +198,18 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
                 }
             }
             if url.path == "/screentime_close" { ScreenTimeWindow.shared.debugClose() }
+            // airbridge://debug/notif_sample — sample notifications in the list; …/notif_snapshot[?light=1] — the list drawn into
+            // ScreenTime/debug-notifs.png in the shared folder.
+            if url.path == "/notif_sample" { PhoneNotifCenter.shared.debugInjectSamples() }
+            if url.path == "/notif_snapshot" {
+                let view = PhoneNotifsView(center: PhoneNotifCenter.shared, model: AppModel.shared, flat: true)
+                    .frame(width: 420).environment(\.colorScheme, q.contains { $0.name == "light" } ? .light : .dark)
+                let r = ImageRenderer(content: view)
+                r.scale = 1
+                if let cg = r.cgImage, let folder = ScreenTimeShared.folder() {
+                    try? NSBitmapImageRep(cgImage: cg).representation(using: .png, properties: [:])?.write(to: folder.appendingPathComponent("debug-notifs.png"))
+                }
+            }
             if url.path == "/screentime_snapshot" {
                 ScreenTimeWindow.shared.debugSnapshot(range: q.first(where: { $0.name == "range" })?.value,
                                                       filter: q.first(where: { $0.name == "filter" })?.value,

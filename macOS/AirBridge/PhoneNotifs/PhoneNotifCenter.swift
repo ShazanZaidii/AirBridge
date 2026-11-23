@@ -28,6 +28,15 @@ enum PhoneNotifSettings {
     @Published var unseen = 0
     /// Last failure to show in the list window, e.g. "Couldn't send the reply".
     @Published var lastError: String?
+    /// Why banners can't appear on this Mac (permission off, banners set to none), or nil when they can.
+    @Published private(set) var bannerProblem: String?
+
+    /// The macOS banners delivered for each phone notification. Every post gets its own banner id: re-adding the same id only
+    /// replaces the old banner, and macOS does that silently, so the second message in a chat never popped up.
+    private var bannerIds: [String: [String]] = [:]
+    private var bannerSeq = 0
+    private var delivered = 0, failed = 0
+    private var lastFailure = ""
 
     private var board = PhoneCallBoard()
     private var peerIds: Set<String> = []
@@ -56,6 +65,10 @@ enum PhoneNotifSettings {
     }
 
     func start() {
+        checkPermission()
+        NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)
+            .sink { _ in MainActor.assumeIsolated { PhoneNotifCenter.shared.checkPermission() } }
+            .store(in: &cancellables)
         AppModel.shared.$readyPeers
             .sink { [weak self] peers in self?.peersChanged(peers) }
             .store(in: &cancellables)
@@ -143,7 +156,7 @@ enum PhoneNotifSettings {
                 deliver(n)
             }
         case .removed(let ids):
-            UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: ids.map { Self.idPrefix + $0 })
+            removeBanners(ids)
         case .none:
             break
         }
@@ -177,8 +190,7 @@ enum PhoneNotifSettings {
             lastSubs[gone] = nil
             states[gone] = nil
             // Banners of a phone that left can't be answered any more; the list keeps them (greyed).
-            let ids = store.items.values.filter { $0.phoneId == gone }.map { Self.idPrefix + $0.id }
-            UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: ids)
+            removeBanners(store.items.values.filter { $0.phoneId == gone }.map(\.id))
             if let c = board.phoneGone(gone) { calls[gone] = nil; CallPanels.shared.end(c) }
             CallPanels.shared.phoneGone(gone)
         }
@@ -189,9 +201,7 @@ enum PhoneNotifSettings {
         for id in peerIds { sendSub(to: id) }
         if !PhoneNotifSettings.showNotifs, store.count > 0 {
             for id in Set(store.items.values.map(\.phoneId)) {
-                if case .removed(let ids) = store.removeAll(phone: id) {
-                    UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: ids.map { Self.idPrefix + $0 })
-                }
+                if case .removed(let ids) = store.removeAll(phone: id) { removeBanners(ids) }
             }
             unseen = 0
         }
@@ -230,9 +240,7 @@ enum PhoneNotifSettings {
     func dismiss(_ n: PhoneNotif) {
         PeerBus.shared.send(to: n.phoneId, PhoneNotifWire.dismiss(n.key))
         // Gone here at once; if the phone refuses, its next post brings it back.
-        if store.remove(id: n.id) {
-            UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [Self.idPrefix + n.id])
-        }
+        if store.remove(id: n.id) { removeBanners([n.id]) }
     }
 
     func dismissAll(_ group: PhoneNotifStore.Group) { group.items.forEach(dismiss) }
@@ -266,7 +274,19 @@ enum PhoneNotifSettings {
 
     // MARK: macOS notifications
 
+    /// Takes down every macOS banner of these phone notifications.
+    private func removeBanners(_ ids: [String]) {
+        let banners = ids.flatMap { bannerIds.removeValue(forKey: $0) ?? [] }
+        if !banners.isEmpty { UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: banners) }
+    }
+
     private func deliver(_ n: PhoneNotif) {
+        // A new message in a notification that already has a banner: take the old banner down and post a fresh one, so it
+        // pops up again (re-using the id would replace it silently).
+        if let old = bannerIds[n.id], !old.isEmpty { UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: old) }
+        bannerSeq += 1
+        let requestId = Self.idPrefix + n.id + "#\(bannerSeq)"
+        bannerIds[n.id] = [requestId]
         let c = UNMutableNotificationContent()
         c.title = n.headline
         var sub = n.app
@@ -283,8 +303,62 @@ enum PhoneNotifSettings {
                                                    options: [UNNotificationAttachmentOptionsTypeHintKey: "public.png"]) {
             c.attachments = [att]
         }
-        let req = UNNotificationRequest(identifier: Self.idPrefix + n.id, content: c, trigger: nil)
-        UNUserNotificationCenter.current().add(req) { _ in }
+        let req = UNNotificationRequest(identifier: requestId, content: c, trigger: nil)
+        UNUserNotificationCenter.current().add(req) { error in
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    let me = PhoneNotifCenter.shared
+                    if let error {
+                        me.failed += 1
+                        me.lastFailure = error.localizedDescription
+                        me.checkPermission() // most refusals are a permission that was turned off
+                    } else {
+                        me.delivered += 1
+                    }
+                    me.writeStatus(nil)
+                }
+            }
+        }
+    }
+
+    // MARK: Permission
+
+    /// Asks macOS whether AirBridge may show banners here, and says what's wrong when it can't.
+    func checkPermission() {
+        UNUserNotificationCenter.current().getNotificationSettings { s in
+            let problem: String?
+            switch s.authorizationStatus {
+            case .denied: problem = "Notifications for AirBridge are turned off on this Mac, so phone notifications can't pop up."
+            case .notDetermined: problem = "AirBridge hasn't been allowed to show notifications on this Mac yet."
+            default: problem = s.alertStyle == .none ? "AirBridge's notifications are set to show no banners on this Mac." : nil
+            }
+            let line = "auth=\(s.authorizationStatus.rawValue) alertStyle=\(s.alertStyle.rawValue) alert=\(s.alertSetting.rawValue) " +
+                "center=\(s.notificationCenterSetting.rawValue) sound=\(s.soundSetting.rawValue)"
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    PhoneNotifCenter.shared.bannerProblem = problem
+                    PhoneNotifCenter.shared.writeStatus(line)
+                }
+            }
+        }
+    }
+
+    /// Opens AirBridge's page in System Settings → Notifications.
+    func openNotificationSettings() {
+        let id = Bundle.main.bundleIdentifier ?? "com.shazan.AirBridge"
+        if let url = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension?id=\(id)") { NSWorkspace.shared.open(url) }
+    }
+
+    private var lastSettingsLine = ""
+
+    /// What macOS reports and how many banners went through (ScreenTime/../notif-status.txt in the shared folder), to check
+    /// "notifications don't show" reports against facts.
+    fileprivate func writeStatus(_ settings: String?) {
+        if let settings { lastSettingsLine = settings }
+        guard let u = ScreenTimeShared.folder()?.appendingPathComponent("notif-status.txt") else { return }
+        let text = "\(Date())\n\(lastSettingsLine)\ndelivered=\(delivered) failed=\(failed) lastFailure=\(lastFailure)\n" +
+            "problem=\(bannerProblem ?? "none")\n"
+        try? text.write(to: u, atomically: true, encoding: .utf8)
     }
 
     /// The app delegate hands over responses to our notifications (already on the main actor).
@@ -338,4 +412,29 @@ enum PhoneNotifSettings {
         let dst = FileManager.default.temporaryDirectory.appendingPathComponent("airbridge-icon-\(UUID().uuidString).png")
         do { try FileManager.default.copyItem(at: src, to: dst); return dst } catch { return nil }
     }
+
+    #if DEBUG
+    /// airbridge://debug/notif_sample — a few realistic notifications in the list (from the connected phone if there is one),
+    /// to review the window's design. List only: no banners.
+    func debugInjectSamples() {
+        let phone = sourcePhones.first?.id ?? "sample-phone"
+        let now = Int64(Date().timeIntervalSince1970 * 1000)
+        let posts: [[String: Any]] = [
+            ["t": "notif_post", "key": "s1", "pkg": "com.whatsapp", "app": "WhatsApp", "title": "Aarav", "text": "On my way, 10 mins",
+             "ts": now - 60_000, "cat": "msg", "reply": true, "alert": false,
+             "msgs": [["from": "Aarav", "text": "Are we still on for tonight?", "ts": now - 600_000], ["me": true, "text": "Yes! 8 pm", "ts": now - 400_000],
+                      ["from": "Aarav", "text": "On my way, 10 mins", "ts": now - 60_000]]],
+            ["t": "notif_post", "key": "s2", "pkg": "com.whatsapp", "app": "WhatsApp", "title": "Family", "conv": "Family", "text": "Mom: Dinner is ready",
+             "ts": now - 300_000, "cat": "msg", "reply": true, "alert": false],
+            ["t": "notif_post", "key": "s3", "pkg": "com.instagram.android", "app": "Instagram", "title": "zoya.k", "text": "liked your reel",
+             "ts": now - 900_000, "cat": "social", "alert": false],
+            ["t": "notif_post", "key": "s4", "pkg": "com.google.android.gm", "app": "Gmail", "title": "Your order has shipped",
+             "text": "Your package is on the way and should arrive by Thursday.", "ts": now - 3_600_000, "cat": "email", "alert": false,
+             "acts": [["i": 0, "label": "Archive"], ["i": 1, "label": "Reply"]]],
+            ["t": "notif_post", "key": "s5", "pkg": "com.whatsapp", "app": "WhatsApp", "title": "", "text": "Contents hidden",
+             "ts": now - 20_000, "cat": "msg", "alert": false],
+        ]
+        for p in posts { _ = store.apply(p, from: phone) }
+    }
+    #endif
 }
