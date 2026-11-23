@@ -14,7 +14,8 @@ import SwiftUI
         NSApp.mainMenu = Self.makeMainMenu()
         let nc = NotificationCenter.default
         for name in [NSWindow.didBecomeKeyNotification, NSWindow.didBecomeMainNotification, NSWindow.willCloseNotification,
-                     NSWindow.didMiniaturizeNotification, NSWindow.didDeminiaturizeNotification, NSWindow.didChangeOcclusionStateNotification] {
+                     NSWindow.didMiniaturizeNotification, NSWindow.didDeminiaturizeNotification, NSWindow.didChangeOcclusionStateNotification,
+                     NSApplication.didResignActiveNotification] {
             observers.append(nc.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated { self?.schedule() }
             })
@@ -38,6 +39,11 @@ import SwiftUI
         let has = NSApp.windows.contains(where: Self.isAppWindow)
         let want: NSApplication.ActivationPolicy = has ? .regular : .accessory
         guard NSApp.activationPolicy() != want else { return }
+        // The last window closed while AirBridge is the active app: stay active (no windows, nothing on screen changes) and
+        // go back to the menu bar once the user clicks something else. Going back now makes macOS activate some other
+        // app, and with "switch to a Space with open windows" it jumps to that app's desktop: closing the window on an
+        // empty desktop teleported the user to the desktop they had left.
+        if want == .accessory && NSApp.isActive { return }
         NSApp.setActivationPolicy(want)
         if want == .regular {
             // Make the menu bar ours right away (otherwise the previous app's menu stays until a click).

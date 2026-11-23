@@ -22,7 +22,7 @@ import SwiftUI
         if window == nil {
             let host = NSHostingController(rootView: PhoneNotifsView(center: PhoneNotifCenter.shared, model: AppModel.shared))
             host.sizingOptions = [.minSize]
-            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 420, height: 640),
+            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 420, height: 780),
                              styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                              backing: .buffered, defer: false)
             w.title = "Notifications"
@@ -32,7 +32,7 @@ import SwiftUI
             w.delegate = self
             // Top right under the menu bar on the icon's screen, as tall as there is room for, beside (not over) a phone
             // mirror or call window that's already open.
-            w.setFrame(SmartPlacement.frame(for: NSSize(width: 420, height: 640), avoiding: w), display: false)
+            w.setFrame(SmartPlacement.frame(for: NSSize(width: 420, height: 780), avoiding: w), display: false)
             window = w
         }
         NSApp.activate()
