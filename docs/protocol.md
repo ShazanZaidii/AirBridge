@@ -1253,7 +1253,10 @@ advertised the `screentime_sink` cap. Any platform can send it: a phone, a Windo
   see. The same `id` on two devices is one app.
 - Send after `ready` and then at most every 5 minutes while the numbers change. A receiver keeps the last 30 days per device,
   and replaces a day it already has when the sender sends that day again.
-- `screen_time_icon` is sent at most once per session per `id`, for the most used apps of the days sent. Receivers may cache icons by `id`.
+- `screen_time_icon` is sent at most once per session per `id`, for the most used apps of the days sent.
+- A sender that advertises `screentime_source` answers `{"t":"screen_time_request"}` with a fresh `screen_time` at once (at
+  most every 10 s per peer). A sink sends it when someone is looking (its Screen Time page or menu opens), so the numbers are
+  current without reporting more often in the background. Receivers may cache icons by `id`.
 - On a phone it is opt-in (it needs the usage access permission). Nothing is relayed: a sink only shows its own paired devices,
   and forgets a device's numbers when that device is forgotten.
 
