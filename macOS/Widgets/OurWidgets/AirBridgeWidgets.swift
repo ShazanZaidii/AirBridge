@@ -70,8 +70,10 @@ struct ScreenTimeProvider: AppIntentTimelineProvider {
 
     func timeline(for configuration: SelectDeviceIntent, in context: Context) async -> Timeline<ScreenTimeEntry> {
         let now = Date()
-        // The app reloads the widget whenever new numbers arrive; this is only the fallback.
-        return Timeline(entries: [Self.entry(for: configuration, now: now)], policy: .after(now.addingTimeInterval(15 * 60)))
+        // Stale after 5 minutes: when the widget is next shown (Notification Center opened), macOS asks again and it draws the
+        // latest numbers the app has saved. The app itself only asks for a redraw about hourly, or at once when someone opens
+        // AirBridge's Screen Time page or menu.
+        return Timeline(entries: [Self.entry(for: configuration, now: now)], policy: .after(now.addingTimeInterval(5 * 60)))
     }
 
     static func entry(for configuration: SelectDeviceIntent, now: Date) -> ScreenTimeEntry {

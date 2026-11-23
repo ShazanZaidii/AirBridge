@@ -17,6 +17,7 @@ import SwiftUI
     /// Shows the page, narrowed to `device` when the widget was set to one.
     func show(device: String? = nil) {
         model.open(device: device)
+        ScreenTimeHub.shared.pullNow()
         // Become a regular app (Dock icon, own desktop handling) *before* the window exists. A window made while AirBridge is
         // still menu-bar-only can float over a full-screen app, and macOS then moves it to another desktop the moment the app
         // turns regular: a flash, then a jump to a desktop without it. Made by a regular app, macOS puts it on a normal
@@ -91,6 +92,9 @@ enum AppSort: String, CaseIterable { case time, opens, notifs }
     }
 
     func close() { timer?.invalidate(); timer = nil; iconCache = [:] }
+
+    /// New numbers arrived: show them at once if the page is open.
+    func reloadIfOpen() { if timer != nil { reload() } }
 
     func reload() {
         let wasToday = calendar.isDate(anchor, inSameDayAs: now)

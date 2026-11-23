@@ -582,6 +582,7 @@ struct MenuView: View {
         .animation(reduceMotion ? nil : Theme.motion, value: model.controlStatus)
         .animation(reduceMotion ? nil : Theme.motion, value: model.pairPrompts)
         .onAppear {
+            ScreenTimeHub.shared.pullNow() // someone opened the menu: fresh screen time for the widget
             if model.devices.isEmpty { showPairing = true }
             if startWithSettingsOpen { showSettings = true }
             model.refreshScreenCapture()
