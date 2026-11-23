@@ -125,5 +125,21 @@ do {
     }
 }
 
+// ---- exact-match blocking
+func notif(_ pkg: String, _ title: String, _ text: String) -> PhoneNotif {
+    PhoneNotifWire.parsePost(["t": "notif_post", "key": "k\(title.count)\(text.count)", "pkg": pkg, "app": "App", "title": title, "text": text], phone: "p")!
+}
+let battery = PhoneNotifBlock(notif("com.android.systemui.power", "Battery Saver is on", "Some features are limited"))
+check(battery.matches(notif("com.android.systemui.power", "Battery Saver is on", "Some features are limited")), "the exact same notification is blocked")
+check(battery.matches(notif("com.android.systemui.power", "  Battery Saver is on ", "Some features\nare  limited")), "extra spaces and line breaks don't matter")
+check(!battery.matches(notif("com.android.systemui.power", "Battery Saver is on", "Some features are limited.")), "one character different is not blocked")
+check(!battery.matches(notif("com.android.systemui.power", "battery saver is on", "Some features are limited")), "case counts: only exact text")
+check(!battery.matches(notif("com.other.app", "Battery Saver is on", "Some features are limited")), "the same words from another app are not blocked")
+let checking = PhoneNotifBlock(notif("com.whatsapp", "WhatsApp", "Checking for new messages"))
+check(PhoneNotifBlock.isBlocked(notif("com.whatsapp", "WhatsApp", "Checking for new messages"), by: [battery, checking]), "a list of blocks")
+check(!PhoneNotifBlock.isBlocked(notif("com.whatsapp", "Aarav", "Checking for new messages"), by: [battery, checking]), "a real chat from the same app still comes through")
+let enc = try! JSONEncoder().encode([checking]); let dec = try! JSONDecoder().decode([PhoneNotifBlock].self, from: enc)
+check(dec == [checking] && dec[0].id == checking.id, "blocks survive saving")
+
 print("notifcheck: \(passed) passed, \(failed) failed")
 exit(failed == 0 ? 0 : 1)

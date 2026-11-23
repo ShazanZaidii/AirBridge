@@ -296,3 +296,34 @@ nonisolated struct PhoneCallBoard {
     /// The phone disconnected: its call can no longer be controlled from here.
     mutating func phoneGone(_ phone: String) -> PhoneCall? { calls.removeValue(forKey: phone) }
 }
+
+/// A notification the user never wants on this Mac again: one app, exactly this title and text (spaces ignored). Not a type
+/// or an id: "Battery saver is on" is blocked while the same app's other notifications still come through. The phone keeps
+/// showing it; only this Mac stays quiet.
+nonisolated struct PhoneNotifBlock: Codable, Hashable, Identifiable, Sendable {
+    let pkg: String
+    let app: String
+    let title: String
+    let text: String
+    var id: String { pkg + "\u{1}" + title + "\u{1}" + text }
+
+    init(pkg: String, app: String, title: String, text: String) {
+        self.pkg = pkg
+        self.app = app
+        self.title = Self.normal(title)
+        self.text = Self.normal(text)
+    }
+
+    init(_ n: PhoneNotif) { self.init(pkg: n.pkg, app: n.app, title: n.title, text: n.body) }
+
+    /// Same app, same words: surrounding and repeated spaces and line breaks don't count, everything else does.
+    func matches(_ n: PhoneNotif) -> Bool {
+        n.pkg == pkg && Self.normal(n.title) == title && Self.normal(n.body) == text
+    }
+
+    static func normal(_ s: String) -> String {
+        s.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+    }
+
+    static func isBlocked(_ n: PhoneNotif, by blocks: [PhoneNotifBlock]) -> Bool { blocks.contains { $0.matches(n) } }
+}
