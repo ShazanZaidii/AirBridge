@@ -106,6 +106,8 @@ internal object PermissionPlan {
     class Page(
         val title: Int, val why: Int, val how: Int, val skip: Int, val accessibility: Boolean = false,
         val granted: (Context) -> Boolean, val intent: (Context) -> Intent,
+        /** Done in the app without Android's page when possible (true: nothing left to open). */
+        val fix: ((Context) -> Boolean)? = null,
     ) {
         fun howText(ctx: Context): String =
             if (accessibility) ctx.getString(how, ctx.getString(R.string.svc_core_name), ctx.getString(R.string.svc_text_name))
@@ -119,8 +121,18 @@ internal object PermissionPlan {
     private fun pkg(ctx: Context) = Uri.parse("package:${ctx.packageName}")
 
     val pages: List<Page> = buildList {
+        // Done only when notifications really go out: Android's notification access AND AirBridge's own "show phone
+        // notifications on your computers" switch (off out of the box). Counting the permission alone said "7/7, everything
+        // is set up" while nothing reached the computers.
         add(Page(R.string.setup_notif_title, R.string.setup_notif_why, R.string.setup_notif_how, R.string.setup_notif_skip,
-            granted = { PhoneRelaySettings.hasNotificationAccess(it) }, intent = { PhoneRelaySettings.accessIntent(it) }))
+            granted = { PhoneRelaySettings.hasNotificationAccess(it) && PhoneRelaySettings.notifsEnabled },
+            intent = { PhoneRelaySettings.accessIntent(it) },
+            fix = { ctx ->
+                // The switch goes on either way; Android's page is only needed when access is still missing.
+                PhoneRelaySettings.notifsEnabled = true
+                PhoneRelay.onSettingsChanged()
+                PhoneRelaySettings.hasNotificationAccess(ctx)
+            }))
         add(Page(R.string.pp_usage, R.string.setup_usage_why, R.string.setup_usage_how, R.string.setup_usage_skip,
             granted = { PaymentPause.hasUsageAccess(it) }, intent = { Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS, pkg(it)) }))
         add(Page(R.string.overlay_perm, R.string.setup_overlay_why, R.string.setup_overlay_how, R.string.setup_overlay_skip,
@@ -255,7 +267,7 @@ internal fun SetupScreen(onBack: () -> Unit, onOpenGuide: () -> Unit) {
                 if (pop.isEmpty()) advance() else popups.launch(pop.toTypedArray())
             }
             is SetupStep.Auto -> onOpenGuide()
-            is SetupStep.Settings -> try {
+            is SetupStep.Settings -> if (s.page.fix?.invoke(ctx) == true) advance() else try {
                 pageLauncher.launch(s.page.intent(ctx))
                 // A short reminder over Android's page, except for Accessibility: Android scrolls our row to the bottom edge
                 // there, exactly where a toast sits.
