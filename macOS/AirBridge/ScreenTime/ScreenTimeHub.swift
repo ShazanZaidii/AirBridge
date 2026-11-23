@@ -1,4 +1,5 @@
 import AppKit
+import Darwin
 import CoreGraphics
 import WidgetKit
 
@@ -120,7 +121,29 @@ nonisolated final class ScreenTimeHub: @unchecked Sendable {
         let key = "ScreenTimeWidgetBuild"
         guard UserDefaults.standard.string(forKey: key) != build else { return }
         UserDefaults.standard.set(build, forKey: key)
-        WidgetCenter.shared.reloadAllTimelines()
+        // A widget process started by the old version keeps running the old code from memory (macOS does not restart it when
+        // the app is replaced), so it would go on drawing the old widget with the old click behaviour. End it; the system
+        // starts the new one for the redraw below.
+        Self.endStaleWidgetProcess()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { WidgetCenter.shared.reloadAllTimelines() }
+    }
+
+    /// Ends AirBridge's widget extension process(es) that started before this app did.
+    private static func endStaleWidgetProcess() {
+        let appStart = NSRunningApplication.current.launchDate ?? Date()
+        let count = proc_listallpids(nil, 0)
+        guard count > 0 else { return }
+        var pids = [pid_t](repeating: 0, count: Int(count) + 32)
+        let n = proc_listallpids(&pids, Int32(pids.count * MemoryLayout<pid_t>.size))
+        for pid in pids.prefix(Int(max(0, n))) where pid > 0 {
+            var path = [CChar](repeating: 0, count: 4096)
+            guard proc_pidpath(pid, &path, UInt32(path.count)) > 0,
+                  String(cString: path).hasSuffix("AirBridgeWidgets.appex/Contents/MacOS/AirBridgeWidgets") else { continue }
+            var info = proc_bsdinfo()
+            guard proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, Int32(MemoryLayout<proc_bsdinfo>.size)) > 0 else { continue }
+            let started = Date(timeIntervalSince1970: TimeInterval(info.pbi_start_tvsec))
+            if started < appStart.addingTimeInterval(-2) { kill(pid, SIGTERM) }
+        }
     }
 }
 

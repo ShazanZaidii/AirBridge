@@ -17,6 +17,19 @@ import SwiftUI
     /// Shows the page, narrowed to `device` when the widget was set to one.
     func show(device: String? = nil) {
         model.open(device: device)
+        // Become a regular app (Dock icon, own desktop handling) *before* the window exists. A window made while AirBridge is
+        // still menu-bar-only can float over a full-screen app, and macOS then moves it to another desktop the moment the app
+        // turns regular: a flash, then a jump to a desktop without it. Made by a regular app, macOS puts it on a normal
+        // desktop and takes the user there in one smooth move, like Apple's own Screen Time.
+        if NSApp.activationPolicy() != .regular { NSApp.setActivationPolicy(.regular) }
+        // Already open where the user is: bring it forward. Open on another desktop, hidden, or the user is in a full-screen
+        // app: start a fresh window instead, which macOS puts on a normal desktop and takes the user to (as Apple's own
+        // windows do). Moving the old window instead fails over a full-screen app: it flashes, then the desktop jumps away.
+        if let old = window, !(old.isVisible && old.isOnActiveSpace && !old.isMiniaturized) {
+            old.delegate = nil
+            old.close()
+            window = nil
+        }
         if window == nil {
             let host = NSHostingController(rootView: ScreenTimePage(model: model))
             host.sizingOptions = [.minSize]
@@ -32,15 +45,11 @@ import SwiftUI
             w.delegate = self
             w.setFrameAutosaveName("AirBridgeScreenTime")
             if w.frame.origin == .zero { w.center() }
-            // Come to the desktop (Space) the user is on, not stay on the one where it was first opened.
-            w.collectionBehavior.insert(.moveToActiveSpace)
             window = w
         }
         guard let w = window else { return }
-        if w.isMiniaturized { w.deminiaturize(nil) }
         NSApp.activate()
         w.makeKeyAndOrderFront(nil)
-        w.orderFrontRegardless()
     }
 
     func windowWillClose(_ notification: Notification) { model.close() }
