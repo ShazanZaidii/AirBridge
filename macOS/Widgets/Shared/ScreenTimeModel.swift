@@ -343,3 +343,23 @@ nonisolated enum STCategory {
     /// The category to show for an app.
     static func of(_ app: STApp) -> String { valid(app.cat) ?? guess(app.id) ?? "other" }
 }
+
+extension STSnapshot {
+    /// Everything the widget can show, at the precision it shows it (whole minutes): two snapshots with the same signature
+    /// draw the same widget, so a redraw between them would be wasted. Covers the last `trendDays` days of every device,
+    /// today's hours and today's apps.
+    nonisolated func widgetSignature(now: Date, calendar: Calendar = .current) -> String {
+        let today = STSummary.dayKey(now, calendar: calendar)
+        var parts: [String] = [today]
+        for d in devices.sorted(by: { $0.id < $1.id }) {
+            parts.append("D:\(d.id):\(d.name)")
+            for day in d.days.suffix(STSummary.trendDays) {
+                parts.append("\(day.day)=\(day.seconds / 60)")
+                guard day.day == today else { continue }
+                if let h = day.hours { parts.append("h:" + h.map { String($0 / 60) }.joined(separator: ",")) }
+                for a in (day.apps ?? []).prefix(12) { parts.append("a:\(a.id)=\(a.seconds / 60)") }
+            }
+        }
+        return parts.joined(separator: "|")
+    }
+}

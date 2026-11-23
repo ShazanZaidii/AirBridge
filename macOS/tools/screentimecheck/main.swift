@@ -368,4 +368,19 @@ check("labels end at today", STText.ticksBack(from: 13, step: 2) == [1, 3, 5, 7,
 check("a label step that fits", STText.step(span: 14, maxLabels: 7) == 2 && STText.step(span: 7, maxLabels: 7) == 1 && STText.step(span: 24, maxLabels: 6) == 4)
 check("just after midnight there is one label", STText.ticksBack(from: 0, step: 3) == [0])
 
+// ---- redraw only when the widget would look different
+func sigSnap(_ secs: Int, _ ig: Int) -> STSnapshot {
+    var s = STSnapshot()
+    s.upsert(STDevice(id: "p", name: "Phone", platform: "android", updated: now, days: [
+        STDay(day: key(1), seconds: 7200, hours: nil, apps: nil),
+        STDay(day: key(0), seconds: secs, hours: hours([9: secs]), apps: [STApp(id: "com.instagram.android", name: "Instagram", seconds: ig)])]))
+    return s
+}
+let sigA = sigSnap(3600, 1800).widgetSignature(now: now, calendar: cal)
+check("same numbers, same drawing", sigA == sigSnap(3600, 1800).widgetSignature(now: now, calendar: cal))
+check("seconds within the same minute don't need a redraw", sigA == sigSnap(3630, 1830).widgetSignature(now: now, calendar: cal))
+check("a new minute in the total needs a redraw", sigA != sigSnap(3660, 1800).widgetSignature(now: now, calendar: cal))
+check("a new minute in an app needs a redraw", sigA != sigSnap(3600, 1860).widgetSignature(now: now, calendar: cal))
+check("a new day needs a redraw", sigA != sigSnap(3600, 1800).widgetSignature(now: now.addingTimeInterval(86_400), calendar: cal))
+
 print("screentimecheck: \(passed) passed, \(failed) failed"); exit(failed == 0 ? 0 : 1)
