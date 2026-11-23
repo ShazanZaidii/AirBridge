@@ -1221,3 +1221,42 @@ every ready peer that advertised the `battery_sink` cap:
 temperature or voltage changes). The sink shows the entry only while that peer is connected and removes it on disconnect.
 A PC without a battery sends nothing. Nothing else about the device is sent. The Mac lists the entry in the system's own
 battery list, so it shows in the Batteries widget (a phone with the phone picture, a computer with the neutral symbol).
+
+## 15. Screen time
+
+A device that wants its screen time shown on a computer (the AirBridge widget on a Mac) sends it to every ready peer that
+advertised the `screentime_sink` cap. Any platform can send it: a phone, a Windows or Linux PC, another Mac.
+
+```json
+{"t":"screen_time","days":[
+  {"day":"2026-11-21","s":30000,"hours":[…24 values],"apps":[…]},
+  {"day":"2026-11-22","s":34200,"hours":[0,0,0,0,0,0,0,0,1800,2400, … 24 values],
+   "unlocks":41,"notifs":120,"first":25920,
+   "apps":[{"id":"com.whatsapp","name":"WhatsApp","s":5400,"opens":38,"notifs":64,"cat":"social"},
+           {"id":"com.android.chrome","name":"Chrome","s":1800,"opens":9,"notifs":0}]}
+]}
+{"t":"screen_time_icon","id":"com.whatsapp","png":"<base64 PNG, at most 96 KiB, 96×96 or smaller>"}
+```
+
+- `day` is the sender's own calendar date, `yyyy-MM-dd`. `s` is the time the screen was on with something in use that day,
+  in seconds, as the sender's OS measures it (Android: time an app is visible, from `UsageStatsManager` events; Mac: macOS's
+  own app-focus records when allowed, else the app in front while someone is at it; Windows and Linux: the app in front while
+  someone is at the computer).
+- At most 31 days, newest last. Every day should carry `hours` (exactly 24 values, seconds per hour) and `apps` (at most 50,
+  most used first; an app with no time but notifications may be listed); a day with only `s` still works. A receiver clamps
+  every value to what a day or an hour can hold and drops a message that does not parse.
+- Optional, for the Mac's Screen Time page (Apple's Screen Time and Digital Wellbeing numbers), sent only by devices that can
+  count them: per day `unlocks` (pickups), `notifs` (notifications shown) and `first` (first use, seconds after local
+  midnight); per app `opens` (times it came on screen), `notifs` and `cat`, one of `social`, `entertainment`, `games`,
+  `productivity`, `creativity`, `reading`, `travel`, `shopping`, `health`, `utilities`, `other` (unknown words are dropped).
+- `id` is the app's own identifier (Android package name, macOS bundle id, Windows executable name). `name` is what people
+  see. The same `id` on two devices is one app.
+- Send after `ready` and then at most every 5 minutes while the numbers change. A receiver keeps the last 30 days per device,
+  and replaces a day it already has when the sender sends that day again.
+- `screen_time_icon` is sent at most once per session per `id`, for the most used apps of the days sent.
+- A sender that advertises `screentime_source` answers `{"t":"screen_time_request"}` with a fresh `screen_time` at once (at
+  most every 10 s per peer). A sink sends it when someone is looking (its Screen Time page or menu opens), so the numbers are
+  current without reporting more often in the background. Receivers may cache icons by `id`.
+- On a phone it is opt-in (it needs the usage access permission). Nothing is relayed: a sink only shows its own paired devices,
+  and forgets a device's numbers when that device is forgotten.
+

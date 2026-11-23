@@ -80,7 +80,20 @@ internal fun AirBridgeRoot() {
     var screen by rememberSaveable { mutableStateOf(if (PairStore.isEmpty()) Screen.ADD else Screen.DEVICES) }
     // Where the computer guide was opened from (Settings or the setup screen), so Back returns there.
     var guideFrom by rememberSaveable { mutableStateOf(Screen.SETTINGS) }
-    var showVpnWarning by remember { mutableStateOf(isVpnActive(ctx)) }
+    // "VPN is on" only when the VPN actually gets in the way: a VPN is up, there are paired devices, and none of them has
+    // connected after a fair wait. With split tunnelling or a VPN that allows the local network (Proton, …) devices
+    // connect fine, and warning on every launch was just noise.
+    var showVpnWarning by remember { mutableStateOf(false) }
+    val linkStatus by ConnectionHub.status.collectAsState()
+    LaunchedEffect(Unit) {
+        kotlinx.coroutines.delay(15_000)
+        val anyConnected = ConnectionHub.status.value.values.any { it == com.shazan.airbridge.connection.PeerStatus.CONNECTED }
+        showVpnWarning = isVpnActive(ctx) && !PairStore.isEmpty() && !anyConnected
+    }
+    // A device connecting proves the local network gets through: take the warning away.
+    LaunchedEffect(linkStatus) {
+        if (linkStatus.values.any { it == com.shazan.airbridge.connection.PeerStatus.CONNECTED }) showVpnWarning = false
+    }
     var pairError by remember { mutableStateOf<PairError?>(null) }
 
     // Nothing is asked up front: notifications are asked once something is paired (incoming files and

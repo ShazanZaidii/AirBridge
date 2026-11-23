@@ -46,6 +46,7 @@ namespace AirBridge.Net
         private Timer? _serverRetry;
         private readonly Timer _netDebounce;
         private PcBatterySharer? _battery;
+        private ScreenTimeTracker? _screenTime;
         private volatile IPAddress? _bestAddress;
         private (int W, int H) _screen;
         private bool _started;
@@ -114,6 +115,7 @@ namespace AirBridge.Net
             var paired = Store.All().Select(p => p.Id).ToHashSet();
             if (paired.Count > 0) Layout.Prune(paired);
             _battery = new PcBatterySharer(Peers, Send);
+            _screenTime = new ScreenTimeTracker(Peers, Send); // §15: this PC's screen time for the Mac's AirBridge widget
             Secrets.Changed += RaiseState;
             Store.Changed += RaiseState;
             Discovery.Changed += () => { _client.WakeAll(clearSuspension: false); RaiseState(); };
@@ -179,6 +181,7 @@ namespace AirBridge.Net
         {
             Stop();
             _netDebounce.Dispose();
+            _screenTime?.Dispose(); // saves today's numbers
             Links.Dispose();
             _serverRetry?.Dispose();
             Secrets.Dispose();
@@ -262,6 +265,7 @@ namespace AirBridge.Net
             });
             TidyOlderEntries(s);
             _battery?.SendTo(s.ToPeerInfo());
+            _screenTime?.SendTo(s.ToPeerInfo());
             NotifyPeers();
         }
 

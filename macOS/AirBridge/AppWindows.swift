@@ -14,7 +14,8 @@ import SwiftUI
         NSApp.mainMenu = Self.makeMainMenu()
         let nc = NotificationCenter.default
         for name in [NSWindow.didBecomeKeyNotification, NSWindow.didBecomeMainNotification, NSWindow.willCloseNotification,
-                     NSWindow.didMiniaturizeNotification, NSWindow.didDeminiaturizeNotification, NSWindow.didChangeOcclusionStateNotification] {
+                     NSWindow.didMiniaturizeNotification, NSWindow.didDeminiaturizeNotification, NSWindow.didChangeOcclusionStateNotification,
+                     NSApplication.didResignActiveNotification] {
             observers.append(nc.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated { self?.schedule() }
             })
@@ -38,11 +39,36 @@ import SwiftUI
         let has = NSApp.windows.contains(where: Self.isAppWindow)
         let want: NSApplication.ActivationPolicy = has ? .regular : .accessory
         guard NSApp.activationPolicy() != want else { return }
+        // The last window closed while AirBridge is the active app: hand the focus to an app on *this* desktop first. Left to
+        // itself macOS activates the previously used app, and with "switch to a Space with open windows" that jumped the
+        // user to the desktop they had left (closing a window on an empty desktop teleported them).
+        if want == .accessory && NSApp.isActive { Self.activateAppOnThisDesktop() }
         NSApp.setActivationPolicy(want)
         if want == .regular {
             // Make the menu bar ours right away (otherwise the previous app's menu stays until a click).
             NSApp.activate(ignoringOtherApps: true)
         }
+    }
+
+    /// Activates the app whose window is front-most on the current desktop, or Finder (it owns the desktop itself on every
+    /// Space) when there is none, so no desktop switch happens.
+    private static func activateAppOnThisDesktop() {
+        let me = ProcessInfo.processInfo.processIdentifier
+        let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+        for w in list {   // front to back
+            guard (w[kCGWindowLayer as String] as? Int) == 0, let pid = w[kCGWindowOwnerPID as String] as? pid_t, pid != me,
+                  let b = w[kCGWindowBounds as String] as? [String: Any], let r = CGRect(dictionaryRepresentation: b as CFDictionary),
+                  r.width > 80, r.height > 80, let app = NSRunningApplication(processIdentifier: pid),
+                  app.activationPolicy == .regular else { continue }
+            app.activate()
+            return
+        }
+        NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.finder").first?.activate()
+    }
+
+    /// Hides the menu bar panel (it floats above other windows): called when the panel opens one of AirBridge's windows.
+    static func closeMenuPanel() {
+        for w in NSApp.windows where w.isVisible && String(describing: type(of: w)).contains("MenuBarExtra") { w.orderOut(nil) }
     }
 
     /// A window the user opened and can switch to: titled windows and the phone mirror window — not the menu

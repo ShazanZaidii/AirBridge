@@ -47,6 +47,9 @@ object NotifFilter {
 
     sealed class Decision {
         object Forward : Decision()
+        /** Locked, and the phone hides sensitive content on its lock screen: forward with the contents hidden (as the lock
+         *  screen shows it); the full version follows quietly at unlock. */
+        object ForwardHidden : Decision()
         object Call : Decision()
         /** Not forwarded now; [later] = forward when the phone is unlocked. */
         data class Skip(val reason: String, val later: Boolean = false) : Decision()
@@ -67,7 +70,7 @@ object NotifFilter {
         if (!f.hasContent) return Decision.Skip("empty")
         if (c.locked) {
             if (f.visibility == VISIBILITY_SECRET) return Decision.Skip("secret", later = true)
-            if (c.hideSensitiveWhenLocked == true) return Decision.Skip("locked", later = true)
+            if (c.hideSensitiveWhenLocked == true) return Decision.ForwardHidden
         }
         return Decision.Forward
     }

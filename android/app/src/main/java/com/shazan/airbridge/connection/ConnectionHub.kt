@@ -221,6 +221,7 @@ object ConnectionHub : PeerBus.Transport {
         com.shazan.airbridge.phone.PhoneRelay.onPeerReady(id) // §13: notification state, resync, current call
         com.shazan.airbridge.phone.calls.CallAudioInfo.onPeerReady(id) // §13.4: Bluetooth facts for call audio
         com.shazan.airbridge.phone.DeviceBattery.onPeerReady(id) // the battery level, for a computer that lists it
+        com.shazan.airbridge.phone.screentime.ScreenTimeReporter.onPeerReady(id) // screen time, for a computer with the widget
     }
 
     fun onClosed(s: Session, outcome: Outcome) {
@@ -370,6 +371,7 @@ object ConnectionHub : PeerBus.Transport {
             t.startsWith("notif_") || t.startsWith("call_") -> com.shazan.airbridge.phone.PhoneRelay.onMessage(id, m)
             // §8.9 Pro mirroring helper: report / open Wireless debugging. Network half, no input lease.
             t == "adb_wifi" -> com.shazan.airbridge.mirror.pro.AdbWifi.onMessage(s, m)
+            t == "screen_time_request" -> com.shazan.airbridge.phone.screentime.ScreenTimeReporter.onRequest(id)
             // §8.7 phone as source: works without the accessibility service (view-only), so it never
             // depends on the input half being installed.
             t.startsWith("mirror_") && com.shazan.airbridge.mirror.PhoneMirror.onControl(id, m) -> Unit

@@ -384,6 +384,7 @@ nonisolated final class PeerManager: PeerTransport, @unchecked Sendable {
 
     private func removePeer(_ id: String) {
         PeerStore.shared.delete(id)
+        ScreenTimeHub.shared.forget(deviceId: id)
         Layout.shared.remove(id)
         outboundIds = outboundIds.filter { $0 != id }
         setLastAddress(id, nil)
@@ -461,6 +462,7 @@ nonisolated final class PeerManager: PeerTransport, @unchecked Sendable {
         snapLock.unlock()
         PeerBus.shared.notifyPeers(list)
         DevicePowerSources.shared.peersChanged(list)
+        ScreenTimeHub.shared.peersChanged(list)
         onMain { AppModel.shared.readyPeers = list }
     }
 
