@@ -77,6 +77,8 @@ struct PhoneNotifsView: View {
                 .padding(.bottom, 14)
             notices
                 .padding(.horizontal, 16)
+            BackgroundSection(hud: TransferHUD.shared, board: CallPanels.shared.board)
+                .padding(.horizontal, 16)
             if groups.isEmpty {
                 VStack(spacing: 12) {
                     empty
@@ -177,6 +179,59 @@ struct PhoneNotifsView: View {
             // Down to the same 16-point margin as the sides, so the window reads as one even frame.
             .frame(maxWidth: .infinity, minHeight: 200, maxHeight: .infinity)
         }
+    }
+}
+
+/// Calls and transfer cards the user swiped away: still going, one click brings them back on screen.
+private struct BackgroundSection: View {
+    @ObservedObject var hud: TransferHUD
+    @ObservedObject var board: CallBoardUI
+
+    private var calls: [CallUI] { board.calls.filter(\.inBackground) }
+    private var cards: [HUDCard] { hud.backgroundCards }
+
+    var body: some View {
+        if !calls.isEmpty || !cards.isEmpty {
+            VStack(alignment: .leading, spacing: 0) {
+                Eyebrow(text: "In the background")
+                    .padding(.horizontal, 14).padding(.top, 12).padding(.bottom, 6)
+                ForEach(calls) { ui in
+                    Rectangle().fill(Ink.hairline).frame(height: 1)
+                    BackgroundCallRow(ui: ui).padding(.horizontal, 14).padding(.vertical, 9)
+                }
+                ForEach(cards) { card in
+                    Rectangle().fill(Ink.hairline).frame(height: 1)
+                    TransferListRow(card: card, hud: hud).buttonStyle(.plain).padding(.horizontal, 14).padding(.vertical, 9)
+                }
+            }
+            .background(RoundedRectangle(cornerRadius: Ink.radius, style: .continuous).fill(Ink.surface))
+            .overlay(RoundedRectangle(cornerRadius: Ink.radius, style: .continuous).strokeBorder(Ink.hairline, lineWidth: 1))
+            .padding(.bottom, 12)
+            .transition(.opacity)
+        }
+    }
+}
+
+private struct BackgroundCallRow: View {
+    @ObservedObject var ui: CallUI
+
+    var body: some View {
+        Button { CallPanels.shared.showCall(phone: ui.phoneId) } label: {
+            HStack(spacing: 10) {
+                CallerAvatar(photo: ui.photo, name: ui.call.name, size: 26)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(ui.title).font(.system(size: 12.5, weight: .medium)).lineLimit(1)
+                    CallStatusText(ui: ui).font(.system(size: 11.5)).foregroundStyle(Ink.secondary).lineLimit(1)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: ui.call.state == .ringing ? "phone.arrow.down.left" : "phone")
+                    .font(.system(size: 12)).foregroundStyle(Ink.tertiary)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("Show the call")
+        .accessibilityLabel("Call with \(ui.title). Show the call")
     }
 }
 

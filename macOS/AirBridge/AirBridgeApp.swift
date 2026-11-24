@@ -169,6 +169,35 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
             }
             // airbridge://debug/fake_call?state=ringing|active|ended&name=Asha&label=Mobile — the call UI without a phone.
             if url.path == "/fake_call" { CallPanels.debugFakeCall(q) }
+            // …/call_swipe?dx=-200 swipes the fake call's pill or banner; …/call_show brings it back (the menu bar row's click).
+            if url.path == "/call_swipe" { CallPanels.debugSwipe(dx: Int32(q.first { $0.name == "dx" }?.value ?? "") ?? -200) }
+            if url.path == "/call_show" { CallPanels.shared.showCall(phone: "debug-phone") }
+            // airbridge://debug/fake_transfer?id=t1&phase=active|done|failed&done=…&total=…&dir=in|out&elapsed=22&name=… — a transfer
+            // card without a transfer.
+            if url.path == "/fake_transfer" {
+                func v(_ k: String) -> String? { q.first { $0.name == k }?.value }
+                let phase: TransferStatus.Phase = switch v("phase") {
+                case "done": .done
+                case "failed": .failed("Connection lost")
+                default: .active
+                }
+                let total = Int64(v("total") ?? "") ?? 1_073_741_824
+                let done = Int64(v("done") ?? "") ?? total / 3
+                AppModel.shared.updateTransfer(TransferStatus(
+                    id: v("id") ?? "fake", direction: v("dir") == "out" ? .outgoing : .incoming, peerName: "V2404", fileCount: 1,
+                    firstName: v("name") ?? "holiday.mov", total: total, done: phase == .done ? total : done, phase: phase,
+                    bytesPerSec: phase == .active ? 44_000_000 : 0, elapsed: Double(v("elapsed") ?? "") ?? 0, peerId: "debug-phone"))
+            }
+            // airbridge://debug/hud_dump?out=/path.txt — the transfer cards (on screen / background) and where the panel is.
+            if url.path == "/hud_dump", let out = q.first(where: { $0.name == "out" })?.value {
+                let hud = TransferHUD.shared
+                var lines = hud.cards.map { "\($0.transferKey ?? "-") \($0.background ? "background" : "screen") \($0.status.map(TransferText.finished) ?? "")" }
+                if let p = NSApp.windows.first(where: { $0.accessibilityLabel() == "AirBridge transfers" }) {
+                    lines.append("panel \(p.isVisible ? "visible" : "hidden") \(Int(p.frame.minX)) \(Int(p.frame.minY)) \(Int(p.frame.width)) \(Int(p.frame.height))")
+                }
+                lines.append("calls " + CallPanels.shared.board.calls.map { "\($0.phoneId):\($0.inBackground ? "background" : "screen")" }.joined(separator: " "))
+                try? lines.joined(separator: "\n").write(toFile: out, atomically: true, encoding: .utf8)
+            }
             // airbridge://debug/airweb?out=/path — opens AirWeb and writes its local link (127.0.0.1) to that file.
             if url.path == "/airweb", let out = q.first(where: { $0.name == "out" })?.value {
                 AirWebWindow.shared.show()
@@ -218,6 +247,21 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
                 r.scale = 1
                 if let cg = r.cgImage, let folder = ScreenTimeShared.folder() {
                     try? NSBitmapImageRep(cgImage: cg).representation(using: .png, properties: [:])?.write(to: folder.appendingPathComponent("debug-notifs.png"))
+                }
+            }
+            // airbridge://debug/hud_swipe?x=170&y=50&dx=-200 — a two-finger swipe on the transfer cards (panel content point).
+            if url.path == "/hud_swipe" {
+                func v(_ k: String) -> Double { Double(q.first { $0.name == k }?.value ?? "") ?? 0 }
+                TransferHUD.shared.debugSwipe(at: CGPoint(x: v("x"), y: v("y")), dx: Int32(v("dx")))
+            }
+            // airbridge://debug/hud_snapshot — the transfer cards drawn into ScreenTime/debug-hud.png in the shared folder.
+            if url.path == "/hud_snapshot" {
+                let view = TransferHUDView(hud: TransferHUD.shared).frame(width: HUDPanelController.width)
+                    .background(Color(white: 0.35)).environment(\.colorScheme, .dark)
+                let r = ImageRenderer(content: view)
+                r.scale = 2
+                if let cg = r.cgImage, let folder = ScreenTimeShared.folder() {
+                    try? NSBitmapImageRep(cgImage: cg).representation(using: .png, properties: [:])?.write(to: folder.appendingPathComponent("debug-hud.png"))
                 }
             }
             if url.path == "/screentime_snapshot" {
@@ -481,6 +525,7 @@ struct MenuView: View {
     @AppStorage(DropSettings.autoHideKey) private var autoHideCards = false
     @ObservedObject private var phoneNotifs = PhoneNotifCenter.shared
     @ObservedObject private var airWeb = AirWebWindow.shared
+    @ObservedObject private var hud = TransferHUD.shared
     @State private var renaming = false
     @State private var draftName = ""
     @AppStorage(PhoneNotifSettings.showNotifsKey) private var showPhoneNotifs = true
@@ -525,10 +570,15 @@ struct MenuView: View {
 
             devicesSection
 
-            if !model.transfers.isEmpty {
+            // Every transfer card, on screen or swiped away; a click brings its card back.
+            if !hud.cards.isEmpty {
                 VStack(alignment: .leading, spacing: Theme.sm) {
                     SectionHeader(title: "Transfers")
-                    ForEach(model.transfers) { TransferRowView(status: $0) }
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(hud.cards) { TransferListRow(card: $0, hud: hud) }
+                    }
+                    .buttonStyle(MenuRowButtonStyle())
+                    .padding(.horizontal, -Theme.sm)
                 }
             }
 
@@ -934,6 +984,7 @@ struct MenuView: View {
             SettingToggleRow(icon: "clock.arrow.circlepath", title: "Tidy up finished transfers",
                              hint: "Hide their cards after 5 seconds", isOn: $autoHideCards)
                 .onChange(of: autoHideCards) { TransferHUD.shared.settingsChanged() }
+            TransferCornerRow()
             SettingToggleRow(icon: "power", title: "Open at login", hint: "Phones reconnect and screen time counts from the start",
                              isOn: Binding(get: { LoginItem.isOn }, set: { LoginItem.set($0) }))
         }
@@ -1115,52 +1166,6 @@ struct PairPromptPanelView: View {
         PairPromptCard(prompt: prompt, model: model)
             .frame(width: 340)
             .background(.regularMaterial)
-    }
-}
-
-struct TransferRowView: View {
-    let status: TransferStatus
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack {
-                Image(systemName: status.direction == .incoming ? "arrow.down.circle" : "arrow.up.circle")
-                Text(title).font(.caption).lineLimit(1)
-                Spacer()
-                if status.phase == .active || status.phase == .waiting {
-                    Button { PeerManager.shared.cancelTransfer(key: status.id) } label: {
-                        Image(systemName: "xmark.circle.fill")
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            if status.phase == .active || status.phase == .waiting {
-                ProgressView(value: status.total > 0 ? Double(status.done) / Double(status.total) : 0)
-                    .progressViewStyle(.linear)
-            }
-            Text(detail).font(.caption2).foregroundStyle(.secondary)
-        }
-    }
-
-    private var title: String {
-        let what = status.fileCount == 1 ? status.firstName : "\(status.fileCount) files"
-        return status.direction == .incoming ? "\(what) from \(status.peerName)" : "\(what) to \(status.peerName)"
-    }
-
-    private var detail: String {
-        switch status.phase {
-        case .waiting: return "Waiting for \(status.peerName)…"
-        case .done: return "Done — \(formatBytes(status.total))"
-        case .failed(let why): return why
-        case .active:
-            var s = "\(formatBytes(status.done)) of \(formatBytes(status.total))"
-            if status.bytesPerSec > 0 {
-                s += String(format: " • %.1f MB/s", status.bytesPerSec / 1_048_576)
-                let remaining = Double(status.total - status.done) / status.bytesPerSec
-                if remaining.isFinite, remaining >= 1 { s += " • \(Int(remaining))s left" }
-            }
-            return s
-        }
     }
 }
 

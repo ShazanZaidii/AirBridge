@@ -14,6 +14,28 @@ nonisolated enum DropSettings {
     }
     /// Hide finished transfer cards after a few seconds (off: cards stay until dismissed).
     static var autoHideFinished: Bool { UserDefaults.standard.bool(forKey: autoHideKey) }
+
+    static let cornerKey = "TransferCardsCorner"
+    /// Where the transfer cards sit on screen.
+    static var corner: HUDCorner {
+        get { UserDefaults.standard.string(forKey: cornerKey).flatMap(HUDCorner.init(rawValue:)) ?? .topRight }
+        set { UserDefaults.standard.set(newValue.rawValue, forKey: cornerKey) }
+    }
+}
+
+/// A screen corner for the transfer cards.
+nonisolated enum HUDCorner: String, CaseIterable, Sendable {
+    case topRight, topLeft, bottomRight, bottomLeft
+    var isTop: Bool { self == .topRight || self == .topLeft }
+    var isLeft: Bool { self == .topLeft || self == .bottomLeft }
+    var title: String {
+        switch self {
+        case .topRight: "Top right"
+        case .topLeft: "Top left"
+        case .bottomRight: "Bottom right"
+        case .bottomLeft: "Bottom left"
+        }
+    }
 }
 
 /// Reads dragged files off a pasteboard and turns folders into the files inside them.
@@ -351,6 +373,23 @@ nonisolated enum TransferText {
         let mins = Int((Double(secs) / 60).rounded())
         if mins < 60 { return "\(mins) min left" }
         return "\(mins / 60) h \(mins % 60) min left"
+    }
+
+    /// How long a finished transfer took: "0.4 s", "22 s", "1 min 5 s", "1 h 2 min"; nil when unknown.
+    static func took(_ secs: TimeInterval) -> String? {
+        guard secs > 0, secs.isFinite else { return nil }
+        if secs < 10 { return String(format: "%.1f s", secs) }
+        let s = Int(secs.rounded())
+        if s < 60 { return "\(s) s" }
+        if s < 3600 { return s % 60 == 0 ? "\(s / 60) min" : "\(s / 60) min \(s % 60) s" }
+        return "\(s / 3600) h \(s % 3600 / 60) min"
+    }
+
+    /// "Sent · 1 GB · 22 s" for a finished card.
+    static func finished(_ s: TransferStatus) -> String {
+        var parts = [s.direction == .outgoing ? "Sent" : "Received", bytes(s.total)]
+        if let t = took(s.elapsed) { parts.append(t) }
+        return parts.joined(separator: " · ")
     }
 
     /// "Report.pdf" or "3 files".
