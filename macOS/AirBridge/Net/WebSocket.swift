@@ -2,14 +2,14 @@ import Foundation
 import Network
 import CryptoKit
 
-/// Minimal RFC 6455 WebSocket over a raw TCP `NWConnection`, used for both roles.
+/// Minimal RFC 6455 WebSocket over a TCP byte stream ([ByteTransport]: a plain socket), used for both roles.
 /// Hand-rolled because Network.framework's server-side WebSocket does not expose the request path,
 /// and the spec requires a 404 for anything other than `/v2`. No extensions (permessage-deflate off).
 /// All callbacks run on `queue`.
 nonisolated final class WebSocket: @unchecked Sendable {
     enum Role { case server, client }
 
-    let connection: NWConnection
+    let transport: ByteTransport
     private let role: Role
     private let queue: DispatchQueue
     private var buffer = Data()
@@ -31,8 +31,8 @@ nonisolated final class WebSocket: @unchecked Sendable {
     var onActivity: (() -> Void)?
     var onClose: ((Error?) -> Void)?
 
-    init(connection: NWConnection, role: Role, queue: DispatchQueue) {
-        self.connection = connection
+    init(transport: ByteTransport, role: Role, queue: DispatchQueue) {
+        self.transport = transport
         self.role = role
         self.queue = queue
     }
@@ -46,17 +46,8 @@ nonisolated final class WebSocket: @unchecked Sendable {
         return NWParameters(tls: nil, tcp: tcp)
     }
 
-    var remoteHost: String? {
-        if case .hostPort(let host, _)? = connection.currentPath?.remoteEndpoint {
-            return WebSocket.hostString(host)
-        }
-        return nil
-    }
-
-    var remotePort: UInt16? {
-        if case .hostPort(_, let port)? = connection.currentPath?.remoteEndpoint { return port.rawValue }
-        return nil
-    }
+    var remoteHost: String? { transport.remoteHost }
+    var remotePort: UInt16? { transport.remotePort }
 
     static func hostString(_ host: NWEndpoint.Host) -> String {
         switch host {
@@ -68,17 +59,14 @@ nonisolated final class WebSocket: @unchecked Sendable {
     }
 
     func start() {
-        connection.stateUpdateHandler = { [weak self] state in
-            guard let self else { return }
-            switch state {
-            case .ready: self.didConnect()
-            case .failed(let e): self.finish(e)
-            case .waiting(let e): if self.role == .client { self.finish(e) }
-            case .cancelled: self.finish(nil)
-            default: break
-            }
+        transport.onReady = { [weak self] in self?.didConnect() }
+        transport.onData = { [weak self] data in
+            guard let self, !self.finished, !data.isEmpty else { return }
+            self.buffer.append(data)
+            self.process()
         }
-        connection.start(queue: queue)
+        transport.onEnd = { [weak self] e in self?.finish(e) }
+        transport.start(queue: queue)
     }
 
     // MARK: Sending
@@ -96,16 +84,16 @@ nonisolated final class WebSocket: @unchecked Sendable {
     /// after the close frame. Calling it again while a close is in progress does nothing.
     func close(code: UInt16 = 1000) {
         guard !finished else { return }
-        guard open else { connection.cancel(); return }
+        guard open else { transport.cancel(); return }
         guard !closeSent else { return }
         closeSent = true
         var payload = Data()
         withUnsafeBytes(of: code.bigEndian) { payload.append(contentsOf: $0) }
         sendFrame(opcode: 0x8, payload: payload, completion: nil)
-        queue.asyncAfter(deadline: .now() + 2) { [weak self] in self?.connection.cancel() }
+        queue.asyncAfter(deadline: .now() + 2) { [weak self] in self?.transport.cancel() }
     }
 
-    func cancel() { connection.cancel() }
+    func cancel() { transport.cancel() }
 
     private func sendFrame(opcode: UInt8, payload: Data, completion: ((Bool) -> Void)?) {
         guard open, !finished, !(closeSent && opcode < 0x8) else { completion?(false); return }
@@ -128,12 +116,12 @@ nonisolated final class WebSocket: @unchecked Sendable {
             header.append(contentsOf: key)
             WebSocket.applyMask(&body, key: key)
         }
-        connection.send(content: header, completion: .idempotent)
-        connection.send(content: body, completion: .contentProcessed { error in completion?(error == nil) })
+        transport.send(header, completion: nil)
+        transport.send(body, completion: completion)
     }
 
     private func sendRaw(_ s: String, then: (() -> Void)? = nil) {
-        connection.send(content: Data(s.utf8), completion: .contentProcessed { _ in then?() })
+        transport.send(Data(s.utf8)) { _ in then?() }
     }
 
     static func applyMask(_ data: inout Data, key: [UInt8]) {
@@ -165,20 +153,6 @@ nonisolated final class WebSocket: @unchecked Sendable {
             }
             sendRaw("GET \(Proto.path) HTTP/1.1\r\nHost: \(hostHeader)\r\nUpgrade: websocket\r\n"
                     + "Connection: Upgrade\r\nSec-WebSocket-Key: \(clientKey)\r\nSec-WebSocket-Version: 13\r\n\r\n")
-        }
-        receiveLoop()
-    }
-
-    private func receiveLoop() {
-        connection.receive(minimumIncompleteLength: 1, maximumLength: 1 << 20) { [weak self] data, _, isComplete, error in
-            guard let self, !self.finished else { return }
-            if let data, !data.isEmpty {
-                self.buffer.append(data)
-                self.process()
-            }
-            if self.finished { return }
-            if error != nil || isComplete { self.finish(error); return }
-            self.receiveLoop()
         }
     }
 
@@ -233,7 +207,7 @@ nonisolated final class WebSocket: @unchecked Sendable {
     private func reject(_ status: String, extra: String = "") -> Bool {
         finishedEarly()
         sendRaw("HTTP/1.1 \(status)\r\n\(extra)Content-Length: 0\r\nConnection: close\r\n\r\n") { [weak self] in
-            self?.connection.cancel()
+            self?.transport.cancel()
         }
         return false
     }
@@ -298,11 +272,11 @@ nonisolated final class WebSocket: @unchecked Sendable {
                 // Peer-initiated: echo the status code, then close the TCP connection once it is flushed.
                 closeSent = true
                 let echo = payload.count >= 2 ? payload.prefix(2) : Data()
-                sendFrame(opcode: 0x8, payload: Data(echo)) { [weak self] _ in self?.connection.cancel() }
-                queue.asyncAfter(deadline: .now() + 2) { [weak self] in self?.connection.cancel() }
+                sendFrame(opcode: 0x8, payload: Data(echo)) { [weak self] _ in self?.transport.cancel() }
+                queue.asyncAfter(deadline: .now() + 2) { [weak self] in self?.transport.cancel() }
             } else {
                 // The echo to our own close frame: the handshake is complete.
-                connection.cancel()
+                transport.cancel()
             }
         case 0x9:
             sendFrame(opcode: 0xA, payload: payload, completion: nil)
@@ -333,8 +307,8 @@ nonisolated final class WebSocket: @unchecked Sendable {
             closeSent = true
             var payload = Data()
             withUnsafeBytes(of: code.bigEndian) { payload.append(contentsOf: $0) }
-            sendFrame(opcode: 0x8, payload: payload) { [weak self] _ in self?.connection.cancel() }
-            queue.asyncAfter(deadline: .now() + 2) { [weak self] in self?.connection.cancel() }
+            sendFrame(opcode: 0x8, payload: payload) { [weak self] _ in self?.transport.cancel() }
+            queue.asyncAfter(deadline: .now() + 2) { [weak self] in self?.transport.cancel() }
             finishedEarly()
         } else {
             finish(nil)
@@ -353,7 +327,7 @@ nonisolated final class WebSocket: @unchecked Sendable {
     private func finish(_ error: Error?) {
         guard !finished else { return }
         finished = true
-        connection.cancel()
+        transport.cancel()
         let cb = onClose
         clearCallbacks()
         cb?(error)
