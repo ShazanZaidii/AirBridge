@@ -40,7 +40,6 @@ import UserNotifications
     /// Screen-recording permission (gates the `mirror_source` capability, §8.7).
     @Published var screenCaptureAllowed = CGPreflightScreenCaptureAccess()
 
-    @Published var transfers: [TransferStatus] = []
     @Published var noticeText: String?
     private var noticeToken = 0
 
@@ -136,18 +135,9 @@ import UserNotifications
         if !accept { endPairPrompt(p.id) }
     }
 
+    /// Transfer progress goes to the transfer cards (which the menu bar and the Notifications window list too).
     func updateTransfer(_ s: TransferStatus) {
         TransferHUD.shared.ingest(s)
-        if let i = transfers.firstIndex(where: { $0.id == s.id }) { transfers[i] = s } else { transfers.append(s) }
-        switch s.phase {
-        case .done, .failed:
-            let id = s.id
-            DispatchQueue.main.asyncAfter(deadline: .now() + 6) {
-                MainActor.assumeIsolated { AppModel.shared.transfers.removeAll { $0.id == id } }
-            }
-        default:
-            break
-        }
     }
 
     // MARK: Share extension hand-off

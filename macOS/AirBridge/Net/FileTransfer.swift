@@ -255,7 +255,7 @@ nonisolated final class IncomingTransfer: @unchecked Sendable {
         let s = TransferStatus(id: key, direction: .incoming, peerName: peerName, fileCount: files.count,
                                firstName: files.first?.name ?? "", total: total, done: writtenBytes, phase: phase,
                                bytesPerSec: elapsed > 0.5 ? Double(writtenBytes) / elapsed : 0,
-                               peerId: peerId, savedPaths: savedURLs.map(\.path))
+                               elapsed: phase == .done ? elapsed : 0, peerId: peerId, savedPaths: savedURLs.map(\.path))
         onMain { TransferUI.update(s) }
     }
 
@@ -329,6 +329,14 @@ nonisolated final class OutgoingTransfer: @unchecked Sendable {
     private var doneSent = false
     private var ended = false
     private var startedAt = Date()
+    /// Chunks handed to the network but not yet taken by it. Each is 512 KiB; the flow-control window still bounds the total.
+    static let maxQueued = 16
+    // Timing for the log line at the end: what the sender was waiting on while it could not send.
+    private var stall: (why: Int, since: TimeInterval)?   // 0 = window full (waiting for acks), 1 = network queue full
+    private var windowWait: TimeInterval = 0
+    private var queueWait: TimeInterval = 0
+    private var readTime: TimeInterval = 0
+    private var acks = 0
     private var lastReport = Date.distantPast
 
     // io-queue state.
@@ -383,6 +391,7 @@ nonisolated final class OutgoingTransfer: @unchecked Sendable {
     func acked(_ received: Int64) {
         guard !ended else { return }
         acked = max(acked, min(received, sent))
+        acks += 1
         let now = Date()
         if now.timeIntervalSince(lastReport) > 0.25 { lastReport = now; report(.active) }
         pump()
@@ -402,7 +411,16 @@ nonisolated final class OutgoingTransfer: @unchecked Sendable {
         }
         let len = Int(min(Int64(Proto.chunkSize), files[fileIndex].size - fileOffset))
         // Window from §6.1, plus a small local queue so control frames are not stuck behind file data.
-        guard sent - acked + Int64(len) <= window, inFlight < 2 else { return }
+        let now = ProcessInfo.processInfo.systemUptime
+        let why = sent - acked + Int64(len) > window ? 0 : (inFlight >= Self.maxQueued ? 1 : -1)
+        if let st = stall, st.why != why {
+            if st.why == 0 { windowWait += now - st.since } else { queueWait += now - st.since }
+            stall = nil
+        }
+        if why >= 0 {
+            if stall == nil { stall = (why, now) }
+            return
+        }
         reading = true
         let (fi, off, url) = (fileIndex, fileOffset, files[fileIndex].url)
         io.async { [self] in
@@ -416,8 +434,10 @@ nonisolated final class OutgoingTransfer: @unchecked Sendable {
                 try? h.seek(toOffset: UInt64(off))
                 data = try? h.read(upToCount: len)
             }
+            let readSecs = ProcessInfo.processInfo.systemUptime - now
             queue.async { [self] in
                 reading = false
+                readTime += readSecs
                 guard !ended else { return }
                 guard let data, data.count == len else {
                     finish(.failed("Could not read \(url.lastPathComponent)"), notifyPeer: "error")
@@ -443,6 +463,16 @@ nonisolated final class OutgoingTransfer: @unchecked Sendable {
     func finish(_ phase: TransferStatus.Phase, notifyPeer reason: String? = nil) {
         guard !ended else { return }
         ended = true
+        let secs = Date().timeIntervalSince(startedAt)
+        let timing = String(format: "tx %d: %.0f MiB in %.2f s = %.1f MiB/s | waiting for acks %.2f s, network queue full %.2f s, reading %.2f s, %d acks",
+                            Int(id), Double(acked) / 1048576, secs, Double(acked) / 1048576 / max(secs, 0.001), windowWait, queueWait, readTime, acks)
+        NSLog("AirBridge: %@", timing)
+        #if DEBUG
+        if let u = ScreenTimeShared.folder()?.appendingPathComponent("transfer-timing.txt") {
+            let line = Data((timing + "\n").utf8)
+            if let h = try? FileHandle(forWritingTo: u) { h.seekToEndOfFile(); h.write(line); try? h.close() } else { try? line.write(to: u) }
+        }
+        #endif
         if let reason { session?.send(["t": "xfer_cancel", "id": Int(id), "dir": "out", "reason": reason]) }
         if phase == .done { acked = total }
         report(phase)
@@ -458,7 +488,7 @@ nonisolated final class OutgoingTransfer: @unchecked Sendable {
         let s = TransferStatus(id: key, direction: .outgoing, peerName: peerName, fileCount: files.count,
                                firstName: files.first?.name ?? "", total: total, done: acked, phase: phase,
                                bytesPerSec: elapsed > 0.5 && phase == .active ? Double(acked) / elapsed : 0,
-                               peerId: peerId, sourcePaths: files.map(\.url.path))
+                               elapsed: phase == .done ? elapsed : 0, peerId: peerId, sourcePaths: files.map(\.url.path))
         onMain { TransferUI.update(s) }
     }
 }

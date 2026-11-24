@@ -13,6 +13,8 @@ nonisolated struct TransferStatus: Identifiable, Equatable, Sendable {
     var done: Int64
     var phase: Phase
     var bytesPerSec: Double = 0
+    /// How long the transfer took, once it is done (from acceptance to the last byte).
+    var elapsed: TimeInterval = 0
     /// The other device's id (for Retry and matching a just-started send to its card).
     var peerId: String = ""
     /// Received files as saved on disk (incoming, once done).

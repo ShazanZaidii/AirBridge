@@ -198,7 +198,15 @@ class Session(
         }
     }
 
+    /** Time spent handling binary frames on the reader thread (decrypt + dispatch), for transfer timing logs. */
+    val rxBusyNs = java.util.concurrent.atomic.AtomicLong()
+
     fun onBinary(data: ByteArray) {
+        val t0 = System.nanoTime()
+        try { onBinaryTimed(data) } finally { rxBusyNs.addAndGet(System.nanoTime() - t0) }
+    }
+
+    private fun onBinaryTimed(data: ByteArray) {
         lastRx = System.currentTimeMillis()
         if (state != State.READY || data.isEmpty()) return // rule 5: nothing binary before ready
         val ch = channel ?: return

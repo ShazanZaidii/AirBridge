@@ -173,3 +173,32 @@ struct SettingsTabs: View {
         .background(Capsule().fill(Color.primary.opacity(0.07)))
     }
 }
+
+/// Settings: which corner of the screen the transfer cards use (also in a card's own menu: press and hold).
+struct TransferCornerRow: View {
+    @AppStorage(DropSettings.cornerKey) private var corner = HUDCorner.topRight.rawValue
+
+    var body: some View {
+        HStack(spacing: 10) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Color.primary.opacity(0.07))
+                Image(systemName: "rectangle.inset.topright.filled").font(.system(size: 12.5, weight: .medium)).foregroundStyle(.secondary)
+            }
+            .frame(width: 26, height: 26)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Transfer cards").font(.callout)
+                Text("Swipe one away to keep it in the menu bar").font(.caption2).foregroundStyle(.secondary).lineLimit(2)
+            }
+            Spacer(minLength: 8)
+            Picker("Transfer cards", selection: $corner) {
+                ForEach(HUDCorner.allCases, id: \.rawValue) { Text($0.title).tag($0.rawValue) }
+            }
+            .labelsHidden()
+            .pickerStyle(.menu)
+            .fixedSize()
+            .onChange(of: corner) { TransferHUD.shared.move(to: HUDCorner(rawValue: corner) ?? .topRight) }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+    }
+}

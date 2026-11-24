@@ -247,6 +247,7 @@ class FileTransfer(private val s: Session) {
                 o.lastProgressAt = System.currentTimeMillis()
             }
 
+            val sendStart = System.currentTimeMillis() // accepted: the transfer itself starts now
             val window = synchronized(o.lock) { o.window }
             val chunkSize = minOf(Protocol.CHUNK_SIZE.toLong(), window).toInt() // never exceed a tiny window
             val buf = ByteArray(chunkSize)
@@ -287,7 +288,8 @@ class FileTransfer(private val s: Session) {
             val label = if (srcs.size == 1) srcs[0].name else ConnectionHub.app.resources.getQuantityString(com.shazan.airbridge.R.plurals.sh_files, srcs.size, srcs.size)
             if (!clip) {
                 ConnectionHub.putTransfer(TransferUi(key, false, peerName, label, srcs.size, srcs.size, total, total, 0, result = ConnectionHub.app.getString(com.shazan.airbridge.R.string.xfer_sent)))
-                resultNotification(notifId, ConnectionHub.app.getString(com.shazan.airbridge.R.string.sh_sent_to, peerName), label, null)
+                resultNotification(notifId, ConnectionHub.app.getString(com.shazan.airbridge.R.string.sh_sent_to, peerName),
+                    TransferNotifs.summary(ctx, label, total, System.currentTimeMillis() - sendStart), null)
             }
         } catch (e: Exception) {
             val why = when (e) {
@@ -414,13 +416,25 @@ class FileTransfer(private val s: Session) {
         private val savedFiles = ArrayList<ReceivedFiles.Item>()
         private val started = System.currentTimeMillis()
         private var lastUi = 0L
+        // Timing for the log line at the end (where a slow transfer spends its time).
+        private val t0 = System.nanoTime()
+        private val busy0 = s.rxBusyNs.get()
+        private var waitNs = 0L
+        private var writeNs = 0L
+        private var publishNs = 0L
+        private var acks = 0
+        private var maxQueued = 0L
 
         fun enqueue(item: Any) {
             if (cancelled != null) return
-            if (item is Protocol.Chunk && queuedBytes.addAndGet(item.len.toLong()) > Protocol.RECV_WINDOW + Protocol.CHUNK_SIZE) {
-                Log.w(TAG, "sender exceeded the window")
-                cancel("error", tellPeer = true)
-                return
+            if (item is Protocol.Chunk) {
+                val q = queuedBytes.addAndGet(item.len.toLong())
+                if (q > maxQueued) maxQueued = q
+                if (q > Protocol.RECV_WINDOW + Protocol.CHUNK_SIZE) {
+                    Log.w(TAG, "sender exceeded the window")
+                    cancel("error", tellPeer = true)
+                    return
+                }
             }
             queue.offer(item)
         }
@@ -451,7 +465,10 @@ class FileTransfer(private val s: Session) {
             try {
                 advanceZeroSize()
                 while (cancelled == null) {
-                    val item = queue.poll(1, TimeUnit.SECONDS) ?: continue
+                    val tw = System.nanoTime()
+                    val item = queue.poll(1, TimeUnit.SECONDS)
+                    waitNs += System.nanoTime() - tw
+                    if (item == null) continue
                     when (item) {
                         CANCEL -> break
                         DONE -> {
@@ -485,6 +502,7 @@ class FileTransfer(private val s: Session) {
                         resultNotification(notifId, ConnectionHub.app.getString(com.shazan.airbridge.R.string.xf_in_failed, peerName), text, null)
                     }
                 }
+                logTiming(ok)
                 incoming.remove(id)
                 TransferLocks.release()
             }
@@ -493,11 +511,15 @@ class FileTransfer(private val s: Session) {
         private fun write(c: Protocol.Chunk) {
             val f = files[cur]
             val t = target ?: createTarget(f).also { target = it }
+            val tw = System.nanoTime()
             t.out.write(c.data, c.dataOff, c.len)
+            writeNs += System.nanoTime() - tw
             curWritten += c.len
             written += c.len
             if (curWritten == f.size) {
+                val tp = System.nanoTime()
                 finishFile()
+                publishNs += System.nanoTime() - tp
                 ack()
                 advanceZeroSize()
             } else if (written - lastAck >= Protocol.ACK_EVERY / 2) ack() // keeps every gap ≤ 1 MiB for chunks ≤ 1 MiB
@@ -527,7 +549,17 @@ class FileTransfer(private val s: Session) {
             }
         }
 
+        private fun logTiming(ok: Boolean) {
+            val secs = (System.nanoTime() - t0) / 1e9
+            fun sec(ns: Long) = String.format(Locale.US, "%.2f s", ns / 1e9)
+            Log.i(TAG, String.format(Locale.US, "rx %d %s: %.0f MiB in %.2f s = %.1f MiB/s | writer waiting %s, writing %s, " +
+                "publishing %s, %d acks, queue max %d KiB | reader busy %s", id, if (ok) "ok" else "failed", written / 1048576.0, secs,
+                written / 1048576.0 / secs.coerceAtLeast(0.001), sec(waitNs), sec(writeNs), sec(publishNs), acks, maxQueued / 1024,
+                sec(s.rxBusyNs.get() - busy0)))
+        }
+
         private fun ack() {
+            acks++
             lastAck = written
             s.send(Protocol.msg("xfer_ack").put("id", id).put("received", written))
         }
@@ -557,7 +589,8 @@ class FileTransfer(private val s: Session) {
             val open = received?.pendingIntent(ctx) ?: PendingIntent.getActivity(ctx, 0,
                 Intent(DownloadManager.ACTION_VIEW_DOWNLOADS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-            resultNotification(notifId, ConnectionHub.app.getString(com.shazan.airbridge.R.string.xf_received_from, peerName), "$label · Downloads/${Saver.SUBDIR}", open)
+            resultNotification(notifId, ConnectionHub.app.getString(com.shazan.airbridge.R.string.xf_received_from, peerName),
+                TransferNotifs.summary(ctx, label, total, System.currentTimeMillis() - started), open, detail = "Downloads/${Saver.SUBDIR}")
         }
     }
 
@@ -570,8 +603,8 @@ class FileTransfer(private val s: Session) {
         TransferNotifs.progress(ctx, id, incoming, peerName, file, filesDone, filesTotal, done, total, bps, action)
     }
 
-    private fun resultNotification(id: Int, title: String, text: String, open: PendingIntent?) =
-        TransferNotifs.finished(ctx, id, title, text, open)
+    private fun resultNotification(id: Int, title: String, text: String, open: PendingIntent?, detail: String? = null) =
+        TransferNotifs.finished(ctx, id, title, text, open, detail)
 }
 
 fun formatSpeed(bps: Long): String = String.format(Locale.US, "%.1f MB/s", bps / (1024.0 * 1024.0))

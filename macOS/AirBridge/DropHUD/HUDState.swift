@@ -26,6 +26,9 @@ nonisolated struct HUDCard: Identifiable, Equatable, Sendable {
     var finishedAt: Date?
     /// Set when Retry found the files gone.
     var retryUnavailable = false
+    /// Swiped away (or hidden from its menu): off screen, still listed in the menu bar and the Notifications window, from
+    /// where it comes back.
+    var background = false
 
     var status: TransferStatus? {
         if case .transfer(let s) = stage { return s }
@@ -56,6 +59,8 @@ nonisolated struct HUDState: Equatable, Sendable {
     static let launchTimeout: TimeInterval = 20
     /// Most cards kept; beyond this the oldest finished ones are dropped.
     static let maxCards = 6
+    /// A finished card in the background stays listed (menu bar, Notifications window) this long.
+    static let backgroundKeep: TimeInterval = 30 * 60
 
     private(set) var cards: [HUDCard] = []
     /// Transfers whose cards were closed: later reports for them must not bring the card back.
@@ -160,6 +165,28 @@ nonisolated struct HUDState: Equatable, Sendable {
         return cards.remove(at: i)
     }
 
+    // MARK: Background
+
+    /// The cards on screen (not in the background).
+    var visible: [HUDCard] { cards.filter { !$0.background } }
+    /// The cards in the background.
+    var backgrounded: [HUDCard] { cards.filter(\.background) }
+
+    /// Swiped away: off screen, the transfer keeps going.
+    mutating func sendToBackground(_ id: UUID) {
+        guard let i = cards.firstIndex(where: { $0.id == id }) else { return }
+        cards[i].background = true
+    }
+
+    /// Back on screen, on top. A finished card gets its time on screen again (it would otherwise auto-hide at once).
+    mutating func bringBack(_ id: UUID, now: Date) {
+        guard let i = cards.firstIndex(where: { $0.id == id }) else { return }
+        var c = cards.remove(at: i)
+        c.background = false
+        if c.finishedAt != nil { c.finishedAt = now }
+        cards.insert(c, at: 0)
+    }
+
     mutating func dismissFinished() {
         for c in cards where c.isFinished { if let k = c.transferKey { dismissedKeys.insert(k) } }
         cards.removeAll { $0.isFinished }
@@ -177,6 +204,7 @@ nonisolated struct HUDState: Equatable, Sendable {
             guard let end = c.finishedAt else { return false }
             let age = now.timeIntervalSince(end)
             if c.wasCancelledHere { return age >= Self.cancelledHideAfter }
+            if c.background { return age >= Self.backgroundKeep }
             return autoHide && c.isDone && age >= Self.autoHideAfter
         }
         for c in gone { _ = dismiss(c.id) }
@@ -193,6 +221,7 @@ nonisolated struct HUDState: Equatable, Sendable {
             }
             if let end = c.finishedAt {
                 if c.wasCancelledHere { dates.append(end.addingTimeInterval(Self.cancelledHideAfter)) }
+                else if c.background { dates.append(end.addingTimeInterval(Self.backgroundKeep)) }
                 else if autoHide && c.isDone { dates.append(end.addingTimeInterval(Self.autoHideAfter)) }
             }
         }

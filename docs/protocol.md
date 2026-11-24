@@ -435,8 +435,13 @@ bytes 17..    : payload (1 .. 1 MiB bytes; recommended 256–512 KiB)
 
 ### 6.4 Speed guidance
 
-- 512 KiB chunks, 8 MiB window, no artificial delays, write to disk off the receive thread (bounded queue).
+- 512 KiB chunks, no artificial delays, write to disk off the receive thread (bounded queue).
+- Window: at least 8 MiB; a receiver writing to slow storage (a nearly full phone) should offer more (Android offers
+  32 MiB), so a storage stall does not stop the sender at once. Senders accept up to 64 MiB.
 - Disable Nagle on the TCP socket if the stack allows. Use WebSocket permessage-deflate = **off**.
+- Let the TCP send buffer grow. On Wi-Fi the send buffer bounds the speed (buffer ÷ round trip); a 128 KiB buffer caps
+  a 5 GHz link at about 10 MiB/s. Kernel sockets grow it automatically (macOS and Android up to 4 MiB); Apple's
+  Network.framework connections did not, so the Mac app uses plain BSD sockets.
 
 ---
 
