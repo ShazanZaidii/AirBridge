@@ -10,7 +10,7 @@ import SwiftUI
 
 /// What the call UI shows and what its buttons do. One per phone; owned by `CallPanels`.
 @MainActor final class CallUI: ObservableObject, Identifiable {
-    enum Action { case answer, answerOnPhone, decline, end, toggleMute, audioPhone, audioSpeaker, expand }
+    enum Action { case answer, answerOnPhone, decline, end, toggleMute, audioPhone, audioSpeaker, expand, options, hide }
 
     nonisolated let phoneId: String
     nonisolated var id: String { phoneId }
@@ -28,6 +28,8 @@ import SwiftUI
     @Published var switching = false
     /// The Mac speaker in use (for the Audio button's icon while the call is on this Mac).
     @Published var macOutputSymbol: String?
+    /// Swiped away: nothing on screen, still in the menu bar and the Notifications window (a click brings it back).
+    @Published var inBackground = false
     var perform: (Action) -> Void = { _ in }
 
     init(call: PhoneCall, phoneName: String) {
@@ -182,6 +184,8 @@ struct IncomingCallBanner: View {
         .padding(14)
         .frame(width: Self.width)
         .glassEffect(.regular, in: .rect(cornerRadius: Self.corner))
+        // Press and hold for the call's options (a two-finger swipe sends the banner away).
+        .simultaneousGesture(LongPressGesture(minimumDuration: 0.45).onEnded { _ in ui.perform(.options) })
         .animation(.spring(response: 0.35, dampingFraction: 0.85), value: ui.ended)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Incoming call from \(ui.title), \(ui.subtitle)")
@@ -361,6 +365,7 @@ struct CallPillView: View {
         .padding(6)
         .frame(width: Self.width)
         .glassEffect(.regular, in: .capsule)
+        .simultaneousGesture(LongPressGesture(minimumDuration: 0.45).onEnded { _ in ui.perform(.options) })
         .accessibilityElement(children: .contain)
     }
 }

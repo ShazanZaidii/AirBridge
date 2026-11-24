@@ -19,9 +19,12 @@ import SwiftUI
 
     private final class Live {
         let ui: CallUI
-        var banner: CallBannerPanel?
+        var banner: CallBannerPanel? { didSet { if banner !== oldValue { bannerSwipe?.stop(); bannerSwipe = nil } } }
         var window: InCallWindow?
-        var pill: CallPillPanel?
+        var pill: CallPillPanel? { didSet { if pill !== oldValue { pillSwipe?.stop(); pillSwipe = nil } } }
+        /// Two-finger swipe and the options menu on the banner / pill.
+        var bannerSwipe: PanelSwipe?
+        var pillSwipe: PanelSwipe?
         var ring: RingSession?
         var silenceSent = false
         /// The banner was on screen when the call was answered (here or on the phone).
@@ -95,7 +98,7 @@ import SwiftUI
 
         switch c.state {
         case .ringing:
-            if l.banner == nil { showBanner(l) }
+            if l.banner == nil && !l.ui.inBackground { showBanner(l) }
             if l.ring == nil { l.ring = RingSession(inputs(c.phoneId)); applyRing(l, phone: c.phoneId) }
         case .active, .held:
             l.ring = nil
@@ -105,8 +108,9 @@ import SwiftUI
                 l.banner = nil
                 b.dismiss(animated: true)
             }
-            // Always on screen while it lasts: the window when the call was seen or answered here, else the pill.
-            if l.window == nil && l.pill == nil {
+            // On screen while it lasts (the window when the call was seen or answered here, else the pill), unless the
+            // user sent it to the background.
+            if l.window == nil && l.pill == nil && !l.ui.inBackground {
                 if l.answeredHere || l.sawRinging { openWindow(l, focus: false) } else { showPill(l) }
             }
             reportRoutes(c)
@@ -174,9 +178,11 @@ import SwiftUI
         BeaconScanner.shared.phoneGone(phone)
     }
 
-    /// From the menu bar: bring the call back (the window, or the banner while it rings).
+    /// From the menu bar or the Notifications window: bring the call back (the window, or the banner while it rings).
     func showCall(phone: String) {
         guard let l = live[phone] else { return }
+        l.ui.inBackground = false
+        publishBoard()
         if l.ui.call.state == .ringing {
             if l.banner == nil { showBanner(l) } else { l.banner?.orderFrontRegardless() }
         } else {
@@ -221,7 +227,64 @@ import SwiftUI
             else { send(c, c.speaker ? "speaker_off" : "speaker_on") }
         case .expand:
             openWindow(l, focus: true)
+        case .options:
+            showMenu(phone: phone)
+        case .hide:
+            toBackground(phone: phone)
         }
+    }
+
+    // MARK: Background
+
+    /// Swiped away (or "Hide" in its menu): nothing on screen, and the Mac stops ringing for it. The call stays in the menu
+    /// bar and the Notifications window; a click there brings it back.
+    func toBackground(phone: String) {
+        guard let l = live[phone], !l.ui.ended else { return }
+        l.ui.inBackground = true
+        if l.ui.call.state == .ringing {
+            silenced.insert(l.ui.call.id)
+            updateRinger()
+        }
+        if let b = l.banner { l.banner = nil; b.dismiss(animated: b.isVisible) }
+        if let p = l.pill { l.pill = nil; if p.isVisible { p.dismiss() } }
+        if let w = l.window, w.isVisible { w.orderOut(nil) }
+        InputLog.shared.log("call: sent to the background")
+        publishBoard()
+    }
+
+    /// The call's options: press and hold, right-click or Control-click on the banner or the pill.
+    private func showMenu(phone: String) {
+        callMenu(phone: phone)?.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
+    }
+
+    private func callMenu(phone: String) -> NSMenu? {
+        guard let l = live[phone], !l.ui.ended else { return nil }
+        let c = l.ui.call
+        let m = NSMenu()
+        m.autoenablesItems = false
+        if c.state == .ringing {
+            m.addItem(ClosureMenuItem("Answer", enabled: c.can.contains("answer")) { [weak self] in self?.perform(.answer, phone: phone) })
+            m.addItem(ClosureMenuItem("Decline", enabled: c.can.contains("decline")) { [weak self] in self?.perform(.decline, phone: phone) })
+        } else {
+            m.addItem(ClosureMenuItem("Show Call Window") { [weak self] in self?.perform(.expand, phone: phone) })
+            m.addItem(ClosureMenuItem(l.ui.isMuted ? "Unmute" : "Mute", enabled: l.ui.canMute) { [weak self] in self?.perform(.toggleMute, phone: phone) })
+        }
+        m.addItem(.separator())
+        m.addItem(ClosureMenuItem(c.state == .ringing ? "Hide and Silence" : "Hide (Keep in Menu Bar)") { [weak self] in
+            self?.toBackground(phone: phone)
+        })
+        if c.state != .ringing {
+            m.addItem(.separator())
+            m.addItem(ClosureMenuItem("End Call", enabled: c.can.contains("end")) { [weak self] in self?.perform(.end, phone: phone) })
+        }
+        return m
+    }
+
+    private func swipeable(_ p: NSWindow, phone: String) -> PanelSwipe {
+        let sw = PanelSwipe(panel: p)
+        sw.onAway = { [weak self] in self?.toBackground(phone: phone) }
+        sw.menu = { [weak self] in self?.callMenu(phone: phone) }
+        return sw
     }
 
     /// §13.5: the Audio menu picked one of the phone's routes.
@@ -320,6 +383,7 @@ import SwiftUI
     private func showBanner(_ l: Live) {
         let b = CallBannerPanel(ui: l.ui)
         l.banner = b
+        l.bannerSwipe = swipeable(b, phone: l.ui.phoneId)
         let index = live.values.filter { $0.banner != nil && $0 !== l }.count
         b.present(index: index, animated: !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
     }
@@ -330,7 +394,7 @@ import SwiftUI
             let w = InCallWindow(ui: l.ui)
             w.setFrame(SmartPlacement.frame(for: w.frame.size, avoiding: w), display: false)
             w.onCollapse = { [weak self, weak l] in
-                guard let self, let l, !l.ui.ended else { return }
+                guard let self, let l, !l.ui.ended, !l.ui.inBackground else { return }
                 self.showPill(l)
             }
             l.window = w
@@ -343,6 +407,7 @@ import SwiftUI
         guard l.pill == nil else { l.pill?.orderFrontRegardless(); return }
         let p = CallPillPanel(ui: l.ui)
         l.pill = p
+        l.pillSwipe = swipeable(p, phone: l.ui.phoneId)
         p.present(near: l.window)
     }
 
@@ -379,6 +444,12 @@ import SwiftUI
 
 #if DEBUG
 extension CallPanels {
+    /// `airbridge://debug/call_swipe?dx=-200`: a two-finger swipe on the fake call's pill (or banner while it rings).
+    static func debugSwipe(dx: Int32) {
+        guard let l = shared.live["debug-phone"] else { return }
+        (l.pillSwipe ?? l.bannerSwipe)?.debugSwipe(dx: dx)
+    }
+
     /// `airbridge://debug/fake_call?state=ringing|active|ended&name=…&number=…&label=…&muted=1&speaker=1`: drives the
     /// banner, window, ring decision and ringtone with a made-up call (phone id "debug-phone"; its buttons go nowhere).
     static func debugFakeCall(_ q: [URLQueryItem]) {

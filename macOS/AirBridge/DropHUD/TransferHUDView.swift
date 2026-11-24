@@ -7,31 +7,49 @@ enum DropMotion {
     static let dock = Animation.spring(response: 0.36, dampingFraction: 0.74)
 }
 
-/// Stack of transfer cards, newest on top.
+/// Stack of transfer cards, newest nearest the screen edge they sit at.
 struct TransferHUDView: View {
     @ObservedObject var hud: TransferHUD
     /// Reports the stack's natural height so the panel can fit it.
     var onHeight: (CGFloat) -> Void = { _ in }
+    /// Reports where each card is (panel content, top-left origin) so swipes and clicks find their card.
+    var onCardFrames: ([UUID: CGRect]) -> Void = { _ in }
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    private static let space = "transfer-hud"
+
     var body: some View {
-        VStack(alignment: .trailing, spacing: 8) {
-            ForEach(hud.cards) { card in
+        let corner = DropSettings.corner
+        let cards = corner.isTop ? hud.visibleCards : hud.visibleCards.reversed()
+        VStack(alignment: corner.isLeft ? .leading : .trailing, spacing: 8) {
+            ForEach(cards) { card in
                 TransferCardView(card: card, hud: hud)
+                    .background(GeometryReader { g in
+                        Color.clear.preference(key: CardFramesKey.self, value: [card.id: g.frame(in: .named(Self.space))])
+                    })
                     .transition(reduceMotion ? .opacity : .asymmetric(
-                        insertion: .move(edge: .top).combined(with: .opacity).combined(with: .scale(scale: 0.94, anchor: .top)),
-                        removal: .opacity.combined(with: .scale(scale: 0.9, anchor: .trailing))))
+                        insertion: .move(edge: corner.isTop ? .top : .bottom).combined(with: .opacity)
+                            .combined(with: .scale(scale: 0.94, anchor: corner.isTop ? .top : .bottom)),
+                        removal: .opacity.combined(with: .scale(scale: 0.9, anchor: corner.isLeft ? .leading : .trailing))))
             }
         }
         .padding(.horizontal, 12)
-        .padding(.top, 6)
-        .padding(.bottom, 18)
-        .animation(reduceMotion ? nil : DropMotion.card, value: hud.cards.map(\.id))
+        // The shadow needs room on the side away from the screen edge.
+        .padding(.top, corner.isTop ? 6 : 18)
+        .padding(.bottom, corner.isTop ? 18 : 6)
+        .animation(reduceMotion ? nil : DropMotion.card, value: hud.visibleCards.map(\.id))
         .fixedSize(horizontal: false, vertical: true)
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { onHeight($0) }
         .frame(width: HUDPanelController.width)
-        .frame(maxHeight: .infinity, alignment: .top)
+        .frame(maxHeight: .infinity, alignment: corner.isTop ? .top : .bottom)
+        .coordinateSpace(.named(Self.space))
+        .onPreferenceChange(CardFramesKey.self) { f in MainActor.assumeIsolated { onCardFrames(f) } }
     }
+}
+
+private struct CardFramesKey: PreferenceKey {
+    static let defaultValue: [UUID: CGRect] = [:]
+    static func reduce(value: inout [UUID: CGRect], nextValue: () -> [UUID: CGRect]) { value.merge(nextValue()) { $1 } }
 }
 
 struct TransferCardView: View {
@@ -68,11 +86,30 @@ struct TransferCardView: View {
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Color.primary.opacity(0.08)))
         .shadow(color: .black.opacity(0.16), radius: 12, y: 5)
+        // Follows a two-finger swipe (fed by the panel) or a mouse drag sideways, fading as it goes.
+        .offset(x: swipeDX)
+        .opacity(1 - min(0.75, Double(abs(swipeDX)) / 360))
+        .gesture(DragGesture(minimumDistance: 8)
+            .onChanged { v in
+                guard abs(v.translation.width) > abs(v.translation.height) else { return }
+                hud.swipe = .init(id: card.id, dx: v.translation.width)
+            }
+            .onEnded { v in
+                guard hud.swipe?.id == card.id else { return }
+                if abs(v.translation.width) > 90 || abs(v.predictedEndTranslation.width) > 260 {
+                    hud.swipedAway(card.id, dx: v.translation.width)
+                } else {
+                    hud.swipeBack()
+                }
+            })
+        .simultaneousGesture(LongPressGesture(minimumDuration: 0.45).onEnded { _ in hud.showMenu(card.id) })
         .onHover { h in withAnimation(reduceMotion ? nil : .easeOut(duration: 0.15)) { hovering = h } }
         .animation(reduceMotion ? nil : DropMotion.card, value: stageKey)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(accessibilityText)
     }
+
+    private var swipeDX: CGFloat { hud.swipe?.id == card.id ? hud.swipe?.dx ?? 0 : 0 }
 
     // MARK: Text
 
@@ -102,7 +139,7 @@ struct TransferCardView: View {
             case .active:
                 Text(progressText(s)).font(.caption).foregroundStyle(.secondary).monospacedDigit().lineLimit(1)
             case .done:
-                Text("\(outgoing ? "Sent" : "Received") · \(TransferText.bytes(s.total))")
+                Text(TransferText.finished(s)).monospacedDigit()
                     .font(.caption).foregroundStyle(.secondary)
             case .failed(let why):
                 Text(why).font(.caption).foregroundStyle(.secondary)
@@ -157,7 +194,7 @@ struct TransferCardView: View {
     }
 
     private var closeButton: some View {
-        Button { hud.dismiss(card.id) } label: {
+        Button { hud.close(card) } label: {
             Image(systemName: "xmark")
                 .font(.system(size: 9, weight: .bold))
                 .frame(width: 18, height: 18)
@@ -166,7 +203,7 @@ struct TransferCardView: View {
         .buttonStyle(.plain)
         .foregroundStyle(.secondary)
         .opacity(hovering || card.isFinished ? 1 : 0.0)
-        .help(card.isFinished ? "Close" : "Hide this card (the transfer keeps going)")
+        .help(card.isFinished ? "Close" : "Hide this card (the transfer keeps going, and stays in the menu bar)")
         .accessibilityLabel("Close")
     }
 
@@ -308,5 +345,55 @@ struct HUDButtonStyle: ButtonStyle {
             .scaleEffect(configuration.isPressed ? 0.96 : 1)
             .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
             .onHover { hovering = $0 }
+    }
+}
+
+/// One transfer in a list (the menu bar, the Notifications window): what, where, how far or how it ended. A click brings
+/// its card back on screen.
+struct TransferListRow: View {
+    let card: HUDCard
+    @ObservedObject var hud: TransferHUD
+
+    var body: some View {
+        Button { hud.bringBack(card.id) } label: {
+            HStack(spacing: 10) {
+                TransferRing(card: card).frame(width: 24, height: 24).scaleEffect(0.8)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).font(.callout.weight(.medium)).lineLimit(1).truncationMode(.middle)
+                    Text(detail).font(.caption).foregroundStyle(.secondary).monospacedDigit().lineLimit(1)
+                }
+                Spacer(minLength: 0)
+                if card.background {
+                    Image(systemName: "rectangle.portrait.and.arrow.forward")
+                        .font(.system(size: 11)).foregroundStyle(.tertiary)
+                        .help("Hidden from the screen")
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .help("Show this transfer's card")
+        .accessibilityLabel("\(title), \(detail)")
+    }
+
+    private var title: String {
+        card.direction == .outgoing ? "\(card.title) to \(card.peerName)" : "\(card.title) from \(card.peerName)"
+    }
+
+    private var detail: String {
+        switch card.stage {
+        case .countdown: return "Starting…"
+        case .launching: return "Starting…"
+        case .transfer(let s):
+            switch s.phase {
+            case .waiting: return card.direction == .outgoing ? "Waiting for \(s.peerName)…" : "Getting ready…"
+            case .active:
+                var parts = ["\(TransferText.bytes(s.done)) of \(TransferText.bytes(s.total))"]
+                if s.bytesPerSec > 0 { parts.append(TransferText.speed(s.bytesPerSec)) }
+                if let left = TransferText.timeLeft(total: s.total, done: s.done, bytesPerSec: s.bytesPerSec) { parts.append(left) }
+                return parts.joined(separator: " · ")
+            case .done: return TransferText.finished(s)
+            case .failed(let why): return why
+            }
+        }
     }
 }
