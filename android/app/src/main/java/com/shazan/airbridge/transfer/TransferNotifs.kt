@@ -97,18 +97,41 @@ object TransferNotifs {
     }
 
     /** The transfer ended: replace the live notification with a dismissible result. */
-    fun finished(ctx: Context, id: Int, title: String, text: String, open: PendingIntent?) {
+    /** [detail] is a second line shown when the notification is expanded (where received files went). */
+    fun finished(ctx: Context, id: Int, title: String, text: String, open: PendingIntent?, detail: String? = null) {
         cancelling.remove(id)
         live.remove(id)
         lastPost.remove(id)
-        val n = NotificationCompat.Builder(ctx, Notifs.CH_RESULT)
+        val b = NotificationCompat.Builder(ctx, Notifs.CH_RESULT)
             .setSmallIcon(R.drawable.ic_stat_name)
             .setContentTitle(title)
             .setContentText(text)
+        if (detail != null) b.setStyle(NotificationCompat.BigTextStyle().bigText("$text\n$detail"))
+        val n = b
             .setAutoCancel(true)
             .setContentIntent(open ?: Notifs.openAppIntent(ctx))
             .build()
         Notifs.notify(id, n)
+    }
+
+    /** "Report.pdf · 1.1 GB · 22 sec" for a finished transfer: what, how big, how long it took (in the user's language). */
+    fun summary(ctx: Context, what: String, bytes: Long, tookMs: Long): String =
+        listOf(what, android.text.format.Formatter.formatShortFileSize(ctx, bytes), took(tookMs)).joinToString(" · ")
+
+    /** "4.2 sec", "22 sec", "1 min, 5 sec", "1 hr, 2 min". */
+    fun took(ms: Long, locale: java.util.Locale = java.util.Locale.getDefault()): String {
+        val f = android.icu.text.MeasureFormat.getInstance(locale, android.icu.text.MeasureFormat.FormatWidth.SHORT)
+        val sec = android.icu.util.MeasureUnit.SECOND
+        val min = android.icu.util.MeasureUnit.MINUTE
+        val s = ms.coerceAtLeast(0) / 1000.0
+        if (s < 10) return f.format(android.icu.util.Measure(java.math.BigDecimal(s).setScale(1, java.math.RoundingMode.HALF_UP), sec))
+        val whole = Math.round(s)
+        return when {
+            whole < 60 -> f.format(android.icu.util.Measure(whole, sec))
+            whole < 3600 -> if (whole % 60 == 0L) f.format(android.icu.util.Measure(whole / 60, min))
+                else f.formatMeasures(android.icu.util.Measure(whole / 60, min), android.icu.util.Measure(whole % 60, sec))
+            else -> f.formatMeasures(android.icu.util.Measure(whole / 3600, android.icu.util.MeasureUnit.HOUR), android.icu.util.Measure(whole % 3600 / 60, min))
+        }
     }
 
     /** "· 12 s left" once the speed is known. */

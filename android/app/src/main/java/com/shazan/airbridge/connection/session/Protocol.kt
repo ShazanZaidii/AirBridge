@@ -106,7 +106,7 @@ object Protocol {
 
     const val MAX_CLIP_BYTES = 512 * 1024
     const val CHUNK_SIZE = 512 * 1024
-    const val RECV_WINDOW = 8L * 1024 * 1024
+    const val RECV_WINDOW = 32L * 1024 * 1024
     const val ACK_EVERY = 1L * 1024 * 1024
 
     const val KIND_FILE_CHUNK: Int = 0x01
