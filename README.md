@@ -22,9 +22,9 @@ AirBridge is an independent project and is not affiliated with Apple. The Apple 
 
 | | Where | Status | Needs |
 |---|---|---|---|
-| Android | `android/` | Released builds are in Releases; the code here is newer | Android 8.0 or newer |
-| macOS | `macOS/` | Released builds are in Releases; the code here is newer | macOS 26.1 or newer (what the current source targets) |
-| Windows | `windows/` | Source is here, no release published yet | Windows 10 (version 2004) or Windows 11 |
+| Android | `android/` | Released (see Releases) | Android 8.0 or newer |
+| macOS | `macOS/` | Released (see Releases) | A Mac with Apple silicon, macOS 26.1 or newer |
+| Windows | `windows/` | Released, still new (see Releases) | Windows 10 (version 2004) or Windows 11, 64-bit |
 | Linux | `linux/` | Not started | |
 | iOS | `iOS/` | Not started | |
 
@@ -59,7 +59,7 @@ AirBridge is an independent project and is not affiliated with Apple. The Apple 
 
 ## Install
 
-The [Releases](https://github.com/ShazanZaidii/AirBridge/releases) tab has the Android app (an APK) and the Mac app from August 2026 (v2.1). The code in this repo is newer, and builds from it are not published yet. To build it yourself:
+The [latest release](https://github.com/ShazanZaidii/AirBridge/releases/latest) has the Android app (an APK), the Mac app and the Windows app. To build it yourself:
 
 - **Android:** open `android/` in Android Studio, or run `cd android && ./gradlew assembleDebug`.
 - **macOS:** open `macOS/AirBridge.xcodeproj` in Xcode and run.
@@ -110,6 +110,48 @@ Yes. It is licensed under the GNU AGPL v3.
 - **AirDrop and Universal Control** are made for Apple devices, with little or no Android support. AirBridge connects Android, Mac and Windows.
 - **Phone Link** connects an Android phone to a Windows PC. AirBridge covers the Mac as well.
 - **KDE Connect** and **LocalSend** are open-source projects with a similar spirit. AirBridge puts its effort into the Mac and Windows experience: crossing the screen edge with the mouse, dragging files between devices, mirroring, and the Mac battery widget.
+
+## How fast it is
+
+Sending files between a Mac and an Android phone, in MB/s (1 MB = 1,000,000 bytes). Measured on a MacBook Pro (M1 Pro, 2021)
+and a vivo V2404 over the phone's own 5 GHz hotspot (Wi-Fi 6, 80 MHz, 1200 Mbps link), with files of 300 MB to 1 GB.
+Everything AirBridge sends is encrypted.
+
+| | Mac → Android | Android → Mac |
+|---|---|---|
+| AirBridge 3.1 | 10–11 | 39–41 |
+| **AirBridge 3.2** | **60–87** | **73–78** |
+| The Wi-Fi link itself (raw TCP, no app, nothing saved) | 72–87 | 75–76 |
+
+AirBridge 3.2 now moves files as fast as the Wi-Fi link carries them. The spread comes from the link: Wi-Fi keeps
+renegotiating its rate (it moved between 576 and 1200 Mbps within seconds in these tests). A phone that is nearly full or
+hot writes more slowly: with this phone 95% full, 1 GB files arrived at 38–48 MB/s. The Mac in these tests has 2×2 Wi-Fi 6,
+so about 90 MB/s is as far as this pair goes; newer Macs and phones with 160 MHz Wi-Fi 6E or Wi-Fi 7 can go further.
+
+**Compared with other apps.** Numbers for the other apps come from public measurements, picked to be as close to the
+setup above as possible (Wi-Fi 6, 5 GHz, a phone on the same network). They are not from the same devices, so treat them
+as a guide. "Works, untested" means the transfer is possible but there is no measurement yet.
+
+| From ↔ to | AirBridge | AirDrop | LocalSend | KDE Connect | Quick Share |
+|---|---|---|---|---|---|
+| Mac → Android | **60–87** | Not possible | ~12 ¹ | Works, untested | No Mac app |
+| Android → Mac | **73–78** | Not possible | ~23 ¹ | Works, untested | No Mac app |
+| Windows ↔ Android | Works, untested | Not possible | 7–21 encrypted, ~100 unencrypted ² | 38–41 ³ | Works, untested |
+| Mac ↔ Windows | Works, untested | Not possible | ~60 ⁴ | Works, untested | No Mac app |
+| Mac ↔ Mac | Works, untested | ~40 ⁵ | Works, untested | Works, untested | Not possible |
+| iPhone ↔ anything | Not yet (no iOS app) | Apple devices only | Works, untested | Works, untested | Not possible |
+
+Where AirBridge comes out behind:
+- **LocalSend with encryption turned off (~100 MB/s, Windows ↔ Android)** sends files in the clear, over a PC wired to its
+  router. AirBridge always encrypts, and its numbers above are capped by this Mac's Wi-Fi radio, not by the encryption.
+  With LocalSend's encryption on (its default), the same reports show 7–21 MB/s.
+- **Windows, Mac ↔ Mac and iPhone**: AirBridge has no measurements there yet, and no iOS app.
+
+¹ LocalSend issue [#384](https://github.com/localsend/localsend/issues/384), a user on a 5 GHz phone hotspot (Linux ↔ Android, LocalSend 0.12, 2023).
+² Same issue: unencrypted 100–103 MB/s (users, 2025); encrypted at most 21 MB/s and usually 7–10 (LocalSend 1.18.2, Windows ↔ iOS, October 2026).
+³ TwinDesk issue [#143](https://github.com/InukaAsith/TwinDesk/issues/143): KDE Connect at 300–330 Mbps between a Windows PC and a Qualcomm Wi-Fi 6 phone on the same router (1201 Mbps link), measured by the issue's author (2026).
+⁴ LocalSend's maintainer in issue [#384](https://github.com/localsend/localsend/issues/384): Windows ↔ macOS at 60 MB/s with HTTPS (2023).
+⁵ [Eclectic Light](https://eclecticlight.co/2022/05/09/whats-the-fastest-way-to-transfer-files-with-m1-macs/): "a steady 40 MB/s between most recent Mac models, including my M1s" (2022).
 
 ## How it works
 
