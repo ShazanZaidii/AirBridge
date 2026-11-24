@@ -261,9 +261,9 @@ nonisolated final class PeerManager: PeerTransport, @unchecked Sendable {
 
     // MARK: Session callbacks (queue)
 
-    private func accept(_ conn: NWConnection) {
+    private func accept(_ conn: ByteTransport) {
         guard pending.count < PeerManager.maxPending else { conn.cancel(); return }
-        let s = Session(ws: WebSocket(connection: conn, role: .server, queue: queue), role: .host,
+        let s = Session(ws: WebSocket(transport: conn, role: .server, queue: queue), role: .host,
                         queue: queue, manager: self)
         pending[ObjectIdentifier(s)] = s
         s.start()
@@ -546,10 +546,7 @@ nonisolated final class OutboundConnector: @unchecked Sendable {
             scheduleRetry()
             return
         }
-        let params = WebSocket.tcpParameters()
-        (params.defaultProtocolStack.internetProtocol as? NWProtocolIP.Options)?.version = .v4
-        let conn = NWConnection(to: endpoint, using: params)
-        let s = Session(ws: WebSocket(connection: conn, role: .client, queue: queue), role: .client, queue: queue,
+        let s = Session(ws: WebSocket(transport: Transports.dial(endpoint), role: .client, queue: queue), role: .client, queue: queue,
                         manager: manager, expectedPeerId: peerId, pairing: pairing)
         attempt = s
         switch pairing {

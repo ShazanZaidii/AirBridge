@@ -20,12 +20,17 @@ nonisolated final class Discovery: @unchecked Sendable {
 
     init(queue: DispatchQueue) { self.queue = queue }
 
-    static func advertisedService() -> NWListener.Service {
-        let txt = NWTXTRecord([
-            "v": String(Proto.version), "id": Identity.id, "name": Identity.name, "plat": Proto.platform,
-        ])
-        return NWListener.Service(name: Identity.name, type: Proto.serviceType, domain: Proto.serviceDomain,
-                                  txtRecord: txt)
+    /// The TXT record we advertise (§2.3), in DNS wire format: each `key=value` prefixed by its length.
+    static func advertisedTXT() -> Data {
+        let pairs = ["v": String(Proto.version), "id": Identity.id, "name": Identity.name, "plat": Proto.platform]
+        var out = Data()
+        for (k, v) in pairs {
+            var entry = Array("\(k)=\(v)".utf8)
+            if entry.count > 255 { entry = Array(entry.prefix(255)) }
+            out.append(UInt8(entry.count))
+            out.append(contentsOf: entry)
+        }
+        return out
     }
 
     func start() {
