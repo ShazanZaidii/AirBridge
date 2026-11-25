@@ -24,4 +24,15 @@
     <string name="pm_sink_denied">%1$s n\'a pas autorisé le partage d\'écran</string>
     <string name="pm_sink_stopped">%1$s a arrêté de partager son écran</string>
     <string name="lk_fallback">%1$s. Envoi via la connexion actuelle.</string>
+    <string name="pm_ask_title">Afficher l\'écran de ce téléphone sur %1$s ?</string>
+    <string name="pm_ask_allow">Autoriser</string>
+    <string name="mt_section">Recopie d\'écran</string>
+    <string name="mt_title">Recopier sans demander</string>
+    <string name="mt_sub_on">Vos ordinateurs affichent l\'écran de ce téléphone tout de suite, sans la question d\'Android. La notification reste visible pendant la recopie.</string>
+    <string name="mt_sub_off">Android demande avant chaque partage d\'écran. Activez ceci pour l\'éviter avec vos ordinateurs.</string>
+    <string name="mt_needs_computer">L\'activation demande votre Mac une fois : connectez-le, puis réessayez. Ou lancez ceci depuis un ordinateur avec adb :</string>
+    <string name="mt_asking">Demande à %1$s…</string>
+    <string name="mt_setup">Terminez la configuration de la recopie Pro sur %1$s. La recopie est approuvée juste après.</string>
+    <string name="mt_failed">Impossible de l\'activer.</string>
+    <string name="mt_retry">Réessayer</string>
 </resources>

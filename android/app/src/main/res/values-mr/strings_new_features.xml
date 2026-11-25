@@ -22,4 +22,15 @@
     <string name="pm_sink_denied">%1$s ने स्क्रीन शेअरची परवानगी दिली नाही</string>
     <string name="pm_sink_stopped">%1$s ने स्क्रीन शेअर करणे थांबवले</string>
     <string name="lk_fallback">%1$s. सध्याच्या कनेक्शनने पाठवत आहे.</string>
+    <string name="pm_ask_title">या फोनची स्क्रीन %1$s वर दाखवायची?</string>
+    <string name="pm_ask_allow">परवानगी द्या</string>
+    <string name="mt_section">स्क्रीन मिररिंग</string>
+    <string name="mt_title">न विचारता मिरर करा</string>
+    <string name="mt_sub_on">तुमचे कॉम्प्युटर Android च्या प्रश्नाशिवाय लगेच या फोनची स्क्रीन दाखवतात. चालू असेपर्यंत सूचना दिसते.</string>
+    <string name="mt_sub_off">प्रत्येक स्क्रीन शेअरपूर्वी Android विचारतो. तुमच्या कॉम्प्युटरसाठी ते टाळण्यासाठी हे चालू करा.</string>
+    <string name="mt_needs_computer">चालू करण्यासाठी एकदा तुमचा Mac लागेल: तो कनेक्ट करा, मग पुन्हा प्रयत्न करा. किंवा adb असलेल्या कोणत्याही कॉम्प्युटरवरून हे चालवा:</string>
+    <string name="mt_asking">%1$s ला विचारत आहे…</string>
+    <string name="mt_setup">%1$s वर Pro मिररिंगचा सेटअप पूर्ण करा. त्यानंतर लगेच मिररिंग विश्वसनीय होईल.</string>
+    <string name="mt_failed">चालू करता आले नाही.</string>
+    <string name="mt_retry">पुन्हा प्रयत्न करा</string>
 </resources>
