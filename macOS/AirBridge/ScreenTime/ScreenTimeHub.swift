@@ -168,6 +168,22 @@ nonisolated final class ScreenTimeHub: @unchecked Sendable {
         }
     }
 
+    /// Opening Notification Center refreshes the widget at most this often: if it was redrawn (or refreshed for Notification
+    /// Center) less than 5 minutes ago, opening it again shows that drawing and nothing is fetched or redrawn.
+    static let notificationCenterGap: TimeInterval = 300
+    private var lastNotificationCenterPull = Date.distantPast
+
+    /// Notification Center opened (the widget may be in it): fresh numbers, unless the widget is less than 5 minutes old.
+    func notificationCenterOpened() {
+        queue.async { [self] in
+            let now = Date()
+            guard now.timeIntervalSince(lastReload) >= Self.notificationCenterGap,
+                  now.timeIntervalSince(lastNotificationCenterPull) >= Self.notificationCenterGap else { return }
+            lastNotificationCenterPull = now
+            onMain { self.pullNow() }
+        }
+    }
+
     /// The Screen Time page is open: every new report redraws the widget too.
     func setPageOpen(_ open: Bool) { queue.async { [self] in pageOpen = open } }
     private var pageOpen = false
