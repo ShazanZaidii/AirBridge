@@ -933,6 +933,10 @@ struct MenuView: View {
             }
             Spacer()
             Menu {
+                if let pc = model.readyPeers.first(where: { $0.id == d.id && PhoneMirrorHub.canShowScreen($0) }) {
+                    Button("Show Screen") { PhoneMirrorWindows.shared.show(pc) } // see and control it (#18)
+                    Divider()
+                }
                 if let phone = connectedPhones.first(where: { $0.id == d.id }) {
                     Button("Mirror Screen") { mirror(phone) }
                     Button(ProMirrorHub.isSetUp(phone.id) ? "Pro Mirroring…" : "Set Up Pro Mirroring…") {
