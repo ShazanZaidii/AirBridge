@@ -374,6 +374,8 @@ object ConnectionHub : PeerBus.Transport {
             t == "screen_time_request" -> com.shazan.airbridge.phone.screentime.ScreenTimeReporter.onRequest(id)
             // §8.7 phone as source: works without the accessibility service (view-only), so it never
             // depends on the input half being installed.
+            // §8.10 "Mirror without asking": the computer's answer to our grant request.
+            t == "mirror_trust_result" -> com.shazan.airbridge.mirror.MirrorTrust.onResult(id, m)
             t.startsWith("mirror_") && com.shazan.airbridge.mirror.PhoneMirror.onControl(id, m) -> Unit
             else -> {
                 if (t in LEASE_INPUT && _controlledBy.value != id) _controlledBy.value = id

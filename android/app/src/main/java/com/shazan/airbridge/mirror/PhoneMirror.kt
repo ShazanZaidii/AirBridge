@@ -240,9 +240,33 @@ object PhoneMirror {
         ))
     }
 
-    /** Heads-up "Shazan's Mac wants to show this phone's screen · Tap to allow", plus a direct launch when allowed. */
+    /** Set when the consent screen opened (so a trusted share doesn't need the notification as well). */
+    @Volatile private var consentOpened = false
+
+    fun consentScreenOpened() { consentOpened = true }
+
+    /**
+     * Heads-up "<computer> wants to show this phone's screen · Tap to allow", plus a direct launch when allowed.
+     * Trusted ("Mirror without asking", [MirrorTrust]): no heads-up, the invisible consent screen opens directly and
+     * Android hands over the screen at once; the notification only follows if Android blocked that launch.
+     */
     private fun askConsent(computer: String) {
         val ctx = app
+        if (MirrorTrust.active(ctx)) {
+            consentOpened = false
+            try { ctx.startActivity(MirrorConsentActivity.intent(ctx)) } catch (t: Throwable) { Log.i(TAG, "trusted consent screen not started: $t") }
+            ConnectionHub.main.postDelayed({
+                if (!consentOpened && pendingComputer() != null) postConsentRequest(ctx, computer)
+            }, 1_500)
+            return
+        }
+        postConsentRequest(ctx, computer)
+        // Allowed while an AirBridge screen is open or Universal Control is on (a system-bound accessibility
+        // service may start activities); otherwise Android blocks it quietly and the notification stays.
+        try { ctx.startActivity(MirrorConsentActivity.intent(ctx)) } catch (t: Throwable) { Log.i(TAG, "consent screen not started directly: $t") }
+    }
+
+    private fun postConsentRequest(ctx: Context, computer: String) {
         ensureChannels(ctx)
         val open = PendingIntent.getActivity(ctx, NOTIF_REQUEST, MirrorConsentActivity.intent(ctx),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
@@ -261,9 +285,6 @@ object PhoneMirror {
             .addAction(0, ctx.getString(R.string.pm_request_decline), decline)
             .build()
         Notifs.notify(NOTIF_REQUEST, n)
-        // Allowed while an AirBridge screen is open or Universal Control is on (a system-bound accessibility
-        // service may start activities); otherwise Android blocks it quietly and the notification stays.
-        try { ctx.startActivity(MirrorConsentActivity.intent(ctx)) } catch (t: Throwable) { Log.i(TAG, "consent screen not started directly: $t") }
     }
 
     fun ongoingNotification(ctx: Context, computer: String): android.app.Notification {

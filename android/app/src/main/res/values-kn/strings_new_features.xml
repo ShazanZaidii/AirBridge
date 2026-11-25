@@ -22,4 +22,15 @@
     <string name="pm_sink_denied">%1$s ಸ್ಕ್ರೀನ್ ಹಂಚಿಕೆಗೆ ಅನುಮತಿ ನೀಡಲಿಲ್ಲ</string>
     <string name="pm_sink_stopped">%1$s ಸ್ಕ್ರೀನ್ ಹಂಚಿಕೊಳ್ಳುವುದನ್ನು ನಿಲ್ಲಿಸಿದೆ</string>
     <string name="lk_fallback">%1$s. ಈಗಿನ ಸಂಪರ್ಕದ ಮೂಲಕ ಕಳುಹಿಸಲಾಗುತ್ತಿದೆ.</string>
+    <string name="pm_ask_title">ಈ ಫೋನ್‌ನ ಪರದೆಯನ್ನು %1$s ನಲ್ಲಿ ತೋರಿಸಬೇಕೇ?</string>
+    <string name="pm_ask_allow">ಅನುಮತಿಸಿ</string>
+    <string name="mt_section">ಸ್ಕ್ರೀನ್ ಮಿರರಿಂಗ್</string>
+    <string name="mt_title">ಕೇಳದೆ ಮಿರರ್ ಮಾಡಿ</string>
+    <string name="mt_sub_on">ನಿಮ್ಮ ಕಂಪ್ಯೂಟರ್‌ಗಳು Android ಪ್ರಶ್ನೆಯಿಲ್ಲದೆ ತಕ್ಷಣ ಈ ಫೋನ್‌ನ ಪರದೆಯನ್ನು ತೋರಿಸುತ್ತವೆ. ಆನ್ ಇರುವವರೆಗೆ ಅಧಿಸೂಚನೆ ಕಾಣಿಸುತ್ತದೆ.</string>
+    <string name="mt_sub_off">ಪ್ರತಿ ಸ್ಕ್ರೀನ್ ಹಂಚಿಕೆಗೆ ಮೊದಲು Android ಕೇಳುತ್ತದೆ. ನಿಮ್ಮ ಕಂಪ್ಯೂಟರ್‌ಗಳಿಗೆ ಅದನ್ನು ಬಿಡಲು ಇದನ್ನು ಆನ್ ಮಾಡಿ.</string>
+    <string name="mt_needs_computer">ಆನ್ ಮಾಡಲು ಒಮ್ಮೆ ನಿಮ್ಮ Mac ಬೇಕು: ಅದನ್ನು ಸಂಪರ್ಕಿಸಿ, ನಂತರ ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ. ಅಥವಾ adb ಇರುವ ಯಾವುದೇ ಕಂಪ್ಯೂಟರ್‌ನಿಂದ ಇದನ್ನು ಚಲಾಯಿಸಿ:</string>
+    <string name="mt_asking">%1$s ಅನ್ನು ಕೇಳಲಾಗುತ್ತಿದೆ…</string>
+    <string name="mt_setup">%1$s ನಲ್ಲಿ Pro ಮಿರರಿಂಗ್ ಸೆಟಪ್ ಮುಗಿಸಿ. ಅದರ ನಂತರ ಮಿರರಿಂಗ್ ವಿಶ್ವಾಸಾರ್ಹವಾಗುತ್ತದೆ.</string>
+    <string name="mt_failed">ಆನ್ ಮಾಡಲಾಗಲಿಲ್ಲ.</string>
+    <string name="mt_retry">ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ</string>
 </resources>

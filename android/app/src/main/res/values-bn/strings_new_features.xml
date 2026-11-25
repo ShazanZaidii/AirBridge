@@ -22,4 +22,15 @@
     <string name="pm_sink_denied">%1$s স্ক্রিন শেয়ারের অনুমতি দেয়নি</string>
     <string name="pm_sink_stopped">%1$s স্ক্রিন শেয়ার বন্ধ করেছে</string>
     <string name="lk_fallback">%1$s। এখনকার সংযোগ দিয়ে পাঠানো হচ্ছে।</string>
+    <string name="pm_ask_title">এই ফোনের স্ক্রিন %1$s-এ দেখাবেন?</string>
+    <string name="pm_ask_allow">অনুমতি দিন</string>
+    <string name="mt_section">স্ক্রিন মিররিং</string>
+    <string name="mt_title">জিজ্ঞাসা ছাড়াই মিরর করুন</string>
+    <string name="mt_sub_on">আপনার কম্পিউটার Android-এর প্রশ্ন ছাড়াই সঙ্গে সঙ্গে এই ফোনের স্ক্রিন দেখায়। চালু থাকাকালীন বিজ্ঞপ্তি দেখা যায়।</string>
+    <string name="mt_sub_off">প্রতিটি স্ক্রিন শেয়ারের আগে Android জিজ্ঞাসা করে। আপনার কম্পিউটারের জন্য এটি এড়াতে চালু করুন।</string>
+    <string name="mt_needs_computer">চালু করতে একবার আপনার Mac লাগবে: সংযোগ করুন, তারপর আবার চেষ্টা করুন। অথবা adb আছে এমন যেকোনো কম্পিউটার থেকে এটি চালান:</string>
+    <string name="mt_asking">%1$s-কে জিজ্ঞাসা করা হচ্ছে…</string>
+    <string name="mt_setup">%1$s-এ Pro মিররিং সেটআপ শেষ করুন। তার পরেই মিররিং বিশ্বস্ত হবে।</string>
+    <string name="mt_failed">চালু করা গেল না।</string>
+    <string name="mt_retry">আবার চেষ্টা করুন</string>
 </resources>

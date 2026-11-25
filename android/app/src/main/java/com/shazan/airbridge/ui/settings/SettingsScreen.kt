@@ -232,6 +232,8 @@ internal fun SettingsScreen(onBack: () -> Unit, onOpenLinkDebug: () -> Unit, onO
                 }
             }
 
+            com.shazan.airbridge.ui.settings.MirrorTrustSection()
+
             SectionHeader(stringResource(R.string.pp_title))
             AbCard {
                 var ppOn by remember { mutableStateOf(com.shazan.airbridge.payment.PaymentPause.isEnabled(ctx)) }

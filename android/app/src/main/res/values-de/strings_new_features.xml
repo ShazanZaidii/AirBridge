@@ -22,4 +22,15 @@
     <string name="pm_sink_denied">%1$s hat die Bildschirmfreigabe nicht zugelassen</string>
     <string name="pm_sink_stopped">%1$s hat die Bildschirmfreigabe beendet</string>
     <string name="lk_fallback">%1$s. Wird über die aktuelle Verbindung gesendet.</string>
+    <string name="pm_ask_title">Bildschirm dieses Telefons auf %1$s zeigen?</string>
+    <string name="pm_ask_allow">Erlauben</string>
+    <string name="mt_section">Bildschirmspiegelung</string>
+    <string name="mt_title">Ohne Nachfrage spiegeln</string>
+    <string name="mt_sub_on">Deine Computer zeigen den Bildschirm dieses Telefons sofort, ohne die Android-Abfrage. Die Benachrichtigung bleibt sichtbar, solange es läuft.</string>
+    <string name="mt_sub_off">Android fragt vor jeder Bildschirmfreigabe. Schalte dies ein, um das für deine Computer zu überspringen.</string>
+    <string name="mt_needs_computer">Zum Einschalten wird einmal dein Mac gebraucht: verbinde ihn und versuche es erneut. Oder führe dies auf einem Computer mit adb aus:</string>
+    <string name="mt_asking">Frage %1$s…</string>
+    <string name="mt_setup">Schließe die Einrichtung von Pro-Spiegelung auf %1$s ab. Danach ist die Spiegelung vertraut.</string>
+    <string name="mt_failed">Konnte nicht eingeschaltet werden.</string>
+    <string name="mt_retry">Erneut versuchen</string>
 </resources>

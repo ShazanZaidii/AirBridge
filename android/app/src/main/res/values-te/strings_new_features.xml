@@ -22,4 +22,15 @@
     <string name="pm_sink_denied">%1$s స్క్రీన్ షేర్‌ను అనుమతించలేదు</string>
     <string name="pm_sink_stopped">%1$s స్క్రీన్ షేర్ చేయడం ఆపివేసింది</string>
     <string name="lk_fallback">%1$s. ప్రస్తుత కనెక్షన్ ద్వారా పంపుతోంది.</string>
+    <string name="pm_ask_title">ఈ ఫోన్ స్క్రీన్‌ను %1$sలో చూపించాలా?</string>
+    <string name="pm_ask_allow">అనుమతించు</string>
+    <string name="mt_section">స్క్రీన్ మిర్రరింగ్</string>
+    <string name="mt_title">అడగకుండా మిర్రర్ చేయి</string>
+    <string name="mt_sub_on">మీ కంప్యూటర్లు Android ప్రశ్న లేకుండా వెంటనే ఈ ఫోన్ స్క్రీన్‌ను చూపిస్తాయి. ఆన్‌లో ఉన్నంత వరకు నోటిఫికేషన్ కనిపిస్తుంది.</string>
+    <string name="mt_sub_off">ప్రతి స్క్రీన్ షేర్‌కు ముందు Android అడుగుతుంది. మీ కంప్యూటర్ల కోసం దాన్ని దాటవేయడానికి దీన్ని ఆన్ చేయండి.</string>
+    <string name="mt_needs_computer">ఆన్ చేయడానికి ఒకసారి మీ Mac కావాలి: దాన్ని కనెక్ట్ చేసి మళ్లీ ప్రయత్నించండి. లేదా adb ఉన్న ఏ కంప్యూటర్ నుండైనా దీన్ని రన్ చేయండి:</string>
+    <string name="mt_asking">%1$sని అడుగుతోంది…</string>
+    <string name="mt_setup">%1$sలో Pro మిర్రరింగ్ సెటప్ పూర్తి చేయండి. ఆ వెంటనే మిర్రరింగ్ విశ్వసనీయమవుతుంది.</string>
+    <string name="mt_failed">ఆన్ చేయలేకపోయింది.</string>
+    <string name="mt_retry">మళ్లీ ప్రయత్నించు</string>
 </resources>

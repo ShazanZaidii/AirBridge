@@ -22,4 +22,15 @@
     <string name="pm_sink_denied">%1$s திரைப் பகிர்வை அனுமதிக்கவில்லை</string>
     <string name="pm_sink_stopped">%1$s திரைப் பகிர்வை நிறுத்தியது</string>
     <string name="lk_fallback">%1$s. தற்போதைய இணைப்பில் அனுப்புகிறது.</string>
+    <string name="pm_ask_title">இந்த ஃபோனின் திரையை %1$s இல் காட்டவா?</string>
+    <string name="pm_ask_allow">அனுமதி</string>
+    <string name="mt_section">திரை மிரரிங்</string>
+    <string name="mt_title">கேட்காமல் மிரர் செய்</string>
+    <string name="mt_sub_on">உங்கள் கணினிகள் Android கேள்வி இல்லாமல் உடனே இந்த ஃபோனின் திரையைக் காட்டும். இயங்கும் வரை அறிவிப்பு தெரியும்.</string>
+    <string name="mt_sub_off">ஒவ்வொரு திரைப் பகிர்வுக்கும் முன் Android கேட்கும். உங்கள் கணினிகளுக்கு அதைத் தவிர்க்க இதை இயக்கவும்.</string>
+    <string name="mt_needs_computer">இயக்க ஒருமுறை உங்கள் Mac தேவை: அதை இணைத்து மீண்டும் முயலவும். அல்லது adb உள்ள எந்தக் கணினியிலிருந்தும் இதை இயக்கவும்:</string>
+    <string name="mt_asking">%1$s இடம் கேட்கிறது…</string>
+    <string name="mt_setup">%1$s இல் Pro மிரரிங் அமைப்பை முடிக்கவும். அதன் பிறகு மிரரிங் நம்பகமாகும்.</string>
+    <string name="mt_failed">இயக்க முடியவில்லை.</string>
+    <string name="mt_retry">மீண்டும் முயல்</string>
 </resources>

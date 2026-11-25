@@ -13,4 +13,17 @@
     <string name="pm_sink_allow">Tap Allow on %1$s</string>
     <string name="pm_sink_denied">%1$s didn\'t allow screen sharing</string>
     <string name="pm_sink_stopped">%1$s stopped sharing its screen</string>
+    <!-- "Mirror without asking" (PROTOCOL §8.10). -->
+    <string name="pm_ask_title">Show this phone\'s screen on %1$s?</string>
+    <string name="pm_ask_allow">Allow</string>
+    <string name="mt_section">Screen mirroring</string>
+    <string name="mt_title">Mirror without asking</string>
+    <string name="mt_sub_on">Your computers show this phone\'s screen right away, without Android\'s prompt. The notification still shows while it\'s on.</string>
+    <string name="mt_sub_off">Android asks before every screen share. Turn this on to skip that for your computers.</string>
+    <string name="mt_needs_computer">Turning it on needs your Mac once: connect it, then try again. Or run this from any computer with adb:</string>
+    <string name="mt_asking">Asking %1$s…</string>
+    <string name="mt_setup">Finish setting up Pro mirroring on %1$s. Mirroring is trusted right after.</string>
+    <string name="mt_failed">Couldn\'t turn it on.</string>
+    <string name="mt_retry">Try again</string>
+    <string name="mt_adb_command" translatable="false">adb shell appops set com.shazan.airbridge PROJECT_MEDIA allow</string>
 </resources>
