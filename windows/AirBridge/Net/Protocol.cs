@@ -30,9 +30,17 @@ namespace AirBridge.Net
         /// "call_ring": decides where calls ring from the phone's presence and beacon (§13.5).
         /// "battery_sink": shows a phone's battery in the device list (§14).
         /// "clip_media": puts a received clipboard image or file list on the clipboard (§5.1).
-        public static readonly string[] Caps = Input.PhoneMirrorHub.Available
-            ? new[] { "clip", "xfer", "ctl_source", "ctl_target", "drag_files", "mirror_sink", "notif_sink", "call_sink", "call_ring", "battery_sink", "clip_media" }
-            : new[] { "clip", "xfer", "ctl_source", "ctl_target", "drag_files", "notif_sink", "call_sink", "call_ring", "battery_sink", "clip_media" };
+        /// "notif_source": this PC's own notifications for other devices (packaged build only, Phone/PcNotifSource.cs).
+        public static readonly string[] Caps = BuildCaps();
+
+        private static string[] BuildCaps()
+        {
+            var c = new List<string> { "clip", "xfer", "ctl_source", "ctl_target", "drag_files" };
+            if (Input.PhoneMirrorHub.Available) c.Add("mirror_sink");
+            c.AddRange(new[] { "notif_sink", "call_sink", "call_ring", "battery_sink", "clip_media" });
+            if (Phone.PcNotifSource.Supported) c.Add(Phone.PcNotifSource.Cap);
+            return c.ToArray();
+        }
 
         public static readonly TimeSpan HandshakeTimeout = TimeSpan.FromSeconds(10);
         public static readonly TimeSpan PingAfterIdle = TimeSpan.FromSeconds(5);

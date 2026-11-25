@@ -74,6 +74,8 @@
 		<Capability Name="internetClientServer" />
 		<Capability Name="privateNetworkClientServer" />
 		<rescap:Capability Name="runFullTrust" />
+		<!-- This PC's notifications on other devices (Phone/PcNotifSource.cs, PROTOCOL §13): Windows asks the user once. -->
+		<uap3:Capability Name="userNotificationListener" />
 		<!-- Wi-Fi Direct legacy group host (PROTOCOL §10.1 wfd_legacy). Declared like the Microsoft WiFiDirect sample; not proven
 		     necessary for a full-trust app, harmless. The TCP rule above (Profile="all") already covers the Wi-Fi Direct adapter,
 		     which comes up as an unidentified Public network. No wiFiControl (not needed for the legacy AP) and no bluetooth (BLE is a later phase). -->
