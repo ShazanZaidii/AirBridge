@@ -11,7 +11,7 @@
 	<Identity
 	  Name="950c48f1-ccef-4230-a5b8-0a80b8e23443"
 	  Publisher="CN=Shazan Zaidi"
-	  Version="1.0.16.0" />
+	  Version="3.3.0.0" />
 
 	<Properties>
 		<DisplayName>AirBridge</DisplayName>

@@ -15,16 +15,56 @@ namespace AirBridge.Input
     }
 
     /// <summary>
-    /// Decoder factory. TODO(windows-mirror-decode): implement with the Media Foundation H.264/HEVC decoder MFT
-    /// (CLSID_MSH264DecoderMFT / HEVC video extension, NV12 out, converted to BGRA for a WriteableBitmap or shown
-    /// through D3DImage). Until then <see cref="Available"/> is false, the PC does not advertise mirror_sink and the
-    /// tray shows no "Mirror" button, so nobody meets a half-working window. The protocol, window and input
-    /// handling below are complete and only wait for this.
+    /// Decoder factory: the Media Foundation H.264 decoder (Input/WindowsMirrorDecode.cs). <see cref="Available"/> runs
+    /// <c>AirBridge.exe --decode-selftest</c> once, in a child process: only when this PC really decoded a test picture
+    /// does it advertise mirror_sink and offer to show a phone's or a computer's screen.
     /// </summary>
     public static class MirrorDecoders
     {
-        public static bool Available => false;
-        public static IMirrorVideoDecoder? Create(string codec) => null;
+        private static readonly object Gate = new();
+        private static bool? _available;
+
+        public static bool Available
+        {
+            get
+            {
+                lock (Gate)
+                {
+                    if (_available is bool known) return known;
+                    _available = SelfTest();
+                    return _available.Value;
+                }
+            }
+        }
+
+        public static IMirrorVideoDecoder? Create(string codec)
+        {
+            if (codec != "h264" || !Available) return null;
+            var d = MfH264Decoder.Create(out var err);
+            if (d == null) AirBridge.Net.Log.Warn("mirror: " + err);
+            return d;
+        }
+
+        private static bool SelfTest()
+        {
+            if (!OperatingSystem.IsWindows() || Environment.OSVersion.Version.Build < 17763) return false;
+            string? exe = Environment.ProcessPath;
+            if (string.IsNullOrEmpty(exe)) return false;
+            try
+            {
+                var psi = new ProcessStartInfo(exe, "--decode-selftest") { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true };
+                using var p = Process.Start(psi);
+                if (p == null) return false;
+                var read = System.Threading.Tasks.Task.Run(() => p.StandardOutput.ReadToEnd());
+                if (!p.WaitForExit(8000)) { try { p.Kill(true); } catch { } AirBridge.Net.Log.Warn("mirror: decode self-test did not finish"); return false; }
+                string said = read.Wait(1000) ? read.Result.Trim() : "";
+                if (p.ExitCode != 0) { AirBridge.Net.Log.Info("mirror: can't show other screens (" + said + ")"); return false; }
+                AirBridge.Net.Log.Info("mirror: decode self-test passed (" + said + ")");
+                var start = Vortice.MediaFoundation.MediaFactory.MFStartup(false);
+                return !start.Failure;
+            }
+            catch (Exception ex) { AirBridge.Net.Log.Warn("mirror: decode self-test could not run: " + ex.Message); return false; }
+        }
     }
 
     /// <summary>
@@ -190,6 +230,11 @@ namespace AirBridge.Input
         public static bool Available => MirrorDecoders.Available;
 
         public static bool CanMirror(PeerInfo p) => Available && p.Platform == "android" && p.Caps.Contains("mirror_source");
+
+        /// <summary>A Mac or another PC that shares its screen (#18): shown and controlled in the same window, without the
+        /// phone's Back / Home / Recents.</summary>
+        public static bool IsComputer(PeerInfo p) => p.Platform is "macos" or "windows" or "linux";
+        public static bool CanShowScreen(PeerInfo p) => Available && IsComputer(p) && p.Caps.Contains("mirror_source");
 
         public static void Register(PhoneMirrorSession s) { lock (Gate) Sessions[s.Peer] = s; }
         public static void Unregister(PhoneMirrorSession s) { lock (Gate) if (Sessions.TryGetValue(s.Peer, out var cur) && cur == s) Sessions.Remove(s.Peer); }

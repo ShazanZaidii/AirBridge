@@ -64,6 +64,7 @@ namespace AirBridge
         {
             _peer = peer;
             _session = new PhoneMirrorSession(peer.Id);
+            if (PhoneMirrorHub.IsComputer(peer)) _aspect = 16.0 / 10.0; // until it says its real size
             Title = peer.Name;
             WindowStyle = WindowStyle.None;
             AllowsTransparency = true;
@@ -123,9 +124,12 @@ namespace AirBridge
                 VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis };
             Grid.SetColumn(name, 1);
             var right = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 6, 0) };
-            right.Children.Add(BarButton("", "Back", () => SendAction("back")));
-            right.Children.Add(BarButton("", "Home", () => SendAction("home")));
-            right.Children.Add(BarButton("", "Recent apps", () => SendAction("recents")));
+            if (!PhoneMirrorHub.IsComputer(_peer)) // a computer has its own; these are the phone's
+            {
+                right.Children.Add(BarButton("", "Back", () => SendAction("back")));
+                right.Children.Add(BarButton("", "Home", () => SendAction("home")));
+                right.Children.Add(BarButton("", "Recent apps", () => SendAction("recents")));
+            }
             Grid.SetColumn(right, 2);
             bg.Children.Add(left); bg.Children.Add(name); bg.Children.Add(right);
             _bar.Child = bg;

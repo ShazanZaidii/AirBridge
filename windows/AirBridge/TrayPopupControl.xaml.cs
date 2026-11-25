@@ -206,9 +206,10 @@ namespace AirBridge
 
             var actions = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
             var mirrorPeer = p.Connected ? PeerDirectory.Find(p.Id) : null;
-            if (mirrorPeer != null && PhoneMirrorHub.CanMirror(mirrorPeer))
+            if (mirrorPeer != null && (PhoneMirrorHub.CanMirror(mirrorPeer) || PhoneMirrorHub.CanShowScreen(mirrorPeer)))
             {
-                var mirror = IconButton((string)FindResource("AB.G.Phone"), $"Mirror {p.Name}");
+                bool computer = PhoneMirrorHub.IsComputer(mirrorPeer);
+                var mirror = IconButton(computer ? "\uE7F4" : (string)FindResource("AB.G.Phone"), computer ? $"Show {p.Name}'s screen" : $"Mirror {p.Name}");
                 mirror.Click += (_, _) => PhoneMirrorWindows.Show(mirrorPeer);
                 actions.Children.Add(mirror);
             }
