@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<assembly manifestVersion="1.0" xmlns="urn:schemas-microsoft-com:asm.v1">
+  <assemblyIdentity version="1.0.0.0" name="AirBridge.app" />
+  <!-- The zip build's package identity (issue #10, Phone/PackageIdentity.cs): names the external-location package that
+       Identity/AirBridge.Identity.msix registers. Ignored until that package is registered, and in the installer build. -->
+  <msix xmlns="urn:schemas-microsoft-com:msix.v1"
+        publisher="CN=AirBridge, OID.2.25.311729368913984317654407730594956997722=1"
+        packageName="AirBridge.Identity"
+        applicationId="AirBridge" />
+  <trustInfo xmlns="urn:schemas-microsoft-com:asm.v2">
+    <security>
+      <requestedPrivileges xmlns="urn:schemas-microsoft-com:asm.v3">
+        <requestedExecutionLevel level="asInvoker" uiAccess="false" />
+      </requestedPrivileges>
+    </security>
+  </trustInfo>
+  <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
+    <application>
+      <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}" />
+    </application>
+  </compatibility>
+</assembly>

@@ -393,6 +393,12 @@ namespace AirBridge
             }
         }
 
+        private void OpenSetup_Click(object sender, RoutedEventArgs e)
+        {
+            ClosePopup();
+            SetupWindow.ShowNow();
+        }
+
         private void OpenNetworkCheck_Click(object sender, RoutedEventArgs e)
         {
             ClosePopup();

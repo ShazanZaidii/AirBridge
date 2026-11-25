@@ -46,6 +46,17 @@ namespace AirBridge
                     Shutdown();
                     return;
                 }
+                // The zip build on Windows 11, first run of this version: take a package identity (#10), then start again
+                // with it. Done before anything else starts, so the relaunched copy finds the single-instance lock free.
+                if (files.Length == 0 && Phone.PackageIdentity.RegisterForZipBuild())
+                {
+                    _singleInstanceMutex.ReleaseMutex();
+                    _singleInstanceMutex.Dispose();
+                    _singleInstanceMutex = null;
+                    Phone.PackageIdentity.Relaunch();
+                    Shutdown();
+                    return;
+                }
                 StartMainInstance(files);
             }
             catch (Exception ex)
@@ -132,6 +143,10 @@ namespace AirBridge
 
             if (pendingFiles.Length > 0) ShowSendWindow(pendingFiles);
             else if (!Environment.GetCommandLineArgs().Contains("--background")) ShowMainWindow(); // opened by hand: show it; at login: stay in the tray
+            // First launch of this install: the setup guide, a moment after the rest is up (#15).
+            if (!UiSettings.SetupShown)
+                Dispatcher.BeginInvoke(new Action(() => { try { SetupWindow.ShowIfFirstRun(); } catch (Exception ex) { Log.Warn($"setup guide: {ex.Message}"); } }),
+                    System.Windows.Threading.DispatcherPriority.ApplicationIdle);
         }
 
         /// <summary>Opens the AirBridge window (any thread), or brings the open one forward.</summary>
