@@ -53,9 +53,9 @@ import ApplicationServices
             else { try? Data(line.utf8).write(to: u) }
         }
         #endif
-        // One open fires several of these; one pull per opening is enough.
+        // One open fires several of these; one per opening is enough. The hub then decides whether a refresh is due.
         guard Date().timeIntervalSince(lastPull) > 8 else { return }
         lastPull = Date()
-        ScreenTimeHub.shared.pullNow()
+        ScreenTimeHub.shared.notificationCenterOpened()
     }
 }
