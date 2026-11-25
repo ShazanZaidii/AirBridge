@@ -329,14 +329,17 @@ import SwiftUI
 
     private func applyRing(_ l: Live, phone: String) {
         guard let d = l.ring?.decision else { return }
-        l.ui.ringingHere = d.macRings
-        if d.silencePhone && !l.silenceSent,
+        // A Focus or DND on the Mac: the call still shows here but doesn't ring, and the phone isn't silenced either, so it
+        // rings or not by its own settings (#11).
+        let focus = MacFocus.isOn
+        l.ui.ringingHere = d.macRings && !focus
+        if d.silencePhone && !focus && !l.silenceSent,
            PeerBus.shared.peers().contains(where: { $0.id == phone && $0.caps.contains(PhoneNotifCaps.callRing) }) {
             l.silenceSent = true
             PeerBus.shared.send(to: phone, PhoneNotifWire.ring(l.ui.call.id, silencePhone: true))
         }
         let i = inputs(phone)
-        InputLog.shared.log("call ring: \(d.reason.rawValue) mac=\(d.macRings) silencePhone=\(d.silencePhone) " +
+        InputLog.shared.log("call ring: \(d.reason.rawValue) mac=\(d.macRings) silencePhone=\(d.silencePhone) focus=\(focus) " +
             "proximity=\(i.proximity) macIdle=\(i.macIdle.map { String(format: "%.0fs", $0) } ?? "?")")
     }
 
@@ -367,7 +370,9 @@ import SwiftUI
                     for (phone, l) in self.live where l.ring != nil {
                         let before = l.ring?.decision
                         _ = l.ring?.update(self.inputs(phone))
-                        if l.ring?.decision != before { self.applyRing(l, phone: phone) }
+                        // A Focus switched on or off while it rings counts as a change too.
+                        let wanted = (l.ring?.decision.macRings ?? false) && !MacFocus.isOn
+                        if l.ring?.decision != before || l.ui.ringingHere != wanted { self.applyRing(l, phone: phone) }
                     }
                     self.updateRinger()
                 }

@@ -271,6 +271,9 @@ nonisolated struct PhoneNotifStore {
 
     mutating func remove(id: String) -> Bool { items.removeValue(forKey: id) != nil }
 
+    /// Puts back one taken out ahead of the phone (a clear the phone then refused).
+    mutating func restore(_ n: PhoneNotif) { items[n.id] = n }
+
     /// Drops the oldest of [phone] beyond `maxPerPhone`; returns their ids.
     private mutating func trim(_ phone: String) -> [String] {
         let mine = items.values.filter { $0.phoneId == phone }
@@ -304,19 +307,28 @@ nonisolated struct PhoneNotifStore {
         }
     }
 
-    /// Grouped by phone and app (as the phone bundles them), in the phone's shade order: a group sits where its first
-    /// notification sits, and inside a group they keep the phone's order. `status` picks the main list (false) or the
-    /// phone's Silent section (true).
-    func groups(status: Bool = false) -> [Group] {
+    /// Grouped by device and app (as the device bundles them). `status` picks the main list (false) or the Silent section
+    /// (true). One device (`device`, or the only one there is): exactly its shade order, a group sitting where its first
+    /// notification sits. All devices together: newest group first across them (their orders can't be merged), each group
+    /// still in its device's order inside.
+    func groups(status: Bool = false, device: String? = nil) -> [Group] {
         var byApp: [String: [PhoneNotif]] = [:]
-        for n in items.values where isSilent(n) == status { byApp[n.phoneId + "|" + n.pkg, default: []].append(n) }
-        return byApp.values.map { list in
+        for n in items.values where isSilent(n) == status && (device == nil || n.phoneId == device) {
+            byApp[n.phoneId + "|" + n.pkg, default: []].append(n)
+        }
+        let list = byApp.values.map { list in
             let sorted = list.sorted(by: precedes)
             return Group(phoneId: sorted[0].phoneId, pkg: sorted[0].pkg, app: sorted[0].app, items: sorted)
-        }.sorted { a, b in
-            a.phoneId != b.phoneId ? a.phoneId < b.phoneId : precedes(a.items[0], b.items[0])
         }
+        let several = Set(list.map(\.phoneId)).count > 1
+        guard several else { return list.sorted { precedes($0.items[0], $1.items[0]) } }
+        // One consistent rule across devices (mixing it with each device's order would make the sort contradict itself).
+        func latest(_ g: Group) -> Date { g.items.map(\.ts).max() ?? .distantPast }
+        return list.sorted { a, b in latest(a) != latest(b) ? latest(a) > latest(b) : a.id < b.id }
     }
+
+    /// Devices with something listed here, in a stable order.
+    var devices: [String] { Array(Set(items.values.map(\.phoneId))).sorted() }
 
     /// Ordinary notifications only (status entries are not news).
     var count: Int { items.values.filter { !$0.isStatus }.count }

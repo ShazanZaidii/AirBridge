@@ -23,6 +23,8 @@
 		<string>_adb-tls-pairing._tcp</string>
 		<string>_adb-tls-connect._tcp</string>
 	</array>
+	<key>NSFocusStatusUsageDescription</key>
+	<string>AirBridge keeps phone calls from ringing on this Mac while a Focus or DND is on. The call still shows.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>AirBridge finds and connects to your phone and other computers on this network to sync the clipboard, send files and share the keyboard and mouse.</string>
 	<key>NSServices</key>

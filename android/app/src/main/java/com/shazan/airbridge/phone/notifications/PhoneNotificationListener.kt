@@ -68,6 +68,11 @@ class PhoneNotificationListener : NotificationListenerService() {
         Log.w(TAG, "ranking", t); emptyList()
     }
 
+    /** Still in the shade (a clear may have been ignored). */
+    fun isShowing(sbnKey: String): Boolean = try {
+        activeNotifications?.any { it.key == sbnKey } == true
+    } catch (_: Throwable) { false }
+
     fun dismiss(sbnKey: String): Boolean = try { cancelNotification(sbnKey); true } catch (t: Throwable) { Log.w(TAG, "cancel", t); false }
 
     companion object {

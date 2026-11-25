@@ -812,6 +812,9 @@ namespace AirBridge.Net
             // Phone notifications and calls (§13): shown by the Phone hub, never the input half.
             if (t.StartsWith("notif_", StringComparison.Ordinal) || t.StartsWith("call_", StringComparison.Ordinal))
             {
+                // A device showing this PC's notifications asks something of them (clear, unsubscribe): ours to answer.
+                try { if (Phone.PcNotifSource.OnCommand(PeerId!, o)) return; }
+                catch (Exception ex) { Log.Error($"PC notifications threw on '{t}'", ex); return; }
                 try { Phone.PhoneNotifHub.OnMessage(PeerId!, o); }
                 catch (Exception ex) { Log.Error($"Phone hub threw on '{t}'", ex); }
                 return;

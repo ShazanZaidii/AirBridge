@@ -34,6 +34,18 @@ enum PhoneNotifSettings {
 
     /// Why banners can't appear on this Mac (permission off, banners set to none), or nil when they can.
     @Published private(set) var bannerProblem: String?
+    /// A row of the Notifications panel following a two-finger swipe (id, points + = right).
+    struct RowSwipe: Equatable { let id: String; var dx: CGFloat }
+    @Published var rowSwipe: RowSwipe?
+    /// The device the Notifications panel shows; nil = all devices together. Kept between openings.
+    @Published var focusDevice: String? = UserDefaults.standard.string(forKey: "PhoneNotifs.focusDevice") {
+        didSet { UserDefaults.standard.set(focusDevice, forKey: "PhoneNotifs.focusDevice") }
+    }
+    /// Devices that send notifications: connected ones, plus any whose notifications are still listed.
+    var notifDevices: [(id: String, name: String)] {
+        let ids = Set(sourcePhones.map(\.id)).union(store.devices)
+        return ids.map { ($0, phoneName($0)) }.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
 
     /// The macOS banners delivered for each phone notification. Every post gets its own banner id: re-adding the same id only
     /// replaces the old banner, and macOS does that silently, so the second message in a chat never popped up.
@@ -111,9 +123,19 @@ enum PhoneNotifSettings {
             if t == "notif_post" && !PhoneNotifSettings.showNotifs { return }
             applyStore(m, from: phone)
         case "notif_result":
-            guard m["ok"] as? Bool == false else { return }
             let op = m["op"] as? String ?? ""
             let why = m["reason"] as? String
+            let clearedId = (m["key"] as? String).map { PhoneNotif.makeId(phone, $0) }
+            let cleared = op == "dismiss" ? clearedId.flatMap { clearing.removeValue(forKey: $0) } : nil
+            guard m["ok"] as? Bool == false else { return }
+            // The phone kept it (an ongoing one it won't let anyone clear): back in the list, with the reason.
+            if let n = cleared, why != "gone" {
+                withAnimation(.easeOut(duration: 0.2)) { store.restore(n) }
+                if why == "ongoing" {
+                    lastError = "\(phoneName(phone)) doesn't let “\(n.headline)” be cleared while \(n.app) is running."
+                    return
+                }
+            }
             lastError = failureText(op: op, reason: why, phone: phone)
             if let msg = lastError { AppModel.shared.notice(msg) }
         case "call_state":
@@ -243,7 +265,17 @@ enum PhoneNotifSettings {
 
     // MARK: UI → phone
 
+    /// Cleared ahead of the phone's answer, kept until it comes (a refused clear puts them back).
+    private var clearing: [String: PhoneNotif] = [:]
+
     func dismiss(_ n: PhoneNotif) {
+        // Android lets no app clear an ongoing notification (measured: USB debugging, running services): say so instead of
+        // taking it out and putting it back.
+        guard n.canClear else {
+            lastError = "\(phoneName(n.phoneId)) doesn't let “\(n.headline)” be cleared while \(n.app) is running."
+            return
+        }
+        clearing[n.id] = n
         PeerBus.shared.send(to: n.phoneId, PhoneNotifWire.dismiss(n.key))
         // Gone here at once; if the phone refuses, its next post brings it back.
         if store.remove(id: n.id) { removeBanners([n.id]) }
@@ -262,6 +294,26 @@ enum PhoneNotifSettings {
     func act(_ n: PhoneNotif, _ a: PhoneAction) {
         guard isConnected(n.phoneId) else { AppModel.shared.notice("\(phoneName(n.phoneId)) isn't connected"); return }
         PeerBus.shared.send(to: n.phoneId, PhoneNotifWire.action(n.key, a.index))
+    }
+
+    /// The device can open a notification's app (a phone; Windows has no way to).
+    func canOpen(_ n: PhoneNotif) -> Bool {
+        AppModel.shared.readyPeers.first { $0.id == n.phoneId }?.platform == "android"
+    }
+
+    /// Clicked in the Notifications panel: the phone opens the notification's app, shown in the mirror window, as a tap on
+    /// the phone would. Without mirroring it still opens on the phone.
+    func openInMirror(_ n: PhoneNotif) {
+        guard let peer = AppModel.shared.readyPeers.first(where: { $0.id == n.phoneId }), canOpen(n) else { return }
+        PhoneNotifsWindow.shared.close()
+        let open = PhoneNotifWire.open(n.key)
+        guard PhoneMirrorHub.canMirror(peer) || ProMirrorHub.isSetUp(peer.id) else { PeerBus.shared.send(to: n.phoneId, open); return }
+        let wasOpen = PhoneMirrorWindows.shared.isOpen(peer.id)
+        PhoneMirrorWindows.shared.show(peer)
+        // A mirror that is just starting opens the phone's screen-capture step, which would bury the app opened at the
+        // same moment: open it once the picture is up.
+        if wasOpen { PeerBus.shared.send(to: n.phoneId, open); return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) { PeerBus.shared.send(to: n.phoneId, open) }
     }
 
     func openOnPhone(_ n: PhoneNotif) {

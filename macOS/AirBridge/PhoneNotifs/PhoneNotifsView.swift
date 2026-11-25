@@ -7,6 +7,11 @@ import SwiftUI
     static let shared = PhoneNotifsWindow()
     private var panel: NotifsPanel?
     private var clickMonitor: Any?
+    private var swipeMonitor: Any?
+    private let tracker = SwipeAway()
+    private var swipeRow: String?
+    /// Each row's frame in the panel (top-left origin), from the list.
+    var rowFrames: [String: CGRect] = [:]
     /// Pixel 9 Pro in points (412 × 915 dp): the list reads like the phone's own shade. Capped to the screen.
     static let phoneSize = NSSize(width: 412, height: 915)
     static let corner: CGFloat = 34
@@ -34,6 +39,11 @@ import SwiftUI
             NSApp.activate()
             p.makeKeyAndOrderFront(nil)
         }
+        if swipeMonitor == nil {
+            swipeMonitor = NSEvent.addLocalMonitorForEvents(matching: [.scrollWheel]) { e in
+                MainActor.assumeIsolated { PhoneNotifsWindow.shared.scroll(e) }
+            }
+        }
         // Clicks in other apps don't always take key status from an app that wasn't active before: watch for them too.
         if clickMonitor == nil {
             clickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { _ in
@@ -44,6 +54,9 @@ import SwiftUI
 
     func close() {
         if let m = clickMonitor { NSEvent.removeMonitor(m); clickMonitor = nil }
+        if let m = swipeMonitor { NSEvent.removeMonitor(m); swipeMonitor = nil }
+        swipeRow = nil
+        PhoneNotifCenter.shared.rowSwipe = nil
         guard let p = panel, p.isVisible else { return }
         NSAnimationContext.runAnimationGroup({ ctx in
             ctx.duration = 0.12
@@ -95,12 +108,66 @@ import SwiftUI
         return NSRect(x: x, y: vis.maxY - h - margin, width: w, height: h)
     }
 
+    // MARK: Swipe a notification away (two fingers sideways, like on the phone)
+
+    private func row(at e: NSEvent) -> PhoneNotif? {
+        guard let p = panel, let content = p.contentView else { return nil }
+        let pt = CGPoint(x: e.locationInWindow.x, y: content.bounds.height - e.locationInWindow.y)
+        let center = PhoneNotifCenter.shared
+        guard let id = rowFrames.first(where: { $0.value.contains(pt) })?.key, let n = center.store.items[id] else { return nil }
+        return n
+    }
+
+    /// Horizontal two-finger swipes move the row under the pointer; vertical ones scroll the list as usual.
+    fileprivate func scroll(_ e: NSEvent) -> NSEvent? {
+        guard let p = panel, e.window === p else { return e }
+        if e.phase.contains(.began) { swipeRow = row(at: e)?.id }
+        guard let id = swipeRow else { return e }
+        let center = PhoneNotifCenter.shared
+        switch tracker.handle(e) {
+        case .ignored:
+            return e
+        case .moved(let dx):
+            // One the phone won't let anyone clear stretches a little and no further, as on the phone.
+            let locked = center.store.items[id].map { !$0.canClear } ?? false
+            center.rowSwipe = .init(id: id, dx: locked ? max(-36, min(36, dx * 0.25)) : dx)
+            return nil
+        case .away where center.store.items[id].map({ !$0.canClear }) ?? false:
+            swipeRow = nil
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) { center.rowSwipe = nil }
+            if let n = center.store.items[id] { center.dismiss(n) } // says why it stays
+            return nil
+        case .away(let dx):
+            swipeRow = nil
+            withAnimation(.easeIn(duration: 0.16)) { center.rowSwipe = .init(id: id, dx: dx > 0 ? 460 : -460) }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.16) {
+                MainActor.assumeIsolated {
+                    // Cleared here and on the phone. One the phone refuses to clear comes back, with the reason.
+                    if let n = center.store.items[id] { withAnimation(.easeOut(duration: 0.2)) { center.dismiss(n) } }
+                    center.rowSwipe = nil
+                }
+            }
+            return nil
+        case .back:
+            swipeRow = nil
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { center.rowSwipe = nil }
+            return nil
+        }
+    }
+
     func windowDidResignKey(_ notification: Notification) { close() }
     func windowDidBecomeKey(_ notification: Notification) { PhoneNotifCenter.shared.unseen = 0 }
 
     #if DEBUG
     func debugClose() { close() }
     #endif
+}
+
+/// Where each notification row sits in the panel, for two-finger swipes.
+private struct NotifRowFramesKey: PreferenceKey {
+    static let space = "notif-panel"
+    static let defaultValue: [String: CGRect] = [:]
+    static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) { value.merge(nextValue()) { $1 } }
 }
 
 /// Borderless, but takes the keyboard (replies are typed here) and closes on Esc.
@@ -122,10 +189,16 @@ struct PhoneNotifsView: View {
     var topInset: CGFloat = 38
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    private var groups: [PhoneNotifStore.Group] { center.store.groups() }
-    /// The phone's ongoing and silent ones (VPN, USB, music), listed under them like the phone's shade does.
-    private var statusGroups: [PhoneNotifStore.Group] { center.store.groups(status: true) }
-    private var multiplePhones: Bool { Set(center.store.items.values.map(\.phoneId)).count > 1 }
+    /// The device picked at the top (nil = all), or nil when it isn't around any more.
+    private var device: String? {
+        guard let d = center.focusDevice, center.notifDevices.contains(where: { $0.id == d }) else { return nil }
+        return d
+    }
+    private var groups: [PhoneNotifStore.Group] { center.store.groups(device: device) }
+    /// The device's ongoing and silent ones (VPN, USB, music), listed under them like its shade does.
+    private var statusGroups: [PhoneNotifStore.Group] { center.store.groups(status: true, device: device) }
+    /// Cards name their device when more than one is on screen.
+    private var multiplePhones: Bool { device == nil && Set(center.store.items.values.map(\.phoneId)).count > 1 }
     /// Like the phone's "Clear all": everything that can be cleared, silent ones included; ongoing ones stay.
     private var clearable: [PhoneNotifStore.Group] {
         (groups + statusGroups).filter { center.isConnected($0.phoneId) && $0.items.contains(where: \.canClear) }
@@ -137,6 +210,11 @@ struct PhoneNotifsView: View {
                 .padding(.horizontal, 20)
                 .padding(.top, topInset)
                 .padding(.bottom, 14)
+            if center.notifDevices.count > 1 {
+                DevicePicker(center: center, selected: device)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 12)
+            }
             notices
                 .padding(.horizontal, 16)
             BackgroundSection(hud: TransferHUD.shared, board: CallPanels.shared.board)
@@ -154,6 +232,8 @@ struct PhoneNotifsView: View {
             }
         }
         // Pinned to the top: with little content SwiftUI otherwise centres it, and the header floated down the window.
+        .coordinateSpace(.named(NotifRowFramesKey.space))
+        .onPreferenceChange(NotifRowFramesKey.self) { f in MainActor.assumeIsolated { PhoneNotifsWindow.shared.rowFrames = f } }
         .frame(minWidth: 340, maxWidth: .infinity, minHeight: 320, maxHeight: .infinity, alignment: .top)
         // Under the (transparent) title bar, like the Screen Time page: one charcoal surface from the top edge, with the
         // header just below the window buttons.
@@ -207,6 +287,10 @@ struct PhoneNotifsView: View {
     }
 
     private var subtitle: String {
+        if let d = device {
+            let n = groups.reduce(0) { $0 + $1.items.count }
+            return n == 0 ? center.phoneName(d) : "\(n) from \(center.phoneName(d))"
+        }
         let n = center.store.count
         let phones = Set(center.store.items.values.map(\.phoneId)).map(center.phoneName).sorted()
         if n == 0 { return center.sourcePhones.isEmpty ? "No phone connected" : "From \(center.sourcePhones.map(\.name).joined(separator: ", "))" }
@@ -253,6 +337,37 @@ struct PhoneNotifsView: View {
             // Down to the same 16-point margin as the sides, so the window reads as one even frame.
             .frame(maxWidth: .infinity, minHeight: 200, maxHeight: .infinity)
         }
+    }
+}
+
+/// All devices, or one: chips under the header when more than one device sends notifications.
+private struct DevicePicker: View {
+    @ObservedObject var center: PhoneNotifCenter
+    let selected: String?
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                chip("All devices", id: nil)
+                ForEach(center.notifDevices, id: \.id) { d in chip(d.name, id: d.id) }
+            }
+        }
+    }
+
+    private func chip(_ title: String, id: String?) -> some View {
+        let on = selected == id
+        return Button { withAnimation(.easeOut(duration: 0.18)) { center.focusDevice = id } } label: {
+            HStack(spacing: 5) {
+                if let id, !center.isConnected(id) { Circle().fill(Ink.tertiary).frame(width: 5, height: 5) }
+                Text(title).font(.system(size: 12, weight: on ? .semibold : .regular)).lineLimit(1)
+            }
+            .foregroundStyle(on ? Ink.onPill : Ink.secondary)
+            .padding(.horizontal, 11).padding(.vertical, 6)
+            .background(Capsule().fill(on ? Ink.pill : Ink.raised))
+            .overlay(Capsule().strokeBorder(Ink.hairline, lineWidth: on ? 0 : 1))
+        }
+        .buttonStyle(.plain)
+        .help(id.map { center.isConnected($0) ? "Only \(title)" : "\(title) (not connected)" } ?? "Every device together")
     }
 }
 
@@ -406,9 +521,17 @@ private struct NotifRow: View {
     @State private var replying = false
     @State private var text = ""
     @State private var hovering = false
+    @State private var expanded = false
+
+    /// More than the collapsed row shows: long text or more of the conversation.
+    private var expandable: Bool {
+        n.msgs.count > 4 || n.body.count > 150 || n.body.filter { $0 == "\n" }.count >= 3
+            || n.msgs.contains { $0.text.count > 90 }
+    }
     @FocusState private var focused: Bool
 
     private var connected: Bool { center.isConnected(n.phoneId) }
+    private var swipeDx: CGFloat { center.rowSwipe?.id == n.id ? center.rowSwipe!.dx : 0 }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -436,20 +559,36 @@ private struct NotifRow: View {
                         .background(Circle().fill(Ink.raised))
                 }
                 .buttonStyle(.plain)
-                .opacity(hovering && connected && n.canClear ? 1 : 0)
-                .disabled(!connected || !n.canClear)
+                .opacity(hovering && connected ? 1 : 0)
+                .disabled(!connected)
                 .accessibilityLabel("Clear")
             }
             if n.msgs.count > 1 {
                 VStack(alignment: .leading, spacing: 3) {
-                    ForEach(Array(n.msgs.suffix(4).enumerated()), id: \.offset) { _, m in
+                    ForEach(Array((expanded ? Array(n.msgs) : Array(n.msgs.suffix(4))).enumerated()), id: \.offset) { _, m in
                         let who = Text(m.from.map { $0.isEmpty ? "" : "\($0)  " } ?? "You  ").foregroundStyle(Ink.tertiary)
-                        Text("\(who)\(Text(m.text).foregroundStyle(Ink.secondary))").font(.system(size: 12.5)).lineLimit(2)
+                        Text("\(who)\(Text(m.text).foregroundStyle(Ink.secondary))").font(.system(size: 12.5))
+                            .lineLimit(expanded ? nil : 2)
+                            .fixedSize(horizontal: false, vertical: expanded)
                     }
                 }
             } else if !n.body.isEmpty {
-                Text(n.body).font(.system(size: 12.5)).foregroundStyle(Ink.secondary).lineLimit(4)
+                Text(n.body).font(.system(size: 12.5)).foregroundStyle(Ink.secondary)
+                    .lineLimit(expanded ? nil : 4)
+                    .fixedSize(horizontal: false, vertical: expanded)
                     .textSelection(.enabled)
+            }
+            if expandable {
+                Button { withAnimation(.easeOut(duration: 0.2)) { expanded.toggle() } } label: {
+                    HStack(spacing: 4) {
+                        Text(expanded ? "Show less" : "Show more").font(.system(size: 11.5, weight: .medium))
+                        Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold))
+                            .rotationEffect(.degrees(expanded ? 180 : 0))
+                    }
+                    .foregroundStyle(Ink.secondary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(expanded ? "Show less" : "Show the whole notification")
             }
             if connected && (n.canReply || !n.actions.isEmpty) && !replying {
                 HStack(spacing: 6) {
@@ -503,12 +642,20 @@ private struct NotifRow: View {
         .padding(.trailing, 14)
         .padding(.vertical, 10)
         .contentShape(Rectangle())
+        .background(GeometryReader { g in
+            Color.clear.preference(key: NotifRowFramesKey.self, value: [n.id: g.frame(in: .named(NotifRowFramesKey.space))])
+        })
+        .offset(x: swipeDx)
+        .opacity(1 - min(Double(abs(swipeDx)) / 320, 0.7))
+        // A click opens it, like a tap in the phone's shade: the app opens on the phone, shown in the mirror window.
+        .onTapGesture { if connected && !replying && center.canOpen(n) { center.openInMirror(n) } }
         .onHover { hovering = $0 }
         .contextMenu {
-            if connected {
+            if connected && center.canOpen(n) {
+                Button("Open in Mirror") { center.openInMirror(n) }
                 Button("Open on Phone") { center.openOnPhone(n) }
-                if n.canClear { Button("Clear") { center.dismiss(n) } }
             }
+            if connected { Button("Clear") { center.dismiss(n) } }
             Button("Don't Show This Again") { center.block(n) }
             Button("Copy Text") {
                 NSPasteboard.general.clearContents()

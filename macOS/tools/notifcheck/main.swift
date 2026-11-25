@@ -182,5 +182,18 @@ do {
     check(st.groups().isEmpty && st.groups(status: true).isEmpty, "a reset clears list and order")
 }
 
+// Several devices: one at a time in its own order, or all together newest first.
+do {
+    var st = PhoneNotifStore()
+    _ = st.apply(["t": "notif_post", "key": "a", "pkg": "wa", "app": "WhatsApp", "title": "A", "ts": 100], from: "phone")
+    _ = st.apply(["t": "notif_post", "key": "b", "pkg": "gm", "app": "Gmail", "title": "B", "ts": 300], from: "phone")
+    _ = st.apply(["t": "notif_order", "keys": ["a", "b"], "silent": []], from: "phone")
+    _ = st.apply(["t": "notif_post", "key": "t", "pkg": "teams", "app": "Teams", "title": "T", "ts": 200], from: "pc")
+    check(st.groups(device: "phone").map(\.pkg) == ["wa", "gm"], "one device: its own shade order")
+    check(st.groups(device: "pc").map(\.pkg) == ["teams"], "one device: only its notifications")
+    check(st.groups().map(\.pkg) == ["gm", "teams", "wa"], "all devices: newest group first across them")
+    check(st.devices == ["pc", "phone"], "devices listed")
+}
+
 print("notifcheck: \(passed) passed, \(failed) failed")
 exit(failed == 0 ? 0 : 1)
