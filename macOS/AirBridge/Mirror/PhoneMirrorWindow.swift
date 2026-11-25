@@ -137,7 +137,9 @@ final class MirrorWindow: NSWindow {
         self.peer = peer
         model = PhoneMirrorModel(name: peer.name)
         session = PhoneMirrorSession(peer: peer.id)
-        let size = Self.initialPhoneSize(aspect: aspect)
+        let computer = PhoneMirrorHub.isComputer(peer)
+        if computer { aspect = 16.0 / 10.0 } // until the computer says its real size (mirror_info)
+        let size = computer ? Self.initialComputerSize(aspect: aspect) : Self.initialPhoneSize(aspect: aspect)
         let frame = NSRect(x: 0, y: 0, width: size.width, height: size.height + Self.barHeight + Self.gap)
         window = MirrorWindow(contentRect: frame, styleMask: [.borderless, .resizable, .miniaturizable],
                               backing: .buffered, defer: false)
@@ -155,6 +157,7 @@ final class MirrorWindow: NSWindow {
         window.minSize = NSSize(width: 180, height: 260)
         window.center()
 
+        root.bar.showPhoneButtons = !computer
         root.screen.peer = peer.id
         root.screen.model = model
         root.bar.onClose = { [weak self] in self?.window.performClose(nil) }
@@ -177,6 +180,15 @@ final class MirrorWindow: NSWindow {
     /// own proportions, that width). Capped to the screen; still freely resizable, and the bar's buttons fit down to
     /// the minimum width (six 26-point buttons in 180 points).
     static let pixelWidth: CGFloat = 412
+
+    /// A computer's screen: about two thirds of this screen's width, its own proportions.
+    private static func initialComputerSize(aspect: CGFloat) -> NSSize {
+        let vis = NSScreen.main?.visibleFrame.size ?? NSSize(width: 1440, height: 900)
+        var w = min(1280, vis.width * 0.66), h = w / aspect
+        let maxH = vis.height - barHeight - gap - 20
+        if h > maxH { h = maxH; w = h * aspect }
+        return NSSize(width: w.rounded(), height: h.rounded())
+    }
 
     private static func initialPhoneSize(aspect: CGFloat) -> NSSize {
         let vis = NSScreen.main?.visibleFrame.size ?? NSSize(width: 1440, height: 900)
@@ -527,6 +539,8 @@ final class MirrorBarView: NSView {
     private let capsule = NSVisualEffectView()
     private let title = NSTextField(labelWithString: "")
     private var buttons: [NSButton] = []
+    /// Back, Home and Recents: phones only (a computer has its own).
+    var showPhoneButtons = true { didSet { for i in 2..<5 { buttons[i].isHidden = !showPhoneButtons }; needsLayout = true } }
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -588,7 +602,7 @@ final class MirrorBarView: NSView {
         for i in 2..<5 {
             buttons[i].frame = NSRect(x: w - 6 - CGFloat(5 - i) * side, y: y, width: side, height: side)
         }
-        let left = 6 + 3 * side + 4, right = w - 6 - 3 * side - 4
+        let left = 6 + 3 * side + 4, right = w - 6 - (showPhoneButtons ? 3 * side : 0) - 4
         title.frame = NSRect(x: left, y: (h - 16) / 2, width: max(0, right - left), height: 16)
         title.isHidden = right - left < 40
     }

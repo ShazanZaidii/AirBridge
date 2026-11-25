@@ -272,4 +272,9 @@ nonisolated final class PhoneMirrorHub: @unchecked Sendable {
 
     /// Phones that can show their screen here.
     static func canMirror(_ p: PeerInfo) -> Bool { p.platform == "android" && p.caps.contains("mirror_source") }
+
+    /// Another Mac or a PC that shares its screen (#18): shown and controlled in the same window, without the phone's
+    /// Back / Home / Recents.
+    static func isComputer(_ p: PeerInfo) -> Bool { ["macos", "windows", "linux"].contains(p.platform) }
+    static func canShowScreen(_ p: PeerInfo) -> Bool { isComputer(p) && p.caps.contains("mirror_source") }
 }
