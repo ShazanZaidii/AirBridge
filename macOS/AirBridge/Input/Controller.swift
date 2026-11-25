@@ -44,7 +44,7 @@ nonisolated final class Controller: @unchecked Sendable {
         let edge: ScreenEdge
         let span: (CGFloat, CGFloat)
         let bar: CGRect                   // indicator rect, global CG coordinates
-        var samples: [(t: CFAbsoluteTime, v: Double)] = []
+        var push = EdgePush()
     }
     private struct Candidate {
         let peer: String
@@ -392,9 +392,15 @@ nonisolated final class Controller: @unchecked Sendable {
         lastLocal = p
         let dx = e.getDoubleValueField(.mouseEventDeltaX), dy = e.getDoubleValueField(.mouseEventDeltaY)
         let cfg = currentSettings()
-        guard !dragging, localButtons.isEmpty, now - lastDragEnd >= CaptureSettings.dragCooldown,
-              ControlGate.shared.controlledBy == nil,          // no chaining while this Mac is itself controlled (§8.6)
-              !peers.isEmpty, let c = candidate(at: p, dx: dx, dy: dy, cfg) else {
+        guard !peers.isEmpty, let c = candidate(at: p, dx: dx, dy: dy, cfg) else {
+            resetCharge()
+            return nil
+        }
+        let held = dragging || !localButtons.isEmpty || now - lastDragEnd < CaptureSettings.dragCooldown
+        guard !held, ControlGate.shared.controlledBy == nil else { // no chaining while this Mac is itself controlled (§8.6)
+            if Self.outward(c.edge, dx, dy) > 0 {
+                notePushBlocked(c, held ? "a button is held or a drag just ended" : "this Mac is being controlled by another device")
+            }
             resetCharge()
             return nil
         }
@@ -469,32 +475,43 @@ nonisolated final class Controller: @unchecked Sendable {
     private func accumulate(_ c: Candidate, _ e: CGEvent, prev: CGPoint?, now: CFAbsoluteTime, _ cfg: CaptureSettings) -> Candidate? {
         let p = e.location
         let dx = e.getDoubleValueField(.mouseEventDeltaX), dy = e.getDoubleValueField(.mouseEventDeltaY)
-        if let until = cooldownUntil[c.edge], now < until { resetCharge(); return nil }
-        if ControlGate.shared.mirrorFocus == c.peer { resetCharge(); return nil } // its mirror window drives it
-        if cfg.requireOption && !e.flags.contains(.maskAlternate) { resetCharge(); return nil }
+        let out = Self.outward(c.edge, dx, dy) > 0
+        if let until = cooldownUntil[c.edge], now < until {
+            if out { notePushBlocked(c, "the cursor came back through this edge less than 0.7 s ago") }
+            resetCharge(); return nil
+        }
+        if ControlGate.shared.mirrorFocus == c.peer { // its mirror window drives it
+            if out { notePushBlocked(c, "its mirror window has the keyboard focus") }
+            resetCharge(); return nil
+        }
+        if cfg.requireOption && !e.flags.contains(.maskAlternate) {
+            if out { notePushBlocked(c, "Option must be held to cross (Displays settings)") }
+            resetCharge(); return nil
+        }
 
         var push = Self.outward(c.edge, dx, dy)
-        if push < 0 { resetCharge(); return nil } // any inward motion
         // Only motion while pinned counts: subtract the distance travelled to reach the edge.
-        if let prev {
+        if push > 0, let prev {
             let travelled = c.edge.isVertical ? abs(p.x - prev.x) : abs(p.y - prev.y)
             push = max(0, push - Double(travelled))
         }
         if charge == nil || charge!.peer != c.peer || charge!.edge != c.edge {
             charge = Charge(peer: c.peer, edge: c.edge, span: c.span, bar: c.bar)
         }
-        charge!.samples.removeAll { now - $0.t > CaptureSettings.window }
-        if push > 0 { charge!.samples.append((now, push)) }
-        let sum = charge!.samples.reduce(0) { $0 + $1.v }
-        if sum >= cfg.threshold {
+        switch charge!.push.feed(t: now, push: push, threshold: cfg.threshold) {
+        case .cross:
             let bar = c.bar
             charge = nil
             shownLevel = -1
             DispatchQueue.main.async { EdgeIndicator.shared.flash(rect: bar) }
             return c
+        case .reset:
+            resetCharge()
+            return nil
+        case .charging(let level):
+            showLevel(level, c.bar)
+            return nil
         }
-        showLevel(sum / cfg.threshold, c.bar)
-        return nil
     }
 
     private func showLevel(_ level: Double, _ bar: CGRect) {
@@ -519,6 +536,17 @@ nonisolated final class Controller: @unchecked Sendable {
         InputLog.shared.log("edge \(edge.rawValue): inert, \(why)")
     }
 
+    private var blockedLogAt: CFAbsoluteTime = 0
+
+    /// A push into a device's edge that was held back on purpose: in the input log (at most every 3 s), so a crossing
+    /// that "didn't happen" always has a reason on record.
+    private func notePushBlocked(_ c: Candidate, _ why: String) {
+        let now = CFAbsoluteTimeGetCurrent()
+        guard now - blockedLogAt > 3 else { return }
+        blockedLogAt = now
+        InputLog.shared.log("edge \(c.edge.rawValue): push toward \(peerName(c.peer)) held back: \(why)")
+    }
+
     private func resetCharge() {
         charge = nil
         if shownLevel > 0 { DispatchQueue.main.async { EdgeIndicator.shared.hide() } }
@@ -535,11 +563,9 @@ nonisolated final class Controller: @unchecked Sendable {
     private func decayCharge() {
         guard var c = charge else { return }
         let now = CFAbsoluteTimeGetCurrent()
-        c.samples.removeAll { now - $0.t > CaptureSettings.window }
+        if c.push.tick(now) { resetCharge(); return }
         charge = c
-        let sum = c.samples.reduce(0) { $0 + $1.v }
-        if sum <= 0 { resetCharge(); return }
-        showLevel(sum / currentSettings().threshold, c.bar)
+        showLevel(c.push.level(now, currentSettings().threshold), c.bar)
     }
 
     private func begin(_ peer: String, _ edge: ScreenEdge, _ span: (CGFloat, CGFloat), _ rel: Double, _ e: CGEvent,
@@ -587,6 +613,7 @@ nonisolated final class Controller: @unchecked Sendable {
             CGWarpMouseCursorPosition(park!.point)
         }
         ControlGate.shared.controlling = peer
+        InputLog.shared.log("edge \(edge.rawValue): crossed to \(peerName(peer)) at \(String(format: "%.2f", rel))")
         // The cursor stays visible (frozen at the edge) until the target confirms its own cursor is up, so there is
         // never a moment with no cursor anywhere. It is hidden in remoteAck.
         PeerBus.shared.send(to: peer, ["t": "ctl_enter", "edge": edge.opposite.rawValue, "rel": Msg.round(rel, 10000)])
