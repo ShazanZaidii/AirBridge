@@ -63,6 +63,7 @@ namespace AirBridge
             IpcManager.StartServer(_ipcCts.Token);
             Peers = new PeerService();
             try { Phone.PhoneNotifHub.Start(Peers); } catch (Exception ex) { Log.Error("Phone notifications failed to start", ex); }
+            try { Phone.PcNotifSource.Start(Peers); } catch (Exception ex) { Log.Error("This PC's notifications failed to start", ex); }
             ApplyControlStatus(); // in case the input half reported a status before the network half existed
 
             _hiddenClipboardWindow = new Window
