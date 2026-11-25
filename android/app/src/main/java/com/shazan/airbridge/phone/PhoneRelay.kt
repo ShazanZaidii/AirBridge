@@ -57,6 +57,8 @@ object PhoneRelay {
     /** Forwarded with the contents hidden while locked; the full version goes out quietly at unlock. */
     private val hiddenWhileLocked = HashSet<String>()
     private val gate = FloodGate<NotifWire.PhoneNotif>()
+    /** Status entries (download progress, music, timers) can change every second: a slower lane of their own. */
+    private val statusGate = FloodGate<NotifWire.PhoneNotif>(perApp = 2, appRefillMs = 5_000, global = 10, globalRefillMs = 1_000)
     private val sentIcons = HashMap<String, MutableSet<String>>()
     private val subs = HashMap<String, NotifWire.Command.Subscribe>()
     private val iconCache = object : LinkedHashMap<String, String>(32, 0.75f, true) {
@@ -65,6 +67,9 @@ object PhoneRelay {
     private val labelCache = HashMap<String, String>()
     private var unlockReceiver: BroadcastReceiver? = null
     private val flush = Runnable { flushParked() }
+    private val orderUpdate = Runnable { sendOrder() }
+    /** The order last sent to the computers (so an unchanged ranking sends nothing). */
+    private var lastOrder: Map<String, Any?>? = null
     /** Forwarding is on and the listener is connected (what [onSettingsChanged] compares against). */
     private var forwarding = false
 
@@ -116,7 +121,7 @@ object PhoneRelay {
         if (!PhoneRelaySettings.notifsEnabled) return@post
         if (muted) {
             active.keys().filter { active.get(it)?.pkg == pkg }.forEach { k ->
-                active.remove(k); gate.forget(k); sendToSinks(NotifWire.remove(k))
+                active.remove(k); gate.forget(k); statusGate.forget(k); sendToSinks(NotifWire.remove(k))
             }
         } else {
             PhoneNotificationListener.instance?.snapshot()?.filter { it.first.packageName == pkg }?.forEach { (sbn, imp) ->
@@ -214,7 +219,37 @@ object PhoneRelay {
 
     // ---- notifications in ----
 
-    fun onPosted(sbn: StatusBarNotification, importance: Int) = worker.post { handlePosted(sbn, importance, quiet = false) }
+    fun onPosted(sbn: StatusBarNotification, importance: Int) = worker.post { handlePosted(sbn, importance, quiet = false); scheduleOrder() }
+
+    fun onRankingChanged() = worker.post { scheduleOrder() }
+
+    // ---- shade order (§13.1 notif_order) ----
+
+    private fun scheduleOrder() {
+        worker.removeCallbacks(orderUpdate)
+        worker.postDelayed(orderUpdate, 250) // one message for a burst of posts and ranking updates
+    }
+
+    /** The forwarded notifications in the phone's shade order, and which of them sit under its Silent header. */
+    private fun orderMsg(): Map<String, Any?> {
+        val keys = ArrayList<String>()
+        val silent = ArrayList<String>()
+        PhoneNotificationListener.instance?.shadeOrder()?.forEach { (sbnKey, importance) ->
+            val k = NotifActions.shortKey(sbnKey)
+            if (active.get(k) == null || k in keys) return@forEach
+            keys += k
+            if (importance in 1 until NotifFilter.IMPORTANCE_DEFAULT) silent += k
+        }
+        return NotifWire.order(keys, silent)
+    }
+
+    private fun sendOrder() {
+        if (!forwarding) return
+        val m = orderMsg()
+        if (m == lastOrder) return
+        lastOrder = m
+        sendToSinks(m)
+    }
 
     fun onRemoved(sbn: StatusBarNotification) = worker.post {
         val n = sbn.notification
@@ -222,8 +257,8 @@ object PhoneRelay {
         val k = NotifActions.shortKey(sbn.key)
         heldWhileLocked.remove(sbn.key)
         hiddenWhileLocked.remove(sbn.key)
-        gate.forget(k)
-        if (active.remove(k) != null) sendToSinks(NotifWire.remove(k))
+        gate.forget(k); statusGate.forget(k)
+        if (active.remove(k) != null) { sendToSinks(NotifWire.remove(k)); scheduleOrder() }
     }
 
     private fun isCallNotification(n: Notification): Boolean {
@@ -277,9 +312,9 @@ object PhoneRelay {
                 // Held until unlock: the computer keeps the version it already has.
                 if (d.later) heldWhileLocked.add(sbn.key)
                 // It was forwarded before and isn't forwardable any more (became ongoing, app muted…).
-                else if (active.remove(k) != null) { gate.forget(k); sendToSinks(NotifWire.remove(k)) }
+                else if (active.remove(k) != null) { gate.forget(k); statusGate.forget(k); sendToSinks(NotifWire.remove(k)) }
             }
-            NotifFilter.Decision.ForwardHidden -> {
+            is NotifFilter.Decision.ForwardHidden -> {
                 // Like the phone's own lock screen: the app, that something arrived, nothing more. It still pops up on the
                 // computer (holding it until unlock made notifications look dropped while the phone lay locked on the desk).
                 heldWhileLocked.remove(sbn.key)
@@ -287,30 +322,39 @@ object PhoneRelay {
                 PhoneRelaySettings.markSeen(pkg)
                 val previous = active.get(k)
                 val onlyAlertOnce = n.flags and Notification.FLAG_ONLY_ALERT_ONCE != 0
-                val alert = !quiet && !(previous != null && onlyAlertOnce)
+                val alert = d.kind.isEmpty() && !quiet && !(previous != null && onlyAlertOnce)
                 val pn = build(k, pkg, n, title, text, extras, style, alert).copy(
                     title = "", text = ctx.getString(com.shazan.airbridge.R.string.notif_contents_hidden), sub = "", conv = null, msgs = emptyList(),
-                    canReply = false, replyLabel = null, actions = emptyList(),
+                    canReply = false, replyLabel = null, actions = emptyList(), kind = d.kind,
                 )
                 if (previous != null && previous.sent.copy(alert = pn.alert) == pn) return
                 active.put(k, Entry(sbn.key, pkg, n, pn))
-                if (gate.offer(pkg, k, pn, System.currentTimeMillis())) deliver(pn) else scheduleFlush()
+                offer(pkg, k, pn)
             }
-            NotifFilter.Decision.Forward -> {
+            is NotifFilter.Decision.Forward -> {
                 heldWhileLocked.remove(sbn.key)
                 hiddenWhileLocked.remove(sbn.key)
                 PhoneRelaySettings.markSeen(pkg)
                 val previous = active.get(k)
                 val onlyAlertOnce = n.flags and Notification.FLAG_ONLY_ALERT_ONCE != 0
-                val alert = !quiet && !(previous != null && onlyAlertOnce)
-                val built = build(k, pkg, n, title, text, extras, style, alert)
+                // Status entries (VPN, music, silent ones) are listed on the computer but never pop up there.
+                val alert = d.kind.isEmpty() && !quiet && !(previous != null && onlyAlertOnce)
+                val built = build(k, pkg, n, title, text, extras, style, alert).copy(kind = d.kind)
                 // A conversation whose newest message is the user's own (a reply just sent): update quietly.
                 val pn = if (built.msgs.lastOrNull()?.from == null && built.msgs.isNotEmpty()) built.copy(alert = false) else built
                 if (previous != null && previous.sent.copy(alert = pn.alert) == pn) return // same content again
                 active.put(k, Entry(sbn.key, pkg, n, pn))
-                if (gate.offer(pkg, k, pn, System.currentTimeMillis())) deliver(pn) else scheduleFlush()
+                offer(pkg, k, pn)
             }
         }
+    }
+
+    private fun offer(pkg: String, k: String, pn: NotifWire.PhoneNotif) {
+        val now = System.currentTimeMillis()
+        // A notification that moved between lanes (became ongoing, or stopped being) leaves nothing behind in the other.
+        if (pn.kind.isEmpty()) statusGate.forget(k) else gate.forget(k)
+        val lane = if (pn.kind.isEmpty()) gate else statusGate
+        if (lane.offer(pkg, k, pn, now)) deliver(pn) else scheduleFlush()
     }
 
     private fun build(
@@ -385,11 +429,13 @@ object PhoneRelay {
 
     private fun scheduleFlush() {
         worker.removeCallbacks(flush)
-        gate.nextDueInMs(System.currentTimeMillis())?.let { worker.postDelayed(flush, it) }
+        val now = System.currentTimeMillis()
+        listOfNotNull(gate.nextDueInMs(now), statusGate.nextDueInMs(now)).minOrNull()?.let { worker.postDelayed(flush, it) }
     }
 
     private fun flushParked() {
-        gate.due(System.currentTimeMillis()).forEach { pn -> if (active.get(pn.key) != null) deliver(pn) }
+        val now = System.currentTimeMillis()
+        (gate.due(now) + statusGate.due(now)).forEach { pn -> if (active.get(pn.key) != null) deliver(pn) }
         scheduleFlush()
     }
 
@@ -404,19 +450,24 @@ object PhoneRelay {
             if (e.pkg !in have) { iconFor(e.pkg)?.let { send(peerId, NotifWire.icon(e.pkg, it)) }; have += e.pkg }
             send(peerId, NotifWire.post(e.sent.copy(alert = false)))
         }
+        send(peerId, orderMsg())
     }
 
     /** Rebuild from the phone's current notifications (forwarding turned on, listener reconnected). */
     private fun resyncAll() {
-        active.clear(); gate.clear(); heldWhileLocked.clear(); hiddenWhileLocked.clear()
+        active.clear(); gate.clear(); statusGate.clear(); heldWhileLocked.clear(); hiddenWhileLocked.clear()
         sendToSinks(NotifWire.reset())
         PhoneNotificationListener.instance?.snapshot()?.forEach { (sbn, imp) -> handlePosted(sbn, imp, quiet = true) }
+        lastOrder = null
+        scheduleOrder()
     }
 
     private fun clearAll(sendRemovals: Boolean) {
         val had = active.size > 0
-        active.clear(); gate.clear(); heldWhileLocked.clear(); hiddenWhileLocked.clear()
+        active.clear(); gate.clear(); statusGate.clear(); heldWhileLocked.clear(); hiddenWhileLocked.clear()
         worker.removeCallbacks(flush)
+        worker.removeCallbacks(orderUpdate)
+        lastOrder = null
         if (sendRemovals && had) sendToSinks(NotifWire.reset())
     }
 
@@ -439,7 +490,7 @@ object PhoneRelay {
             is NotifWire.Command.Ring -> if (NotifWire.CAP_CALL_RING in peer.caps) CallWatcher.onRing(cmd.id, cmd.silencePhone)
             is NotifWire.Command.Dismiss -> withEntry(peerId, peer, cmd.key, "dismiss") { e ->
                 val ok = PhoneNotificationListener.instance?.dismiss(e.sbnKey) == true
-                if (ok) { active.remove(cmd.key); gate.forget(cmd.key); sendToSinksExcept(peerId, NotifWire.remove(cmd.key)) }
+                if (ok) { active.remove(cmd.key); gate.forget(cmd.key); statusGate.forget(cmd.key); sendToSinksExcept(peerId, NotifWire.remove(cmd.key)) }
                 ok to (if (ok) null else "failed")
             }
             is NotifWire.Command.Reply -> withEntry(peerId, peer, cmd.key, "reply") { e -> reply(e, cmd.text) }

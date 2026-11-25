@@ -41,6 +41,11 @@ class PhoneNotificationListener : NotificationListenerService() {
         PhoneRelay.onRemoved(sbn)
     }
 
+    /** The shade's order or sections changed (a new notification, a channel's importance, a conversation promoted). */
+    override fun onNotificationRankingUpdate(rankingMap: RankingMap?) {
+        PhoneRelay.onRankingChanged()
+    }
+
     override fun onDestroy() {
         if (instance === this) instance = null
         super.onDestroy()
@@ -52,6 +57,15 @@ class PhoneNotificationListener : NotificationListenerService() {
         (activeNotifications ?: emptyArray()).map { it to importanceOf(it, ranking) }
     } catch (t: Throwable) {
         Log.w(TAG, "activeNotifications", t); emptyList()
+    }
+
+    /** The shade's order now, top first: (Android key, importance). Empty if not connected. */
+    fun shadeOrder(): List<Pair<String, Int>> = try {
+        val ranking = currentRanking ?: return emptyList()
+        val r = Ranking()
+        ranking.orderedKeys.map { k -> k to (if (ranking.getRanking(k, r)) r.importance else NotifFilter.IMPORTANCE_DEFAULT) }
+    } catch (t: Throwable) {
+        Log.w(TAG, "ranking", t); emptyList()
     }
 
     fun dismiss(sbnKey: String): Boolean = try { cancelNotification(sbnKey); true } catch (t: Throwable) { Log.w(TAG, "cancel", t); false }

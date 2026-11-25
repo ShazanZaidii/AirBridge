@@ -47,6 +47,8 @@ object NotifWire {
         val actions: List<Action> = emptyList(),
         /** False for quiet updates and the resync after connecting: list only, no banner or sound. */
         val alert: Boolean = true,
+        /** "" = an ordinary notification; "ongoing" / "silent" ([NotifFilter.KIND_ONGOING]…) = listed, never alerts. */
+        val kind: String = "",
     )
 
     enum class CallState(val wire: String) { RINGING("ringing"), ACTIVE("active"), HELD("held"), ENDED("ended") }
@@ -113,6 +115,7 @@ object NotifWire {
         "reply" to n.canReply,
         "alert" to n.alert,
     ).apply {
+        if (n.kind.isNotEmpty()) put("kind", n.kind)
         if (n.sub.isNotBlank()) put("sub", clip(n.sub, MAX_TITLE))
         if (!n.conv.isNullOrBlank()) put("conv", clip(n.conv, MAX_TITLE))
         if (n.canReply && !n.replyLabel.isNullOrBlank()) put("reply_label", clip(n.replyLabel, MAX_LABEL))
@@ -130,6 +133,10 @@ object NotifWire {
 
     /** Everything this phone showed before is stale (sent before a resync and when forwarding stops). */
     fun reset(): Map<String, Any?> = linkedMapOf("t" to "notif_reset")
+
+    /** The phone's shade order (§13.1): every forwarded key, top first; [silent] = those under the shade's Silent header. */
+    fun order(keys: List<String>, silent: List<String>): Map<String, Any?> =
+        linkedMapOf("t" to "notif_order", "keys" to keys, "silent" to silent)
 
     fun icon(pkg: String, pngBase64: String): Map<String, Any?> =
         linkedMapOf("t" to "notif_icon", "pkg" to pkg, "png" to pngBase64)
