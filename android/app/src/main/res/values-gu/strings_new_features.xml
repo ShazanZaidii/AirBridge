@@ -22,4 +22,15 @@
     <string name="pm_sink_denied">%1$s એ સ્ક્રીન શેરની મંજૂરી ન આપી</string>
     <string name="pm_sink_stopped">%1$s એ સ્ક્રીન શેર કરવાનું બંધ કર્યું</string>
     <string name="lk_fallback">%1$s. હાલના કનેક્શનથી મોકલી રહ્યા છીએ.</string>
+    <string name="pm_ask_title">આ ફોનની સ્ક્રીન %1$s પર બતાવવી?</string>
+    <string name="pm_ask_allow">મંજૂરી આપો</string>
+    <string name="mt_section">સ્ક્રીન મિરરિંગ</string>
+    <string name="mt_title">પૂછ્યા વિના મિરર કરો</string>
+    <string name="mt_sub_on">તમારા કમ્પ્યુટર Android ના પ્રશ્ન વિના તરત જ આ ફોનની સ્ક્રીન બતાવે છે. ચાલુ હોય ત્યાં સુધી સૂચના દેખાય છે.</string>
+    <string name="mt_sub_off">દરેક સ્ક્રીન શેર પહેલાં Android પૂછે છે. તમારા કમ્પ્યુટર માટે તે છોડવા આ ચાલુ કરો.</string>
+    <string name="mt_needs_computer">ચાલુ કરવા એક વાર તમારું Mac જોઈએ: તેને કનેક્ટ કરો, પછી ફરી પ્રયાસ કરો. અથવા adb વાળા કોઈપણ કમ્પ્યુટરથી આ ચલાવો:</string>
+    <string name="mt_asking">%1$s ને પૂછી રહ્યા છીએ…</string>
+    <string name="mt_setup">%1$s પર Pro મિરરિંગ સેટઅપ પૂર્ણ કરો. તે પછી તરત મિરરિંગ વિશ્વસનીય બનશે.</string>
+    <string name="mt_failed">ચાલુ કરી શકાયું નહીં.</string>
+    <string name="mt_retry">ફરી પ્રયાસ કરો</string>
 </resources>

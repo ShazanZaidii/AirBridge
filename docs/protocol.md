@@ -817,6 +817,27 @@ phone→computer {"t":"adb_wifi_state","dev":true,"wifi":false,"sdk":35,"opened"
 
 ---
 
+### 8.10 Mirror without asking
+
+Android asks before every screen share (§8.7) unless the app holds the `PROJECT_MEDIA` app-op, which only a shell
+(adb) can grant. A computer that can run adb on the phone (one set up for Pro mirroring, §8.9) advertises
+`mirror_trust` and grants it when the phone asks:
+
+```json
+{"t":"mirror_trust","op":"grant","pkg":"com.shazan.airbridge"}      // phone → computer ("revoke" undoes it)
+{"t":"mirror_trust_result","op":"grant","ok":true}                  // computer → phone
+{"t":"mirror_trust_result","op":"grant","ok":false,"why":"setup","msg":"Finish setting up Pro mirroring…"}
+```
+
+- `why`: `setup` = not set up for Pro mirroring yet (the computer opens its setup and grants by itself once paired),
+  `unreachable` = adb couldn't reach the phone (Wireless debugging off, other network), `failed` = the command ran
+  but the app-op isn't allowed. `msg` is a sentence the phone may show.
+- The computer runs `appops set <pkg> PROJECT_MEDIA allow` (`default` for revoke) and only for AirBridge's own
+  package (`com.shazan.airbridge` or a name under it); it reports success only when `appops get` reads `allow`.
+- The app-op persists until the app is uninstalled. With it granted, the phone starts a share without any prompt while
+  its "Mirror without asking" switch is on, and asks with its own Allow / Not now dialog while it is off. The ongoing
+  "Showing your screen" notification is shown either way.
+
 ## 9. Limits and encoding
 
 - Text frame ≤ 1 MiB; binary frame ≤ 1 MiB + 17 header bytes (+ 26 bytes of envelope overhead: 9 header,
@@ -992,19 +1013,30 @@ Phone permission (optional: Contacts for the caller's name and photo, Nearby dev
 - `key` is opaque, at most 64 characters, stable while the notification exists (Android: a hash of its key). A
   `notif_post` with a known `key` replaces that notification.
 - `notif_icon` comes once per session per `pkg`, before that app's first `notif_post`. Sinks may cache it by `pkg`.
+- `{"t":"notif_order","keys":["9f2c…","…"],"silent":["…"]}`: the phone's shade order, top first, of every forwarded
+  `key`; `silent` = the ones under the shade's Silent header (low/min importance). Sent after the resync and whenever
+  the order or sections change (posts, removals, ranking updates; coalesced over ~250 ms). A sink lists notifications
+  in this order and in these sections; keys it doesn't know are ignored, and one posted after the last order goes on
+  top until the next. Sources that never send it: newest first, status entries (`kind`) as Silent.
 - `notif_post` fields: `app` display name; `title` ≤ 200 chars, `text` ≤ 2000 (longer values end with `…`); `sub`
   optional sub-text; `ts` when it was posted; `cat` one of `msg`, `email`, `call`, `alarm`, `event`, `social`,
   `other`; `conv` group conversation title (optional); `msgs` the last ≤ 6 messages of a conversation, oldest first,
   each with `from` (sender name) or `me:true` (the phone's user); `reply` = the notification takes a text reply
   (`reply_label` = its button title); `acts` ≤ 3 other buttons, `i` = the index to send back; `alert` = show a banner
-  and play a sound (false for quiet updates and resyncs).
+  and play a sound (false for quiet updates and resyncs); `kind` (optional) marks a status entry: `ongoing` (VPN
+  active, USB, media playing, a download, a foreground service: the phone can't clear it) or `silent` (filed under
+  Silent on the phone). A status entry is listed like the phone's shade lists it but never shows a banner, plays a
+  sound or counts as unread, whatever `alert` says; sinks treat an unknown `kind` as `silent`. Absent = an
+  ordinary notification.
 - `notif_result` answers every command (§13.2) with its outcome, to the sink that sent it. `gone` = no such
   notification any more, `no_reply` / `no_action` = it has no reply / no such button, `off` = forwarding is off.
-- What a source forwards (Android): no group summaries, no ongoing or foreground-service notifications, no media
-  controls, no silent (low/min importance) notifications except conversations, nothing from AirBridge itself or
-  the system UI, nothing from apps the user muted. While the phone is locked and the user chose to hide sensitive
-  content on the lock screen, nothing new is forwarded; it follows (quietly) when the phone is unlocked. Floods are
-  rate limited per app (newest version per `key` wins).
+- What a source forwards (Android): the whole shade, so the sink's list mirrors it. Ongoing, foreground-service,
+  media and system notifications go as `kind:"ongoing"`; low/min importance ones (except conversations), status
+  categories and the system UI's as `kind:"silent"`. Left out: group summaries (their children carry the content),
+  empty ones, AirBridge's own, and apps the user muted. While the phone is locked and the user chose to hide sensitive
+  content on the lock screen, they go with the contents hidden; the full version follows (quietly) at unlock. Floods
+  are rate limited per app (newest version per `key` wins), status entries more tightly (they can change every
+  second: a download's progress, a timer).
 
 ### 13.2 Sink → source
 

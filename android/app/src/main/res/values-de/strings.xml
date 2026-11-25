@@ -224,7 +224,8 @@
     <string name="reconnect_auto_sub">Mit gekoppelten Geräten verbinden, sobald sie erreichbar sind</string>
     <string name="clipboard">Zwischenablage</string>
     <string name="floating_bubble">Schwebende Bubble</string>
-    <string name="bubble_sub">Tippen, um die Zwischenablage zu senden. Ausgeblendet, während du das Trackpad nutzt oder ein anderes Gerät dieses Smartphone steuert.</string>
+    <string name="bubble_sub">Tippen, um die Zwischenablage zu senden. Ausgeblendet, solange kein Gerät verbunden ist, während du das Trackpad nutzt oder ein anderes Gerät dieses Smartphone steuert.</string>
+    <string name="bubble_hidden_offline">Schwebende Blase ausgeblendet: Kein Gerät ist verbunden. Sie kommt von selbst zurück, sobald sich eines verbindet.</string>
     <string name="bubble_needs_overlay">Benötigt „Über anderen Apps einblenden“. Ist der Schalter ausgegraut, öffne zuerst App-Info › ⋮ › Eingeschränkte Einstellungen zulassen.</string>
     <string name="remote_control">Fernsteuerung</string>
     <string name="invert_x">Pfeiltasten links/rechts umkehren</string>

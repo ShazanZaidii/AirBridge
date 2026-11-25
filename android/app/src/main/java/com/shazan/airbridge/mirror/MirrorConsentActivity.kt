@@ -34,8 +34,26 @@ class MirrorConsentActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         if (savedInstanceState != null) return // recreated while the system dialog is up: the result comes here
-        if (PhoneMirror.pendingComputer() == null) { finish(); return }
+        val computer = PhoneMirror.pendingComputer()
+        if (computer == null) { finish(); return }
+        PhoneMirror.consentScreenOpened()
         try { Notifs.cancel(PhoneMirror.NOTIF_REQUEST) } catch (_: Throwable) {}
+        // Android no longer asks (the app-op from "Mirror without asking" is granted) but the user switched that off:
+        // ask here instead, so a share never starts unseen.
+        if (MirrorTrust.granted(this) && !MirrorTrust.wanted(this)) {
+            android.app.AlertDialog.Builder(this)
+                .setTitle(getString(com.shazan.airbridge.R.string.pm_ask_title, computer))
+                .setMessage(com.shazan.airbridge.R.string.pm_ongoing_text)
+                .setPositiveButton(com.shazan.airbridge.R.string.pm_ask_allow) { _, _ -> launchCapture() }
+                .setNegativeButton(com.shazan.airbridge.R.string.pm_request_decline) { _, _ -> PhoneMirror.onConsentDenied(); finish() }
+                .setOnCancelListener { PhoneMirror.onConsentDenied(); finish() }
+                .show()
+            return
+        }
+        launchCapture()
+    }
+
+    private fun launchCapture() {
         val mpm = getSystemService(MediaProjectionManager::class.java)
         if (mpm == null) { PhoneMirror.onConsentDenied(); finish(); return }
         // Whole screen only: mirroring a single app makes no sense for remote control.

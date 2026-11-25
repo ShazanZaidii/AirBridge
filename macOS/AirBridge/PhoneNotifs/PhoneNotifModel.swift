@@ -40,8 +40,15 @@ nonisolated struct PhoneNotif: Identifiable, Equatable, Sendable {
     var replyLabel: String?
     var actions: [PhoneAction]
     var alert: Bool
+    /// §13.2 `kind`: nil = an ordinary notification; "ongoing" (VPN, USB, music: can't be cleared) or "silent" = a status
+    /// entry, listed like the phone's shade lists it but never a banner or a sound.
+    var kind: String? = nil
 
     var id: String { PhoneNotif.makeId(phoneId, key) }
+    /// Listed only: never a banner, a sound or a count.
+    var isStatus: Bool { kind != nil }
+    /// The phone won't clear it (an ongoing notification stays until its app ends it).
+    var canClear: Bool { kind != "ongoing" }
     static func makeId(_ phone: String, _ key: String) -> String { phone + "|" + key }
 
     /// What a banner or list row shows as the main line.
@@ -128,6 +135,8 @@ nonisolated enum PhoneNotifWire {
             return PhoneAction(index: Int(i), label: clip(label, 40))
         }
         let pkg = clip(s(m, "pkg"), 200)
+        // Unknown kinds from a newer phone are still status entries: listing quietly is the safe reading.
+        let kind: String? = s(m, "kind").flatMap { $0.isEmpty ? nil : ($0 == "ongoing" || $0 == "silent" ? $0 : "silent") }
         return PhoneNotif(
             phoneId: phone, key: key, pkg: pkg,
             app: clip(s(m, "app"), 80).isEmpty ? pkg : clip(s(m, "app"), 80),
@@ -136,7 +145,7 @@ nonisolated enum PhoneNotifWire {
             conv: s(m, "conv").map { clip($0, 200) }.flatMap { $0.isEmpty ? nil : $0 },
             msgs: msgs, canReply: b(m, "reply") == true,
             replyLabel: s(m, "reply_label").map { clip($0, 40) },
-            actions: acts, alert: b(m, "alert") ?? true)
+            actions: acts, alert: kind == nil && (b(m, "alert") ?? true), kind: kind)
     }
 
     static func parseCall(_ m: [String: Any], phone: String) -> PhoneCall? {
@@ -204,9 +213,17 @@ nonisolated struct PhoneNotifStore {
     /// Per phone at most this many; the oldest go first.
     var maxPerPhone = 200
     private(set) var items: [String: PhoneNotif] = [:]
+    /// §13.1 `notif_order`: each notification's place in its phone's shade (0 = top), by id.
+    private(set) var rank: [String: Int] = [:]
+    /// Ids the phone shows under its Silent header.
+    private(set) var silentIds: Set<String> = []
+    /// Phones that sent an order (older ones don't: their list falls back to newest first, status entries as Silent).
+    private(set) var orderedPhones: Set<String> = []
 
     enum Change: Equatable {
         case none
+        /// The phone's shade order or sections changed.
+        case reordered
         /// `isNew` = first time this key is seen (vs. an update of one already listed).
         case posted(PhoneNotif, isNew: Bool)
         case removed([String])
@@ -224,6 +241,15 @@ nonisolated struct PhoneNotifStore {
         case "notif_remove":
             guard let key = PhoneNotifWire.validKey(m["key"] as? String) else { return .none }
             return items.removeValue(forKey: PhoneNotif.makeId(phone, key)) != nil ? .removed([PhoneNotif.makeId(phone, key)]) : .none
+        case "notif_order":
+            let keys = ((m["keys"] as? [Any]) ?? []).prefix(1000).compactMap { PhoneNotifWire.validKey($0 as? String) }
+            let silent = Set(((m["silent"] as? [Any]) ?? []).compactMap { PhoneNotifWire.validKey($0 as? String) })
+            rank = rank.filter { !$0.key.hasPrefix(phone + "|") }
+            silentIds = silentIds.filter { !$0.hasPrefix(phone + "|") }
+            for (i, k) in keys.enumerated() where rank[PhoneNotif.makeId(phone, k)] == nil { rank[PhoneNotif.makeId(phone, k)] = i }
+            for k in silent { silentIds.insert(PhoneNotif.makeId(phone, k)) }
+            orderedPhones.insert(phone)
+            return .reordered
         case "notif_reset":
             return removeAll(phone: phone)
         case "notif_state":
@@ -235,6 +261,9 @@ nonisolated struct PhoneNotifStore {
     }
 
     mutating func removeAll(phone: String) -> Change {
+        rank = rank.filter { !$0.key.hasPrefix(phone + "|") }
+        silentIds = silentIds.filter { !$0.hasPrefix(phone + "|") }
+        orderedPhones.remove(phone)
         let ids = items.values.filter { $0.phoneId == phone }.map(\.id)
         ids.forEach { items.removeValue(forKey: $0) }
         return ids.isEmpty ? .none : .removed(ids)
@@ -260,17 +289,37 @@ nonisolated struct PhoneNotifStore {
         var latest: Date { items.first?.ts ?? .distantPast }
     }
 
-    /// Grouped by phone and app, newest app first; inside a group newest first.
-    func groups() -> [Group] {
-        var byApp: [String: [PhoneNotif]] = [:]
-        for n in items.values { byApp[n.phoneId + "|" + n.pkg, default: []].append(n) }
-        return byApp.values.map { list in
-            let sorted = list.sorted { $0.ts > $1.ts }
-            return Group(phoneId: sorted[0].phoneId, pkg: sorted[0].pkg, app: sorted[0].app, items: sorted)
-        }.sorted { $0.latest > $1.latest }
+    /// Under the phone's Silent header: where the phone puts it, or (a phone that sends no order) any status entry.
+    func isSilent(_ n: PhoneNotif) -> Bool {
+        orderedPhones.contains(n.phoneId) ? silentIds.contains(n.id) : n.isStatus
     }
 
-    var count: Int { items.count }
+    /// Before [b] in the list: the phone's shade order; ones it hasn't placed yet (just posted) on top, newest first.
+    private func precedes(_ a: PhoneNotif, _ b: PhoneNotif) -> Bool {
+        switch (rank[a.id], rank[b.id]) {
+        case let (x?, y?): return x != y ? x < y : a.ts > b.ts
+        case (nil, _?): return true
+        case (_?, nil): return false
+        case (nil, nil): return a.ts > b.ts
+        }
+    }
+
+    /// Grouped by phone and app (as the phone bundles them), in the phone's shade order: a group sits where its first
+    /// notification sits, and inside a group they keep the phone's order. `status` picks the main list (false) or the
+    /// phone's Silent section (true).
+    func groups(status: Bool = false) -> [Group] {
+        var byApp: [String: [PhoneNotif]] = [:]
+        for n in items.values where isSilent(n) == status { byApp[n.phoneId + "|" + n.pkg, default: []].append(n) }
+        return byApp.values.map { list in
+            let sorted = list.sorted(by: precedes)
+            return Group(phoneId: sorted[0].phoneId, pkg: sorted[0].pkg, app: sorted[0].app, items: sorted)
+        }.sorted { a, b in
+            a.phoneId != b.phoneId ? a.phoneId < b.phoneId : precedes(a.items[0], b.items[0])
+        }
+    }
+
+    /// Ordinary notifications only (status entries are not news).
+    var count: Int { items.values.filter { !$0.isStatus }.count }
 }
 
 /// Which calls to show: one per phone; ended calls disappear.

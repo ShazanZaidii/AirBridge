@@ -141,5 +141,46 @@ check(!PhoneNotifBlock.isBlocked(notif("com.whatsapp", "Aarav", "Checking for ne
 let enc = try! JSONEncoder().encode([checking]); let dec = try! JSONDecoder().decode([PhoneNotifBlock].self, from: enc)
 check(dec == [checking] && dec[0].id == checking.id, "blocks survive saving")
 
+// §13.2 kind: the phone's status entries (VPN, music, silent) are listed but never alert.
+do {
+    var st = PhoneNotifStore()
+    let vpn: [String: Any] = ["t": "notif_post", "key": "v1", "pkg": "com.android.vpndialogs", "app": "VPN", "title": "VPN is active",
+                              "text": "", "ts": 1, "alert": true, "kind": "ongoing"]
+    if case .posted(let n, _) = st.apply(vpn, from: "P") {
+        check(n.isStatus && !n.alert, "an ongoing entry never alerts, even if the phone says alert")
+        check(!n.canClear, "an ongoing entry can't be cleared")
+    } else { check(false, "ongoing entry is listed") }
+    let silent: [String: Any] = ["t": "notif_post", "key": "s1", "pkg": "com.google.android.gms", "app": "Play", "title": "Updates ready", "ts": 2, "kind": "silent"]
+    if case .posted(let n, _) = st.apply(silent, from: "P") { check(n.isStatus && n.canClear && !n.alert, "a silent entry is listed, clearable, quiet") }
+    let future: [String: Any] = ["t": "notif_post", "key": "f1", "pkg": "x", "app": "X", "title": "Something", "ts": 3, "kind": "glance"]
+    if case .posted(let n, _) = st.apply(future, from: "P") { check(n.isStatus && !n.alert, "an unknown kind from a newer phone stays quiet") }
+    let msg: [String: Any] = ["t": "notif_post", "key": "m1", "pkg": "com.whatsapp", "app": "WhatsApp", "title": "Asha", "text": "Hi", "ts": 4]
+    if case .posted(let n, _) = st.apply(msg, from: "P") { check(!n.isStatus && n.alert, "an ordinary message still alerts") }
+    check(st.count == 1, "the count is ordinary notifications only")
+    check(st.groups().count == 1 && st.groups(status: true).count == 3, "status entries are grouped in their own section")
+}
+
+// §13.1 notif_order: the list follows the phone's shade order and its Silent header.
+do {
+    var st = PhoneNotifStore()
+    func post(_ k: String, _ pkg: String, _ ts: Int, kind: String? = nil) {
+        var m: [String: Any] = ["t": "notif_post", "key": k, "pkg": pkg, "app": pkg, "title": k, "ts": ts]
+        if let kind { m["kind"] = kind }
+        _ = st.apply(m, from: "P")
+    }
+    post("a", "wa", 100); post("b", "gm", 300); post("c", "wa", 200); post("usb", "android", 50, kind: "ongoing"); post("vpn", "vpn", 60, kind: "ongoing")
+    // Before an order arrives: newest first, status entries under Silent.
+    check(st.groups().map(\.pkg) == ["gm", "wa"], "no order yet: newest app first")
+    _ = st.apply(["t": "notif_order", "keys": ["usb", "a", "c", "b", "vpn"], "silent": ["vpn"]], from: "P")
+    let main = st.groups()
+    check(main.map(\.pkg) == ["android", "wa", "gm"], "groups follow the phone's order (an alerting ongoing one stays where the phone has it)")
+    check(main[1].items.map(\.key) == ["a", "c"], "inside a group the phone's order wins over time")
+    check(st.groups(status: true).map(\.pkg) == ["vpn"], "only what the phone files under Silent is in Silent")
+    post("new", "gm", 400)
+    check(st.groups()[0].pkg == "gm" && st.groups()[0].items[0].key == "new", "a just-posted one goes on top until the next order")
+    _ = st.apply(["t": "notif_reset"], from: "P")
+    check(st.groups().isEmpty && st.groups(status: true).isEmpty, "a reset clears list and order")
+}
+
 print("notifcheck: \(passed) passed, \(failed) failed")
 exit(failed == 0 ? 0 : 1)
