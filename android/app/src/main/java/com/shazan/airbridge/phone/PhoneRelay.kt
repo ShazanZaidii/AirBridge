@@ -488,15 +488,29 @@ object PhoneRelay {
             }
             is NotifWire.Command.CallAction -> if (NotifWire.CAP_CALL_SINK in peer.caps) CallWatcher.act(peerId, cmd.id, cmd.op, cmd.dev)
             is NotifWire.Command.Ring -> if (NotifWire.CAP_CALL_RING in peer.caps) CallWatcher.onRing(cmd.id, cmd.silencePhone)
-            is NotifWire.Command.Dismiss -> withEntry(peerId, peer, cmd.key, "dismiss") { e ->
-                val ok = PhoneNotificationListener.instance?.dismiss(e.sbnKey) == true
-                if (ok) { active.remove(cmd.key); gate.forget(cmd.key); statusGate.forget(cmd.key); sendToSinksExcept(peerId, NotifWire.remove(cmd.key)) }
-                ok to (if (ok) null else "failed")
-            }
+            is NotifWire.Command.Dismiss -> dismiss(peerId, peer, cmd.key)
             is NotifWire.Command.Reply -> withEntry(peerId, peer, cmd.key, "reply") { e -> reply(e, cmd.text) }
             is NotifWire.Command.Act -> withEntry(peerId, peer, cmd.key, "action") { e -> action(e, cmd.index) }
             is NotifWire.Command.Open -> withEntry(peerId, peer, cmd.key, "open") { e -> open(e) }
         }
+    }
+
+    /**
+     * Clears it on the phone, then answers with what really happened: Android quietly ignores a clear of a notification
+     * it won't let anyone clear (USB debugging, some running services), and that one must come back on the computer.
+     */
+    private fun dismiss(peerId: String, peer: PeerInfo, key: String) {
+        if (NotifWire.CAP_NOTIF_SINK !in peer.caps) return
+        if (!PhoneRelaySettings.notifsEnabled) { send(peerId, NotifWire.result(key, "dismiss", false, "off")); return }
+        val e = active.get(key) ?: run { send(peerId, NotifWire.result(key, "dismiss", false, "gone")); return }
+        val l = PhoneNotificationListener.instance ?: run { send(peerId, NotifWire.result(key, "dismiss", false, "failed")); return }
+        l.dismiss(e.sbnKey)
+        worker.postDelayed({
+            val still = PhoneNotificationListener.instance?.isShowing(e.sbnKey) == true
+            Log.i(TAG, "clear from computer: ${e.pkg} ${if (still) "kept by the phone" else "cleared"}")
+            // Cleared: onNotificationRemoved tells every computer. Kept: only the one that asked needs to know.
+            send(peerId, if (still) NotifWire.result(key, "dismiss", false, "ongoing") else NotifWire.result(key, "dismiss", true))
+        }, 400)
     }
 
     private inline fun withEntry(
