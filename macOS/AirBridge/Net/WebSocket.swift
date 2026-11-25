@@ -90,7 +90,10 @@ nonisolated final class WebSocket: @unchecked Sendable {
         var payload = Data()
         withUnsafeBytes(of: code.bigEndian) { payload.append(contentsOf: $0) }
         sendFrame(opcode: 0x8, payload: payload, completion: nil)
-        queue.asyncAfter(deadline: .now() + 2) { [weak self] in self?.transport.cancel() }
+        // Holds the transport strongly: whoever owned this socket may drop it right after closing, and the transport
+        // must still be cancelled (a dropped one never was, and that crashed 3.2).
+        nonisolated(unsafe) let t = transport
+        queue.asyncAfter(deadline: .now() + 2) { t.cancel() }
     }
 
     func cancel() { transport.cancel() }
@@ -272,8 +275,11 @@ nonisolated final class WebSocket: @unchecked Sendable {
                 // Peer-initiated: echo the status code, then close the TCP connection once it is flushed.
                 closeSent = true
                 let echo = payload.count >= 2 ? payload.prefix(2) : Data()
-                sendFrame(opcode: 0x8, payload: Data(echo)) { [weak self] _ in self?.transport.cancel() }
-                queue.asyncAfter(deadline: .now() + 2) { [weak self] in self?.transport.cancel() }
+                sendFrame(opcode: 0x8, payload: Data(echo)) { [t = transport] _ in t.cancel() }
+                // Holds the transport strongly: whoever owned this socket may drop it right after closing, and the transport
+                // must still be cancelled (a dropped one never was, and that crashed 3.2).
+                nonisolated(unsafe) let t = transport
+                queue.asyncAfter(deadline: .now() + 2) { t.cancel() }
             } else {
                 // The echo to our own close frame: the handshake is complete.
                 transport.cancel()
@@ -307,8 +313,11 @@ nonisolated final class WebSocket: @unchecked Sendable {
             closeSent = true
             var payload = Data()
             withUnsafeBytes(of: code.bigEndian) { payload.append(contentsOf: $0) }
-            sendFrame(opcode: 0x8, payload: payload) { [weak self] _ in self?.transport.cancel() }
-            queue.asyncAfter(deadline: .now() + 2) { [weak self] in self?.transport.cancel() }
+            sendFrame(opcode: 0x8, payload: payload) { [t = transport] _ in t.cancel() }
+            // Holds the transport strongly: whoever owned this socket may drop it right after closing, and the transport
+            // must still be cancelled (a dropped one never was, and that crashed 3.2).
+            nonisolated(unsafe) let t = transport
+            queue.asyncAfter(deadline: .now() + 2) { t.cancel() }
             finishedEarly()
         } else {
             finish(nil)
