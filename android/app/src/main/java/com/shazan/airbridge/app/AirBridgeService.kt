@@ -30,6 +30,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
@@ -48,6 +50,9 @@ class AirBridgeService : Service() {
         const val ACTION_CANCEL_XFER = "com.shazan.airbridge.action.CANCEL_XFER"
         const val ACTION_SEND_FILES = "com.shazan.airbridge.action.SEND_FILES"
         const val ACTION_REFRESH_BUBBLE = "com.shazan.airbridge.action.REFRESH_BUBBLE"
+        /** How long no device has to be connected before the bubble hides. */
+        private const val BUBBLE_HIDE_DELAY_MS = 3_000L
+        private const val PREF_BUBBLE_OFFLINE_EXPLAINED = "bubble_offline_explained"
         const val EXTRA_PEER = "peer"
         /** [ACTION_SEND_FILES]: every device to send the same files to (String array). */
         const val EXTRA_PEERS = "peers"
@@ -95,6 +100,18 @@ class AirBridgeService : Service() {
         bubble = FloatingBubble(this)
         BubbleController.onChange = { refreshBubble() }
         refreshBubble()
+        // Nothing to push the clipboard to while no device is connected: hide the bubble, and bring it back as soon as one
+        // connects (the user's own "Floating bubble" setting still decides). Hiding waits a few seconds so a session being
+        // replaced (reconnect, link upgrade) doesn't make it blink.
+        scope.launch {
+            ConnectionHub.status.map { st -> st.values.any { it == PeerStatus.CONNECTED } }.distinctUntilChanged()
+                .collectLatest { connected ->
+                    if (!connected) delay(BUBBLE_HIDE_DELAY_MS)
+                    val wasShown = bubble?.isShown == true
+                    BubbleController.setSuppressed(BubbleController.REASON_OFFLINE, !connected)
+                    if (!connected && wasShown) explainBubbleHiddenOnce()
+                }
+        }
         scope.launch { ClipboardSync.pending.collect { bubble?.setPending(it) } }
 
         scope.launch {
@@ -156,6 +173,15 @@ class AirBridgeService : Service() {
             }
         }
         return START_STICKY
+    }
+
+    /** The first time ever the bubble hides because nothing is connected, say why, once. Never again, and nothing when it
+     *  comes back (seeing it return is enough). */
+    private fun explainBubbleHiddenOnce() {
+        val prefs = getSharedPreferences("AirBridgePrefs", Context.MODE_PRIVATE)
+        if (prefs.getBoolean(PREF_BUBBLE_OFFLINE_EXPLAINED, false)) return
+        prefs.edit().putBoolean(PREF_BUBBLE_OFFLINE_EXPLAINED, true).apply()
+        ConnectionHub.toast(getString(R.string.bubble_hidden_offline), long = true)
     }
 
     /** Show the bubble only if the user wants it and nothing suppresses it (lease, trackpad, mirror — §5). */

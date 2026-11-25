@@ -225,7 +225,8 @@
     <string name="reconnect_auto_sub">Se connecter aux appareils associés dès qu\'ils sont joignables</string>
     <string name="clipboard">Presse-papiers</string>
     <string name="floating_bubble">Bulle flottante</string>
-    <string name="bubble_sub">Touchez-la pour envoyer votre presse-papiers. Masquée quand vous utilisez le pavé tactile ou qu\'un autre appareil contrôle ce téléphone.</string>
+    <string name="bubble_sub">Touchez-la pour envoyer votre presse-papiers. Masquée quand aucun appareil n\'est connecté, quand vous utilisez le pavé tactile ou qu\'un autre appareil contrôle ce téléphone.</string>
+    <string name="bubble_hidden_offline">Bulle flottante masquée : aucun appareil n\'est connecté. Elle revient d\'elle-même dès qu\'un appareil se connecte.</string>
     <string name="bubble_needs_overlay">Nécessite « Superposition sur d\'autres applis ». Si ce bouton est grisé, ouvrez d\'abord Infos sur l\'appli › ⋮ › Autoriser les paramètres restreints.</string>
     <string name="remote_control">Contrôle à distance</string>
     <string name="invert_x">Inverser les flèches gauche/droite</string>
