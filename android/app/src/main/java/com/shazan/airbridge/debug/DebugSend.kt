@@ -21,6 +21,7 @@ object DebugSend {
     private const val TAG = "AirBridge.DebugSend"
     const val ACTION = "com.shazan.airbridge.DEBUG_SEND"
     const val ACTION_TCP = "com.shazan.airbridge.DEBUG_TCP"
+    const val ACTION_VOLUME = "com.shazan.airbridge.DEBUG_VOLUME"
 
     fun register(ctx: Context) {
         val r = object : BroadcastReceiver() {
@@ -43,6 +44,19 @@ object DebugSend {
             }
         }
         ContextCompat.registerReceiver(ctx, tcp, IntentFilter(ACTION_TCP), ContextCompat.RECEIVER_EXPORTED)
+        // A computer's volume key, from adb (checks it over other apps and the share sheet):
+        //   adb shell am broadcast -a com.shazan.airbridge.DEBUG_VOLUME --es dir up|down|mute
+        val vol = object : BroadcastReceiver() {
+            override fun onReceive(c: Context, i: Intent) {
+                val dir = when (i.getStringExtra("dir")) {
+                    "down" -> android.media.AudioManager.ADJUST_LOWER
+                    "mute" -> android.media.AudioManager.ADJUST_TOGGLE_MUTE
+                    else -> android.media.AudioManager.ADJUST_RAISE
+                }
+                com.shazan.airbridge.control.target.VolumeKeys.press(c, dir)
+            }
+        }
+        ContextCompat.registerReceiver(ctx, vol, IntentFilter(ACTION_VOLUME), ContextCompat.RECEIVER_EXPORTED)
     }
 
     private fun tcpUpload(host: String, port: Int, conns: Int, mb: Int) {
