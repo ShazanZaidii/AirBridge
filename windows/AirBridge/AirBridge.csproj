@@ -7,6 +7,8 @@
 		<ImplicitUsings>enable</ImplicitUsings>
 		<UseWPF>true</UseWPF>
 		<ApplicationIcon>icon.ico</ApplicationIcon>
+		<!-- Names the zip build's package identity (issue #10); see app.manifest and Phone/PackageIdentity.cs. -->
+		<ApplicationManifest>app.manifest</ApplicationManifest>
 		<Version>3.3.0</Version>
 
 		<Platforms>x86;x64;ARM64</Platforms>
@@ -53,4 +55,8 @@
 		<PackageReference Include="Vortice.MediaFoundation" Version="3.8.3" />
 	</ItemGroup>
 
+	<!-- The identity package the zip build registers on Windows 11 (tools/make_identity_package.py builds it). -->
+	<ItemGroup>
+		<None Include="Identity\AirBridge.Identity.msix" CopyToOutputDirectory="PreserveNewest" Link="Identity\AirBridge.Identity.msix" />
+	</ItemGroup>
 </Project>

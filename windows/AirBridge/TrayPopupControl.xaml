@@ -222,6 +222,14 @@
 
             <Grid Margin="0,0,0,10">
                 <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                <StackPanel><TextBlock Style="{StaticResource AB.Text}" Text="Set up AirBridge"/>
+                    <TextBlock Style="{StaticResource AB.Text.Caption}" Text="Firewall, start with Windows, notifications and pairing, step by step"/></StackPanel>
+                <Button Grid.Column="1" Content="Open" Style="{StaticResource AB.Button.Secondary}" MinHeight="30" Padding="12,0" VerticalAlignment="Center"
+                        Click="OpenSetup_Click" AutomationProperties.Name="Set up AirBridge"/>
+            </Grid>
+
+            <Grid Margin="0,0,0,10">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                 <StackPanel><TextBlock Style="{StaticResource AB.Text}" Text="Drop shelf"/>
                     <TextBlock Style="{StaticResource AB.Text.Caption}" Text="A small target above the tray: drop files on it to send"/></StackPanel>
                 <CheckBox Grid.Column="1" x:Name="DropShelfSwitch" Style="{StaticResource AB.Switch}" Click="ToggleDropShelf_Click" VerticalAlignment="Center"
