@@ -36,6 +36,22 @@ class NotifWireTest {
         @Suppress("UNCHECKED_CAST") val acts = m["acts"] as List<Map<String, Any?>>
         assertEquals(1, acts[0]["i"]); assertEquals("Mark as read", acts[0]["label"])
         assertFalse(m.containsKey("sub")) // empty fields are left out
+        assertFalse(m.containsKey("kind")) // an ordinary notification carries no kind
+    }
+
+    @Test fun shadeOrder() {
+        val m = NotifWire.order(listOf("a", "b", "c"), listOf("c"))
+        assertEquals("notif_order", m["t"])
+        assertEquals(listOf("a", "b", "c"), m["keys"])
+        assertEquals(listOf("c"), m["silent"])
+    }
+
+    @Test fun statusEntriesCarryTheirKind() {
+        val n = NotifWire.PhoneNotif(key = "k", pkg = "com.android.vpndialogs", appName = "VPN", title = "VPN is active", text = "",
+            ts = 1L, alert = false, kind = NotifFilter.KIND_ONGOING)
+        val m = NotifWire.post(n)
+        assertEquals("ongoing", m["kind"])
+        assertEquals(false, m["alert"])
     }
 
     @Test fun postTrimsLongFieldsAndLists() {
