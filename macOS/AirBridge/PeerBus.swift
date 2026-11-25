@@ -45,7 +45,7 @@ nonisolated final class PeerBus: @unchecked Sendable {
         "mirror_start", "mirror_info", "mirror_key", "mirror_ack", "mirror_stop",
         "drag_carry", "drag_drop", "drag_cancel",
         "mirror_wait", "mirror_state",
-        "adb_wifi_state",
+        "adb_wifi_state", "mirror_trust",
     ]
 
     /// Inner binary frame kinds routed to the input half (first byte of the inner frame).

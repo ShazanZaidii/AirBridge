@@ -24,7 +24,13 @@ nonisolated enum Proto {
     static let baseCaps = ["clip", "xfer", "ctl_source", "ctl_target", "drag_files", "mirror_sink", "notif_sink", "call_sink", "call_ring", "battery_sink", "clip_media", "screentime_sink"]
 
     /// `hello.caps`: `mirror_source` only while the screen-recording permission is granted (§8.7).
-    static var caps: [String] { CGPreflightScreenCaptureAccess() ? baseCaps + ["mirror_source"] : baseCaps }
+    /// `mirror_trust`: can grant a phone "Mirror without asking" over its Pro mirroring adb link (§8.10).
+    static var caps: [String] {
+        var c = baseCaps
+        if CGPreflightScreenCaptureAccess() { c.append("mirror_source") }
+        if MirrorTrust.available { c.append(MirrorTrust.cap) }
+        return c
+    }
 
     static let handshakeTimeout: TimeInterval = 10
     /// Mode `confirm`: the whole pairing must finish within this long after `pair_start` (§3.3).
