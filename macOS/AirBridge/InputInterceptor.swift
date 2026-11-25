@@ -74,6 +74,8 @@ nonisolated final class InputInterceptor: @unchecked Sendable {
             PhoneMirrorHub.shared.handle(peer, msg)
         case "adb_wifi_state":
             ProMirrorHub.shared.handle(peer, msg)   // Pro mirroring setup helper (§8.9)
+        case "mirror_trust":
+            MirrorTrust.shared.handle(peer, msg)    // "Mirror without asking" (§8.10)
         case "key_state":
             break // no caps-lock indicator on the Mac
         default:
