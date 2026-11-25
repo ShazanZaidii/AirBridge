@@ -95,6 +95,12 @@ nonisolated final class MirrorRenderer: @unchecked Sendable {
     }
 
     func isOpen(_ peerId: String) -> Bool { open[peerId] != nil }
+
+    #if DEBUG
+    func debugClose(_ peerId: String) { open[peerId]?.closeWindow() }
+    /// The window's frame, for test rigs.
+    func debugFrame(_ peerId: String) -> NSRect? { open[peerId]?.windowFrame }
+    #endif
 }
 
 /// Borderless window that can still become key (keyboard goes to the phone).
@@ -167,10 +173,18 @@ final class MirrorWindow: NSWindow {
         PhoneMirrorHub.shared.register(session)
     }
 
+    /// A Pixel 9 Pro's screen in points (412 × 915 dp): the mirrored phone opens life-size, whatever phone it is (its
+    /// own proportions, that width). Capped to the screen; still freely resizable, and the bar's buttons fit down to
+    /// the minimum width (six 26-point buttons in 180 points).
+    static let pixelWidth: CGFloat = 412
+
     private static func initialPhoneSize(aspect: CGFloat) -> NSSize {
         let vis = NSScreen.main?.visibleFrame.size ?? NSSize(width: 1440, height: 900)
-        let h = min(vis.height * 0.72, 820)
-        return NSSize(width: (h * aspect).rounded(), height: h.rounded())
+        let portrait = min(aspect, 1 / aspect) // width / height with the phone upright
+        var w = pixelWidth, h = w / portrait
+        let maxH = vis.height - barHeight - gap - 20
+        if h > maxH { h = maxH; w = h * portrait }
+        return NSSize(width: w.rounded(), height: h.rounded())
     }
 
     func present() {
@@ -190,6 +204,9 @@ final class MirrorWindow: NSWindow {
         }
         window.makeFirstResponder(root.screen)
     }
+
+    func closeWindow() { window.performClose(nil) }
+    var windowFrame: NSRect { window.frame }
 
     func bringForward(restart: Bool) {
         NSApp.activate(ignoringOtherApps: true)

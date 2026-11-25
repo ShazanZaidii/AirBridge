@@ -1,5 +1,6 @@
 import CoreImage
 import SwiftUI
+import Intents
 import UserNotifications
 import AppKit
 
@@ -37,6 +38,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
             UNNotificationCategory(identifier: "FILE_TRANSFER", actions: [show, open], intentIdentifiers: [], options: []),
         ] + PhoneNotifCenter.categories))
         center.requestAuthorization(options: [.alert, .sound]) { _, _ in }
+        MacFocus.prepare() // calls show but don't ring during a Focus or DND (#11)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { SetupGuideWindow.shared.showIfFirstRun() } // #15
 
         AppModel.shared.startObservingControlStatus()
         PeerManager.shared.start()
@@ -113,6 +116,42 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
             let to = q.first(where: { $0.name == "to" })?.value
             let peer = AppModel.shared.readyPeers.first { $0.id == to }
             if url.path == "/mirror", let peer { PhoneMirrorWindows.shared.show(peer) }
+            // airbridge://debug/focus?out=/path.txt — the Focus status API: authorization and whether a Focus is on.
+            if url.path == "/focus", let out = q.first(where: { $0.name == "out" })?.value {
+                let line = "auth=\(INFocusStatusCenter.default.authorizationStatus.rawValue) focusOn=\(MacFocus.isOn)"
+                try? line.write(toFile: out, atomically: true, encoding: .utf8)
+            }
+            // airbridge://debug/setup?page=N&out=/path.png — the setup guide at page N, drawn into a PNG (design review).
+            if url.path == "/setup" {
+                let page = Int(q.first(where: { $0.name == "page" })?.value ?? "") ?? 0
+                if let out = q.first(where: { $0.name == "out" })?.value {
+                    let m = SetupModel(); m.page = page
+                    let r = ImageRenderer(content: SetupGuideView(model: m, close: {}).environment(\.colorScheme, .dark))
+                    r.scale = 1
+                    if let cg = r.cgImage { try? NSBitmapImageRep(cgImage: cg).representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: out)) }
+                } else { SetupGuideWindow.shared.show() }
+            }
+            // airbridge://debug/notif_click?title=Connected — a click on that notification in the panel (opens it in the mirror).
+            if url.path == "/notif_click", let t = q.first(where: { $0.name == "title" })?.value,
+               let n = PhoneNotifCenter.shared.store.items.values.first(where: { $0.title == t }) {
+                PhoneNotifCenter.shared.openInMirror(n)
+            }
+            // airbridge://debug/mirror_close?to=ID&out=/path.txt — close that phone's mirror window (writes its frame first).
+            if url.path == "/mirror_close", let to {
+                if let out = q.first(where: { $0.name == "out" })?.value {
+                    try? (PhoneMirrorWindows.shared.debugFrame(to).map { NSStringFromRect($0) } ?? "none").write(toFile: out, atomically: true, encoding: .utf8)
+                }
+                PhoneMirrorWindows.shared.debugClose(to)
+            }
+            // airbridge://debug/notif_clear?title=USB%20debugging%20on — clear that phone notification, as a swipe does.
+            if url.path == "/notif_clear", let t = q.first(where: { $0.name == "title" })?.value,
+               let n = PhoneNotifCenter.shared.store.items.values.first(where: { $0.title == t }) {
+                PhoneNotifCenter.shared.dismiss(n)
+            }
+            // airbridge://debug/action?to=ID&name=vol_up — a key-row action (volume, media…) sent to that device.
+            if url.path == "/action", let peer, let name = q.first(where: { $0.name == "name" })?.value {
+                PeerBus.shared.send(to: peer.id, ["t": "action", "name": name])
+            }
             if url.path == "/mirror_tap", let peer,
                let x = Double(q.first(where: { $0.name == "x" })?.value ?? ""), let y = Double(q.first(where: { $0.name == "y" })?.value ?? "") {
                 PeerBus.shared.send(to: peer.id, ["t": "ptr_abs", "x": x, "y": y])
@@ -992,6 +1031,8 @@ struct MenuView: View {
             TransferCornerRow()
             SettingToggleRow(icon: "power", title: "Open at login", hint: "Phones reconnect and screen time counts from the start",
                              isOn: Binding(get: { LoginItem.isOn }, set: { LoginItem.set($0) }))
+            SettingActionRow(icon: "checklist", title: "Set up AirBridge", hint: "Permissions, widgets and pairing, step by step",
+                             action: "Open") { SetupGuideWindow.shared.show() }
         }
         .fixedSize(horizontal: false, vertical: true)
         .padding(.top, Theme.xs)
