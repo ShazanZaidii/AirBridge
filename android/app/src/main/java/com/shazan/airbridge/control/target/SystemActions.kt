@@ -16,6 +16,7 @@ import android.widget.Toast
 class SystemActions(private val host: TargetController) {
 
     private val svc: AccessibilityService get() = host.service
+    private var lastVolumePanel = 0L
     private var lastVolumeStep = 0L
     private var lastMedia = 0L
     private val toastedOnce = HashSet<String>()
@@ -64,7 +65,31 @@ class SystemActions(private val host: TargetController) {
         val now = SystemClock.uptimeMillis()
         if (now - lastVolumeStep < 40) return // debounce double-fired keys
         lastVolumeStep = now
-        VolumeKeys.press(svc, direction)
+        val am = svc.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        val apply = {
+            if (direction == AudioManager.ADJUST_TOGGLE_MUTE) {
+                am.adjustStreamVolume(AudioManager.STREAM_MUSIC, direction, AudioManager.FLAG_SHOW_UI)
+            } else {
+                // Absolute set bypasses OEM step logic.
+                val max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+                val cur = am.getStreamVolume(AudioManager.STREAM_MUSIC)
+                val v = if (direction == AudioManager.ADJUST_RAISE) minOf(max, cur + 1) else maxOf(0, cur - 1)
+                am.setStreamVolume(AudioManager.STREAM_MUSIC, v, AudioManager.FLAG_SHOW_UI)
+            }
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && now - lastVolumePanel > 2000) {
+            // Open the volume panel first so the change is visible and not blocked in background.
+            try {
+                svc.startActivity(Intent(Settings.Panel.ACTION_VOLUME).addFlags(
+                    Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP,
+                ))
+                lastVolumePanel = now
+                host.main.postDelayed({ try { apply() } catch (_: Throwable) {} }, 200)
+                return
+            } catch (_: Throwable) { /* fall through */ }
+        }
+        lastVolumePanel = now
+        apply()
     }
 
     /** Only adjusts when manual brightness is already active; never flips auto-brightness off. */
