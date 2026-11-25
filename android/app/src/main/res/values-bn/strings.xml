@@ -224,7 +224,8 @@
     <string name="reconnect_auto_sub">পেয়ার করা ডিভাইস নাগালে এলেই কানেক্ট করুন</string>
     <string name="clipboard">ক্লিপবোর্ড</string>
     <string name="floating_bubble">ভাসমান বাবল</string>
-    <string name="bubble_sub">ক্লিপবোর্ড পাঠাতে এতে ট্যাপ করুন। ট্র্যাকপ্যাড ব্যবহারের সময় বা অন্য ডিভাইস এই ফোন নিয়ন্ত্রণ করলে লুকানো থাকে।</string>
+    <string name="bubble_sub">ক্লিপবোর্ড পাঠাতে এতে ট্যাপ করুন। কোনো ডিভাইস কানেক্ট না থাকলে, ট্র্যাকপ্যাড ব্যবহারের সময় বা অন্য ডিভাইস এই ফোন নিয়ন্ত্রণ করলে লুকানো থাকে।</string>
+    <string name="bubble_hidden_offline">ফ্লোটিং বাবল লুকানো হয়েছে: কোনো ডিভাইস কানেক্ট নেই। কোনো ডিভাইস কানেক্ট হলেই এটি নিজে থেকে ফিরে আসবে।</string>
     <string name="bubble_needs_overlay">“অন্যান্য অ্যাপের উপরে দেখান” দরকার। সুইচটি ধূসর থাকলে, আগে অ্যাপের তথ্য › ⋮ › সীমাবদ্ধ সেটিংসের অনুমতি দিন খুলুন।</string>
     <string name="remote_control">রিমোট কন্ট্রোল</string>
     <string name="invert_x">বাঁ/ডান তীর উল্টে দিন</string>

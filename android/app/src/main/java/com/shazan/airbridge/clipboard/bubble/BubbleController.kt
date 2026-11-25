@@ -11,6 +11,8 @@ import kotlinx.coroutines.flow.update
  * pushes, so it is hidden while any suppression reason is active and comes back when all are off
  * (and the user's "Floating bubble" setting is on).
  *
+ * `"offline"`: no device is connected, so there is nothing to push to (set by the service; cleared on connect).
+ *
  * Reasons used by the input half: `"lease"` (a peer holds the control lease on this phone),
  * `"trackpad"`, `"mirror"` (those screens are open). The network half additionally suppresses while
  * a trackpad/mirror activity is started (reason `"ui:<ActivityName>"`), so the bubble never covers
@@ -21,6 +23,7 @@ import kotlinx.coroutines.flow.update
  * `setSuppressed(String, boolean)`. Keep that signature (and the R8 keep rule) stable.
  */
 object BubbleController {
+    const val REASON_OFFLINE = "offline"
     private val main = Handler(Looper.getMainLooper())
     private val _reasons = MutableStateFlow<Set<String>>(emptySet())
     /** Active suppression reasons. */

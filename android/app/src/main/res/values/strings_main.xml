@@ -123,7 +123,8 @@
     <string name="reconnect_auto_sub">Connect to paired devices whenever they\'re reachable</string>
     <string name="clipboard">Clipboard</string>
     <string name="floating_bubble">Floating bubble</string>
-    <string name="bubble_sub">Tap it to send your clipboard. Hidden while you use the trackpad or another device controls this phone.</string>
+    <string name="bubble_sub">Tap it to send your clipboard. Hidden while no device is connected, while you use the trackpad, or while another device controls this phone.</string>
+    <string name="bubble_hidden_offline">Floating bubble hidden: no device is connected. It comes back by itself when one connects.</string>
     <string name="bubble_needs_overlay">Needs “Display over other apps”. If that switch is greyed out, open App info › ⋮ › Allow restricted settings first.</string>
     <string name="remote_control">Remote control</string>
     <string name="invert_x">Invert left/right arrows</string>

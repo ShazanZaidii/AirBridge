@@ -224,7 +224,8 @@
     <string name="reconnect_auto_sub">જોડી બનાવેલા ડિવાઇસ પહોંચમાં હોય ત્યારે તેમની સાથે કનેક્ટ કરો</string>
     <string name="clipboard">ક્લિપબોર્ડ</string>
     <string name="floating_bubble">ફ્લોટિંગ બબલ</string>
-    <string name="bubble_sub">તમારું ક્લિપબોર્ડ મોકલવા તેના પર ટૅપ કરો. તમે ટ્રૅકપૅડ વાપરો અથવા બીજું ડિવાઇસ આ ફોન નિયંત્રિત કરે ત્યારે છુપાયેલો રહે છે.</string>
+    <string name="bubble_sub">તમારું ક્લિપબોર્ડ મોકલવા તેના પર ટૅપ કરો. કોઈ ડિવાઇસ કનેક્ટ ન હોય, તમે ટ્રૅકપૅડ વાપરો અથવા બીજું ડિવાઇસ આ ફોન નિયંત્રિત કરે ત્યારે છુપાયેલો રહે છે.</string>
+    <string name="bubble_hidden_offline">ફ્લોટિંગ બબલ છુપાવ્યો: કોઈ ડિવાઇસ કનેક્ટ નથી. કોઈ ડિવાઇસ કનેક્ટ થતાં જ તે આપમેળે પાછો આવશે.</string>
     <string name="bubble_needs_overlay">“અન્ય ઍપની ઉપર બતાવો” જરૂરી છે. જો તે સ્વિચ ઝાંખી હોય, તો પહેલાં ઍપ માહિતી › ⋮ › પ્રતિબંધિત સેટિંગને મંજૂરી આપો ખોલો.</string>
     <string name="remote_control">રિમોટ કંટ્રોલ</string>
     <string name="invert_x">ડાબી/જમણી ઍરો ઊલટાવો</string>
