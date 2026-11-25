@@ -1,59 +1,114 @@
 import AppKit
 import SwiftUI
 
-/// The phone notifications list window (one at a time).
+/// The phone notifications, as a phone-sized panel that drops down from AirBridge's menu bar icon (one at a time).
+/// It closes as soon as it loses focus: a click anywhere else, Esc, or the menu bar icon again. Nothing to close by hand.
 @MainActor final class PhoneNotifsWindow: NSObject, NSWindowDelegate {
     static let shared = PhoneNotifsWindow()
-    private var window: NSWindow?
+    private var panel: NotifsPanel?
+    private var clickMonitor: Any?
+    /// Pixel 9 Pro in points (412 × 915 dp): the list reads like the phone's own shade. Capped to the screen.
+    static let phoneSize = NSSize(width: 412, height: 915)
+    static let corner: CGFloat = 34
+
+    var isShown: Bool { panel?.isVisible == true }
+
+    func toggle() { isShown ? close() : show() }
 
     func show() {
         PhoneNotifCenter.shared.unseen = 0
         PhoneNotifCenter.shared.checkPermission()
-        AppWindows.closeMenuPanel() // the menu bar panel would sit on top of the window
-        // Become a regular app before the window exists, and open a fresh window when the old one isn't on this desktop
-        // (or the user is in a full-screen app): macOS then puts it on a normal desktop and takes the user there in one
-        // move, instead of flashing it and jumping to a desktop without it.
-        if NSApp.activationPolicy() != .regular { NSApp.setActivationPolicy(.regular) }
-        if let old = window, !(old.isVisible && old.isOnActiveSpace && !old.isMiniaturized) {
-            old.delegate = nil
-            old.close()
-            window = nil
+        AppWindows.closeMenuPanel() // the menu bar panel would sit on top of it
+        let p = panel ?? makePanel()
+        panel = p
+        p.setFrame(Self.frame(), display: false)
+        if !p.isVisible {
+            p.alphaValue = 0
+            NSApp.activate()
+            p.makeKeyAndOrderFront(nil)
+            NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration = 0.16
+                p.animator().alphaValue = 1
+            }
+        } else {
+            NSApp.activate()
+            p.makeKeyAndOrderFront(nil)
         }
-        if window == nil {
-            // The SwiftUI list fills a plain container that follows the window, so the window keeps the size it's given.
-            // Hosted directly, SwiftUI resized the window to the list's height right after it opened (434 points with a
-            // short list, whatever height was set).
-            let hosting = NSHostingView(rootView: PhoneNotifsView(center: PhoneNotifCenter.shared, model: AppModel.shared))
-            hosting.sizingOptions = []
-            let container = NSView(frame: NSRect(x: 0, y: 0, width: 380, height: 860))
-            hosting.frame = container.bounds
-            hosting.autoresizingMask = [.width, .height]
-            container.addSubview(hosting)
-            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 380, height: 860),
-                             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
-                             backing: .buffered, defer: false)
-            w.title = "Notifications"
-            w.titleVisibility = .hidden // the header below says it; the title next to the buttons only repeated it
-            w.titlebarAppearsTransparent = true
-            w.isReleasedWhenClosed = false
-            w.contentView = container
-            w.delegate = self
-            w.contentMinSize = NSSize(width: 340, height: 320)
-            w.backgroundColor = NSColor(Ink.page)
-            // Top right under the menu bar on the icon's screen, beside (not over) a phone mirror or call window that's
-            // already open. 500 tall (the user's choice; capped to the screen).
-            w.setFrame(SmartPlacement.frame(for: NSSize(width: 380, height: 500), avoiding: w), display: false)
-            window = w
+        // Clicks in other apps don't always take key status from an app that wasn't active before: watch for them too.
+        if clickMonitor == nil {
+            clickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { _ in
+                MainActor.assumeIsolated { PhoneNotifsWindow.shared.close() }
+            }
         }
-        NSApp.activate()
-        window?.makeKeyAndOrderFront(nil)
     }
 
+    func close() {
+        if let m = clickMonitor { NSEvent.removeMonitor(m); clickMonitor = nil }
+        guard let p = panel, p.isVisible else { return }
+        NSAnimationContext.runAnimationGroup({ ctx in
+            ctx.duration = 0.12
+            p.animator().alphaValue = 0
+        }, completionHandler: {
+            MainActor.assumeIsolated { p.orderOut(nil); p.alphaValue = 1 }
+        })
+    }
+
+    private func makePanel() -> NotifsPanel {
+        let root = PhoneNotifsView(center: PhoneNotifCenter.shared, model: AppModel.shared, topInset: 22)
+            .clipShape(RoundedRectangle(cornerRadius: Self.corner, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: Self.corner, style: .continuous).strokeBorder(Ink.hairline, lineWidth: 1))
+        // A plain container that follows the panel, so SwiftUI never resizes the panel to the list's height.
+        let hosting = NSHostingView(rootView: root)
+        hosting.sizingOptions = []
+        let size = Self.phoneSize
+        let container = NSView(frame: NSRect(origin: .zero, size: size))
+        hosting.frame = container.bounds
+        hosting.autoresizingMask = [.width, .height]
+        container.addSubview(hosting)
+        let p = NotifsPanel(contentRect: NSRect(origin: .zero, size: size), styleMask: [.borderless],
+                            backing: .buffered, defer: false)
+        p.isOpaque = false
+        p.backgroundColor = .clear
+        p.hasShadow = true
+        p.level = .popUpMenu
+        p.isReleasedWhenClosed = false
+        p.hidesOnDeactivate = false
+        p.animationBehavior = .none
+        p.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary, .ignoresCycle, .transient]
+        p.title = "Notifications"
+        p.contentView = container
+        p.delegate = self
+        p.onEscape = { PhoneNotifsWindow.shared.close() }
+        return p
+    }
+
+    /// Under the menu bar, its right edge lined up with AirBridge's menu bar icon, on that icon's screen.
+    static func frame() -> NSRect {
+        let icon = NSApp.windows.first { String(describing: type(of: $0)).contains("StatusBar") && $0.isVisible }
+        let screen = icon?.screen ?? NSScreen.main ?? NSScreen.screens[0]
+        let vis = screen.visibleFrame
+        let margin: CGFloat = 6
+        let w = min(phoneSize.width, vis.width - 2 * margin)
+        let h = min(phoneSize.height, vis.height - 2 * margin)
+        var x = (icon.map { $0.frame.maxX + 12 } ?? vis.maxX - margin) - w
+        x = min(max(x, vis.minX + margin), vis.maxX - w - margin)
+        return NSRect(x: x, y: vis.maxY - h - margin, width: w, height: h)
+    }
+
+    func windowDidResignKey(_ notification: Notification) { close() }
     func windowDidBecomeKey(_ notification: Notification) { PhoneNotifCenter.shared.unseen = 0 }
 
     #if DEBUG
-    func debugClose() { window?.performClose(nil) }
+    func debugClose() { close() }
     #endif
+}
+
+/// Borderless, but takes the keyboard (replies are typed here) and closes on Esc.
+final class NotifsPanel: NSPanel {
+    var onEscape: (() -> Void)?
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { false }
+    override func cancelOperation(_ sender: Any?) { onEscape?() }
 }
 
 // MARK: - The list, in AirBridge's charcoal design language (Design/Charcoal.swift)
@@ -63,23 +118,30 @@ struct PhoneNotifsView: View {
     @ObservedObject var model: AppModel
     /// Debug snapshots: draw the list without its scroll view.
     var flat = false
+    /// Space above the header (the drop-down panel has no title bar to clear).
+    var topInset: CGFloat = 38
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var groups: [PhoneNotifStore.Group] { center.store.groups() }
+    /// The phone's ongoing and silent ones (VPN, USB, music), listed under them like the phone's shade does.
+    private var statusGroups: [PhoneNotifStore.Group] { center.store.groups(status: true) }
     private var multiplePhones: Bool { Set(center.store.items.values.map(\.phoneId)).count > 1 }
-    private var clearable: [PhoneNotifStore.Group] { groups.filter { center.isConnected($0.phoneId) } }
+    /// Like the phone's "Clear all": everything that can be cleared, silent ones included; ongoing ones stay.
+    private var clearable: [PhoneNotifStore.Group] {
+        (groups + statusGroups).filter { center.isConnected($0.phoneId) && $0.items.contains(where: \.canClear) }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
                 .padding(.horizontal, 20)
-                .padding(.top, 38)   // just under the window buttons (title bar ~28 pt)
+                .padding(.top, topInset)
                 .padding(.bottom, 14)
             notices
                 .padding(.horizontal, 16)
             BackgroundSection(hud: TransferHUD.shared, board: CallPanels.shared.board)
                 .padding(.horizontal, 16)
-            if groups.isEmpty {
+            if groups.isEmpty && statusGroups.isEmpty {
                 VStack(spacing: 12) {
                     empty
                     BlockedSection(center: center)
@@ -112,6 +174,18 @@ struct PhoneNotifsView: View {
                     .padding(.top, 4)
                     .padding(.bottom, 16)
                     .animation(reduceMotion ? nil : .easeOut(duration: 0.22), value: center.store.items.keys.sorted())
+        if !statusGroups.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                Eyebrow(text: "Silent")
+                    .padding(.leading, 4)
+                    .help("Ongoing and silent notifications on the phone. They never pop up on this Mac.")
+                LazyVStack(alignment: .leading, spacing: 12) {
+                    ForEach(statusGroups) { g in GroupCard(group: g, center: center, showPhone: multiplePhones) }
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 16)
+        }
         BlockedSection(center: center)
             .padding(.horizontal, 16)
             .padding(.bottom, 16)
@@ -296,10 +370,10 @@ private struct GroupCard: View {
                     Text(center.phoneName(group.phoneId)).font(.system(size: 11.5)).foregroundStyle(Ink.tertiary).lineLimit(1)
                 }
                 Spacer()
-                if connected {
+                if connected && group.items.contains(where: \.canClear) {
                     QuietButton(title: "Clear", small: true) { center.dismissAll(group) }
                         .help("Clear these notifications on the phone too")
-                } else {
+                } else if !connected {
                     Text("Not connected").font(.system(size: 11.5)).foregroundStyle(Ink.tertiary)
                 }
             }
@@ -362,8 +436,8 @@ private struct NotifRow: View {
                         .background(Circle().fill(Ink.raised))
                 }
                 .buttonStyle(.plain)
-                .opacity(hovering && connected ? 1 : 0)
-                .disabled(!connected)
+                .opacity(hovering && connected && n.canClear ? 1 : 0)
+                .disabled(!connected || !n.canClear)
                 .accessibilityLabel("Clear")
             }
             if n.msgs.count > 1 {
@@ -433,7 +507,7 @@ private struct NotifRow: View {
         .contextMenu {
             if connected {
                 Button("Open on Phone") { center.openOnPhone(n) }
-                Button("Clear") { center.dismiss(n) }
+                if n.canClear { Button("Clear") { center.dismiss(n) } }
             }
             Button("Don't Show This Again") { center.block(n) }
             Button("Copy Text") {
