@@ -1012,6 +1012,9 @@ Phone permission (optional: Contacts for the caller's name and photo, Nearby dev
   the phone as `notif_post` with `alert:false` (a quiet resync: listed, no banner, no sound).
 - `key` is opaque, at most 64 characters, stable while the notification exists (Android: a hash of its key). A
   `notif_post` with a known `key` replaces that notification.
+- Sources so far: Android phones, and Windows PCs (the packaged build: Windows grants notification access only to
+  apps with package identity). A Windows source sends `cat:"other"`, `reply:false` and no `acts` (Windows offers no
+  way to press another app's buttons): its entries can be cleared, not answered. Its `notif_order` is newest first.
 - `notif_icon` comes once per session per `pkg`, before that app's first `notif_post`. Sinks may cache it by `pkg`.
 - `{"t":"notif_order","keys":["9f2c…","…"],"silent":["…"]}`: the phone's shade order, top first, of every forwarded
   `key`; `silent` = the ones under the shade's Silent header (low/min importance). Sent after the resync and whenever
