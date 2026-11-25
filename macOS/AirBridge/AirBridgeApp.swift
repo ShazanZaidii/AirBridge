@@ -232,6 +232,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
             if url.path == "/notif_sample" { PhoneNotifCenter.shared.debugInjectSamples() }
             if url.path == "/notif_open" { PhoneNotifsWindow.shared.show() }
             if url.path == "/notif_close" { PhoneNotifsWindow.shared.debugClose() }
+            // airbridge://debug/notif_frame?out=/path.txt — where the drop-down panel is and whether it shows.
+            if url.path == "/notif_frame", let out = q.first(where: { $0.name == "out" })?.value {
+                let p = NSApp.windows.first { $0 is NotifsPanel }
+                try? "\(p.map { NSStringFromRect($0.frame) } ?? "none") visible=\(p?.isVisible ?? false) key=\(p?.isKeyWindow ?? false)".write(toFile: out, atomically: true, encoding: .utf8)
+            }
             // …/notif_block_sample blocks the sample Instagram one; …/notif_unblock_samples removes sample blocks again.
             if url.path == "/notif_block_sample", let n = PhoneNotifCenter.shared.store.items.values.first(where: { $0.key == "s3" }) {
                 PhoneNotifCenter.shared.block(n)
@@ -241,8 +246,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
             }
             if url.path == "/notif_snapshot" {
                 let h = Double(q.first(where: { $0.name == "h" })?.value ?? "") ?? 0
-                let view = PhoneNotifsView(center: PhoneNotifCenter.shared, model: AppModel.shared, flat: h == 0)
-                    .frame(width: 380, height: h > 0 ? h : nil).environment(\.colorScheme, q.contains { $0.name == "light" } ? .light : .dark)
+                let view = PhoneNotifsView(center: PhoneNotifCenter.shared, model: AppModel.shared, flat: h == 0, topInset: 22)
+                    .frame(width: PhoneNotifsWindow.phoneSize.width, height: h > 0 ? h : nil).environment(\.colorScheme, q.contains { $0.name == "light" } ? .light : .dark)
                 let r = ImageRenderer(content: view)
                 r.scale = 1
                 if let cg = r.cgImage, let folder = ScreenTimeShared.folder() {

@@ -107,7 +107,7 @@ enum PhoneNotifSettings {
         case "notif_state":
             if let st = PhoneNotifWire.parseState(m) { states[phone] = st }
             applyStore(m, from: phone)
-        case "notif_post", "notif_remove", "notif_reset":
+        case "notif_post", "notif_remove", "notif_reset", "notif_order":
             if t == "notif_post" && !PhoneNotifSettings.showNotifs { return }
             applyStore(m, from: phone)
         case "notif_result":
@@ -157,13 +157,13 @@ enum PhoneNotifSettings {
         switch store.apply(m, from: phone) {
         case .posted(let n, _):
             if PhoneNotifBlock.isBlocked(n, by: blocks) { return } // dropped by the defer: no banner, no count
-            if n.alert {
+            if n.alert && !n.isStatus {
                 unseen += 1
                 deliver(n)
             }
         case .removed(let ids):
             removeBanners(ids)
-        case .none:
+        case .reordered, .none:
             break
         }
     }
@@ -249,7 +249,7 @@ enum PhoneNotifSettings {
         if store.remove(id: n.id) { removeBanners([n.id]) }
     }
 
-    func dismissAll(_ group: PhoneNotifStore.Group) { group.items.forEach(dismiss) }
+    func dismissAll(_ group: PhoneNotifStore.Group) { group.items.filter(\.canClear).forEach(dismiss) }
 
     func reply(_ n: PhoneNotif, _ text: String) {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -287,6 +287,7 @@ enum PhoneNotifSettings {
     }
 
     private func deliver(_ n: PhoneNotif) {
+        guard !n.isStatus else { return } // VPN, music, silent ones: listed, never a banner
         // A new message in a notification that already has a banner: take the old banner down and post a fresh one, so it
         // pops up again (re-using the id would replace it silently).
         if let old = bannerIds[n.id], !old.isEmpty { UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: old) }
