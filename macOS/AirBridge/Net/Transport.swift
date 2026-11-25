@@ -59,6 +59,7 @@ nonisolated final class SocketTransport: ByteTransport, @unchecked Sendable {
     private var readSource: DispatchSourceRead?
     private var writeSource: DispatchSourceWrite?
     private var writeArmed = false
+    private var connecting: (source: DispatchSourceWrite, fd: Int32)?   // a connect still in progress
     private var pending: [(data: Data, sent: Int, done: ((Bool) -> Void)?)] = []
     private var timeout: DispatchWorkItem?
     private var resolver: DNSServiceRef?
@@ -174,13 +175,15 @@ nonisolated final class SocketTransport: ByteTransport, @unchecked Sendable {
         let w = DispatchSource.makeWriteSource(fileDescriptor: s, queue: queue)
         w.setEventHandler { [weak self, weak w] in
             w?.cancel()
-            guard let self else { close(s); return }
+            guard let self else { return }   // deinit already closed it
             var err: Int32 = 0
             var len = socklen_t(MemoryLayout<Int32>.size)
             getsockopt(s, SOL_SOCKET, SO_ERROR, &err, &len)
-            if self.ended { close(s); return }
+            if self.ended { return }   // end() already closed it
+            self.connecting = nil
             if err == 0 { self.fd = s; self.finishConnect() } else { self.lastError = Transports.posixError(err); close(s); self.connectNext() }
         }
+        connecting = (w, s)
         w.resume()
     }
 
@@ -262,18 +265,44 @@ nonisolated final class SocketTransport: ByteTransport, @unchecked Sendable {
         timeout?.cancel()
         timeout = nil
         stopResolver()
-        if let w = writeSource {
-            if !writeArmed { w.resume() }   // a suspended source never runs its cancel handler
-            w.cancel()
-        }
-        readSource?.cancel()
-        if readSource == nil, fd >= 0 { close(fd) }   // never got as far as the sources (an accepted socket ended early)
+        tearDownSources()
         let waiting = pending
         pending = []
         for p in waiting { p.done?(false) }
         let cb = onEnd
         onReady = nil; onData = nil; onEnd = nil
         cb?(error)
+    }
+
+    /// Cancels both sources (their cancel handlers close the descriptor) and forgets them, so this runs at most once.
+    /// libdispatch kills the process when a source is released while inactive (never resumed) or suspended, so the
+    /// write source is resumed first whenever it isn't armed.
+    private func tearDownSources() {
+        if let c = connecting {   // gave up while connecting (timeout or cancel): that socket never became ours
+            c.source.cancel()
+            close(c.fd)
+            connecting = nil
+        }
+        if let w = writeSource {
+            if !writeArmed { w.resume() }
+            w.cancel()
+        }
+        readSource?.cancel()
+        if readSource == nil, fd >= 0 { close(fd) }   // never got as far as the sources (an accepted socket ended early)
+        readSource = nil
+        writeSource = nil
+        writeArmed = false
+        fd = -1
+    }
+
+    /// Dropped without `cancel()` (its owner went away mid-close): free the socket without calling back into anyone.
+    deinit {
+        guard !ended else { return }
+        ended = true
+        timeout?.cancel()
+        stopResolver()
+        tearDownSources()
+        for p in pending { p.done?(false) }
     }
 
     // MARK: Helpers
