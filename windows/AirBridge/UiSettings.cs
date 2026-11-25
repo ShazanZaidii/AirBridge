@@ -8,7 +8,12 @@ namespace AirBridge
     /// <summary>Look-and-feel settings, in %LOCALAPPDATA%\AirBridge\ui.json.</summary>
     public static class UiSettings
     {
-        private sealed class Stored { public bool Glass { get; set; } = true; }
+        private sealed class Stored
+        {
+            public bool Glass { get; set; } = true;
+            /// <summary>The first-run setup (SetupWindow) has been shown once.</summary>
+            public bool SetupShown { get; set; }
+        }
 
         private static readonly string FilePath = Path.Combine(Log.Dir, "ui.json");
         private static readonly object Gate = new();
@@ -19,6 +24,12 @@ namespace AirBridge
         {
             get { lock (Gate) return Load().Glass; }
             set { lock (Gate) { Load().Glass = value; Save(); } }
+        }
+
+        public static bool SetupShown
+        {
+            get { lock (Gate) return Load().SetupShown; }
+            set { lock (Gate) { Load().SetupShown = value; Save(); } }
         }
 
         private static Stored Load()

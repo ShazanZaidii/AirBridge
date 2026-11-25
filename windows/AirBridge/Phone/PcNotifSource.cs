@@ -17,8 +17,9 @@ namespace AirBridge.Phone
     /// read the notifications in the notification center through <see cref="UserNotificationListener"/> once the user
     /// allows it (Windows asks the first time; Settings › Privacy › Notifications can take it back).
     ///
-    /// Windows gives that access only to apps with package identity (the MSIX build, AirBridge.Package): the plain
-    /// zip build doesn't advertise <c>notif_source</c>. Windows offers no way to press a notification's buttons or
+    /// Windows gives that access only to apps with package identity: the installer (MSIX) build has it, and the zip build
+    /// takes one on Windows 11 (<see cref="PackageIdentity"/>). Without one (the zip build on Windows 10), no
+    /// <c>notif_source</c>. Windows offers no way to press a notification's buttons or
     /// reply from outside, so these go as list entries that can be cleared, not answered.
     ///
     /// The list is read every two seconds while a device that shows notifications is connected (the change event isn't
@@ -43,13 +44,7 @@ namespace AirBridge.Phone
         private static string? _lastOrder;
 
         /// <summary>Windows can hand this app its notifications (package identity, Windows 10 1809 or later).</summary>
-        public static bool Supported { get; } = HasIdentity() && OperatingSystem.IsWindowsVersionAtLeast(10, 0, 17763);
-
-        private static bool HasIdentity()
-        {
-            try { return Windows.ApplicationModel.Package.Current != null; }
-            catch { return false; }
-        }
+        public static bool Supported { get; } = PackageIdentity.Has && OperatingSystem.IsWindowsVersionAtLeast(10, 0, 17763);
 
         public static void Start(PeerService peers)
         {
@@ -98,6 +93,28 @@ namespace AirBridge.Phone
                 Log.Warn($"This PC's notifications unavailable: {ex.Message}");
                 _access = false;
             }
+        }
+
+        /// <summary>Windows lets AirBridge read this PC's notifications (setup guide).</summary>
+        public static Task<bool> AccessAllowed()
+        {
+            if (!Supported) return Task.FromResult(false);
+            try { return Task.FromResult(UserNotificationListener.Current.GetAccessStatus() == UserNotificationListenerAccessStatus.Allowed); }
+            catch { return Task.FromResult(false); }
+        }
+
+        /// <summary>Shows Windows' own question (setup guide, UI thread). Once allowed, sharing starts with the next device.</summary>
+        public static async Task RequestAccess()
+        {
+            if (!Supported) return;
+            try
+            {
+                _listener ??= UserNotificationListener.Current;
+                _access = await _listener.RequestAccessAsync() == UserNotificationListenerAccessStatus.Allowed;
+                _asked = true;
+                if (_access) _ = Task.Run(PeersChanged);
+            }
+            catch (Exception ex) { Log.Warn($"This PC's notifications: {ex.Message}"); }
         }
 
         private static JsonObject State()
